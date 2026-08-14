@@ -221,8 +221,23 @@ int Cmix_file::post_open()
 				read(&header, sizeof(header));
 				int c_files = header.c_files;
 				const int cb_index = c_files * sizeof(t_mix_index_entry);
-				if (get_size() != 4 + sizeof(t_mix_header) + cb_index + header.size + (m_has_checksum ? 20 : 0))
-					test_fail(1);				
+				// Mental Omega / FA2Ext compatibility: some mod MIX files (e.g.
+				// expandmo99.mix) ship with a deliberately small header.size
+				// (body_size) as an anti-tamper measure. The original FA2 v1.02
+				// editor worked around this via the FA2Ext.dll
+				// MixFile_Open_CheckRA* hooks. Instead of rejecting the whole
+				// MIX when the total-size equation fails, recompute body_size
+				// from the actual file size so the valid index entries can
+				// still be read.
+				const int expected_size = 4 + sizeof(t_mix_header) + cb_index + header.size + (m_has_checksum ? 20 : 0);
+				if (get_size() != expected_size)
+				{
+					int real_body = get_size() - 4 - sizeof(t_mix_header) - cb_index - (m_has_checksum ? 20 : 0);
+					if (real_body > header.size && c_files > 0)
+						header.size = real_body;
+					else
+						test_fail(1);
+				}
 				m_index.resize(c_files);
 				read(&m_index[0], cb_index);
 				for (int i = 0; i < c_files; i++)

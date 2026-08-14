@@ -156,6 +156,10 @@ extern int cliffwater2set;
 extern int editor_mode;
 extern int yuri_mode;
 
+// Mental Omega mod support: when enabled, the editor loads *mo.ini / *mo.mix
+// instead of the YR *md.ini / expandmd.mix, and merges FAData.ini [Sides].
+extern int mental_omega_mode;
+
 // debug
 extern int last_succeeded_operation;
 

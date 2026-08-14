@@ -631,8 +631,15 @@ void CViewObjects::UpdateDialog()
 			structhouses[i]=hAllied;
 		else if(yuri_mode && sides[i].orig_n==2)
 			structhouses[i]=hYuri;
-		else
+		else if(sides[i].orig_n==1)
 			structhouses[i]=hSoviet;
+		else
+		{
+			// Mental Omega / FA2Ext extended sides (orig_n >= 3): create a
+			// dedicated tree node named after the side, mirroring the
+			// ObjectBrowserControl_Redraw_Sides hook in FA2Ext.dll.
+			structhouses[i]=tree.InsertItem(TVIF_PARAM | TVIF_TEXT, sides[i].name, 0, 0, 0, 0, -1, rootitems[3], TVI_LAST);
+		}
 		
 	}
 	
@@ -1029,7 +1036,7 @@ void CViewObjects::UpdateDialog()
 		//addedString+=" (";
 		//addedString+=unitname+")";
 
-		BOOL addedfor[3]={FALSE,FALSE,FALSE};
+		BOOL addedfor[16]={FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE};
 
 		// MW fixed below for YR... uhhh...
 		int e;
@@ -1101,7 +1108,7 @@ void CViewObjects::UpdateDialog()
 		else
 		{
 			CString addedString=(*ini.sections["BuildingTypes"].GetValue(i)+" UNDEFINED");
-			BOOL addedfor[2]={FALSE,FALSE};
+			BOOL addedfor[16]={FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE};
 
 			int e;
 			for(e=0;e<sides.size();e++)

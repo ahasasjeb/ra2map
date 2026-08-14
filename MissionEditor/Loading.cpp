@@ -252,7 +252,7 @@ void CLoading::Load()
 	if(bUseFirestorm && yuri_mode) // MW actually this is Yuri's Revenge
 	{
 		CIniFile rulesmd;
-		LoadTSIni("rulesmd.ini", &rulesmd, TRUE);
+		LoadTSIni(mental_omega_mode ? "rulesmo.ini" : "rulesmd.ini", &rulesmd, TRUE);
 		if(rulesmd.sections.size()>0)
 		{
 			rules=rulesmd;
@@ -320,7 +320,7 @@ void CLoading::Load()
 	if(bUseFirestorm && yuri_mode) // Yuri's Revenge
 	{
 		CIniFile artmd;
-		LoadTSIni("artmd.ini", &artmd, TRUE);
+		LoadTSIni(mental_omega_mode ? "artmo.ini" : "artmd.ini", &artmd, TRUE);
 		if(artmd.sections.size()>0)
 		{
 			art.Clear();
@@ -366,6 +366,8 @@ void CLoading::Load()
 
 	} else LoadTSIni("Sound01.ini", &sound, FALSE);
 	if(sound.sections.size()==0) LoadTSIni("Sound.ini", &sound, FALSE);
+	// YR / Mental Omega sound expansion
+	if(yuri_mode) LoadTSIni(mental_omega_mode ? "soundmo.ini" : "soundmd.ini", &sound, TRUE);
 
 	m_progress.SetPos(2);
 	UpdateWindow();
@@ -375,6 +377,8 @@ void CLoading::Load()
 	m_progress.SetPos(1);
 	UpdateWindow();
 	LoadTSIni("eva.ini", &eva, FALSE);
+	// YR / Mental Omega eva expansion
+	if(yuri_mode) LoadTSIni(mental_omega_mode ? "evamo.ini" : "evamd.ini", &eva, TRUE);
 	m_progress.SetPos(2);
 	UpdateWindow();
 
@@ -383,6 +387,8 @@ void CLoading::Load()
 	m_progress.SetPos(1);
 	UpdateWindow();
 	LoadTSIni("theme.ini", &theme, FALSE);
+	// YR / Mental Omega theme expansion
+	if(yuri_mode) LoadTSIni(mental_omega_mode ? "thememo.ini" : "thememd.ini", &theme, TRUE);
 	m_progress.SetPos(2);
 	UpdateWindow();
 
@@ -395,7 +401,7 @@ void CLoading::Load()
 #ifdef TS_MODE
 	if(bUseFirestorm) LoadTSIni("aifs.ini", &ai, TRUE);;
 #else
-	if(bUseFirestorm && yuri_mode) LoadTSIni("aimd.ini", &ai, TRUE); // YR
+	if(bUseFirestorm && yuri_mode) LoadTSIni(mental_omega_mode ? "aimo.ini" : "aimd.ini", &ai, TRUE); // YR / Mental Omega
 #endif
 	m_progress.SetPos(2);
 	UpdateWindow();
@@ -408,7 +414,7 @@ void CLoading::Load()
 	m_progress.SetPos(1);
 	UpdateWindow();
 	LoadTSIni("Temperat.ini", &tiles_t, FALSE, preferLocalTheater);
-	if(yuri_mode) LoadTSIni("TemperatMD.ini", &tiles_t, TRUE, preferLocalTheater);
+	if(yuri_mode) LoadTSIni(mental_omega_mode ? "TemperatMO.ini" : "TemperatMD.ini", &tiles_t, TRUE, preferLocalTheater);
 	m_progress.SetPos(2);
 	UpdateWindow();
 
@@ -417,7 +423,7 @@ void CLoading::Load()
 	m_progress.SetPos(1);
 	UpdateWindow();
 	LoadTSIni("Snow.ini", &tiles_s, FALSE, preferLocalTheater);
-	if(yuri_mode) LoadTSIni("SnowMD.ini", &tiles_s, TRUE, preferLocalTheater);
+	if(yuri_mode) LoadTSIni(mental_omega_mode ? "SnowMO.ini" : "SnowMD.ini", &tiles_s, TRUE, preferLocalTheater);
 	m_progress.SetPos(2);
 	UpdateWindow();
 
@@ -426,7 +432,7 @@ void CLoading::Load()
 	m_progress.SetPos(1);
 	UpdateWindow();
 	LoadTSIni("Urban.ini", &tiles_u, FALSE, preferLocalTheater);
-	if(yuri_mode) LoadTSIni("UrbanMD.ini", &tiles_u, TRUE, preferLocalTheater);
+	if(yuri_mode) LoadTSIni(mental_omega_mode ? "UrbanMO.ini" : "UrbanMD.ini", &tiles_u, TRUE, preferLocalTheater);
 	m_progress.SetPos(2);
 	UpdateWindow();
 
@@ -435,7 +441,7 @@ void CLoading::Load()
 		m_cap.SetWindowText(GetLanguageStringACP("LoadLoadUrbanN"));
 		m_progress.SetPos(1);
 		UpdateWindow();
-		LoadTSIni("UrbanNMD.ini", &tiles_un, FALSE, preferLocalTheater);
+		LoadTSIni(mental_omega_mode ? "UrbanNMO.ini" : "UrbanNMD.ini", &tiles_un, FALSE, preferLocalTheater);
 		m_progress.SetPos(2);
 		UpdateWindow();
 
@@ -446,14 +452,14 @@ void CLoading::Load()
 		m_cap.SetWindowText(GetLanguageStringACP("LoadLoadLunar"));
 		m_progress.SetPos(1);
 		UpdateWindow();
-		LoadTSIni("LunarMD.ini", &tiles_l, FALSE, preferLocalTheater);
+		LoadTSIni(mental_omega_mode ? "LunarMO.ini" : "LunarMD.ini", &tiles_l, FALSE, preferLocalTheater);
 		m_progress.SetPos(2);
 		UpdateWindow();
 
 		m_cap.SetWindowText(GetLanguageStringACP("LoadLoadDesert"));
 		m_progress.SetPos(1);
 		UpdateWindow();
-		LoadTSIni("DesertMD.ini", &tiles_d, FALSE, preferLocalTheater);
+		LoadTSIni(mental_omega_mode ? "DesertMO.ini" : "DesertMD.ini", &tiles_d, FALSE, preferLocalTheater);
 		m_progress.SetPos(2);
 		UpdateWindow();
 	}
@@ -3688,6 +3694,24 @@ BOOL CLoading::InitMixFiles()
 	if(DoesFileExist((CString)TSPath+"\\ra2md.mix"))
 		yuri_mode=TRUE; // MW Apr 17th, make it available right here!
 
+	// Mental Omega auto-detection: when YR mode is active, look for expandmo*.mix
+	// in the game directory. If present (or if the user enabled it in FinalAlert.ini),
+	// switch to Mental Omega INI/MIX naming (*mo instead of *md).
+	if(yuri_mode && !mental_omega_mode)
+	{
+		for(int j=0; j<101 && !mental_omega_mode; j++)
+		{
+			CString mo;
+			mo.Format("%s\\expandmo%02d.mix", (LPCSTR)(CString)TSPath, j);
+			if(DoesFileExist(mo)) mental_omega_mode=1;
+		}
+	}
+	if(mental_omega_mode)
+	{
+		errstream << "Mental Omega mode enabled: using *mo.ini / expandmo*.mix" << endl;
+		errstream.flush();
+	}
+
 	// load expansion mix files
 	for(i=0;i<101;i++)
 	{
@@ -3700,7 +3724,7 @@ BOOL CLoading::InitMixFiles()
 		itoa(i, n, 10);
 		expand=TSPath;
 		expand+="\\Expand";		
-		if(yuri_mode) expand+="md";
+		if(yuri_mode) expand += mental_omega_mode ? "mo" : "md";
 		if(i<10) expand+="0";
 		expand+=n;
 		expand+=".mix";
@@ -3889,7 +3913,17 @@ BOOL CLoading::InitMixFiles()
 
 			CString cache="ecache01";
 			if(i==100) cache="cache";
-			if(FSunPackLib::XCC_DoesFileExist((CString)cache+append, m_hExpand[i].hExpand))
+			// Mental Omega / FA2Ext compatibility: fa2mix01md.mix (inside ra2md.mix)
+			// contains the MO editor INI files (rulesmo.ini, artmo.ini, etc.).
+			// Try it first, then fall back to the v2.0 ecache01 mix.
+			m_hExpand[i].hECache=NULL;
+			if(FSunPackLib::XCC_DoesFileExist((CString)"fa2mix01"+append, m_hExpand[i].hExpand))
+			{
+				m_hExpand[i].hECache=FSunPackLib::XCC_OpenMix((CString)"fa2mix01"+append, m_hExpand[i].hExpand);
+				errstream << LPCSTR("fa2mix01"+append+", ");
+				errstream.flush();
+			}
+			if(m_hExpand[i].hECache==NULL && FSunPackLib::XCC_DoesFileExist((CString)cache+append, m_hExpand[i].hExpand))
 			{
 				m_hExpand[i].hECache=FSunPackLib::XCC_OpenMix((CString)cache+append, m_hExpand[i].hExpand);
 				errstream << LPCSTR("ecache01"+append+", ");
@@ -6186,6 +6220,31 @@ void CLoading::PrepareHouses()
 			sides[p].orig_n=rules.sections["Sides"].GetValueOrigPos(i); // mw fix instead of =i
 			t++;
 			p++;
+		}
+	}
+
+	// Mental Omega / FA2Ext compatibility: append additional sides from
+	// FAData.ini [Sides] (e.g. Epsilon, Foehn, etc.) that are not already
+	// provided by rules.ini. This mirrors the ObjectBrowserControl_Redraw_Sides
+	// hook that FA2Ext.dll installs in the stock FA2 v1.02 editor.
+	if(g_data.sections.find("Sides") != g_data.sections.end())
+	{
+		auto& faSides = g_data.sections["Sides"];
+		for(i=0; i<(int)faSides.values.size(); i++)
+		{
+			int orig = faSides.GetValueOrigPos(i);
+			// skip if this side index was already provided by rules.ini
+			bool already = false;
+			for(int e=0; e<p; e++) { if(sides[e].orig_n == orig) { already = true; break; } }
+			if(already) continue;
+			int t=0;
+			while(GetParam(*faSides.GetValue(i), t).GetLength()>0)
+			{
+				sides[p].name=GetParam(*faSides.GetValue(i), t);
+				sides[p].orig_n=orig;
+				t++;
+				p++;
+			}
 		}
 	}
 

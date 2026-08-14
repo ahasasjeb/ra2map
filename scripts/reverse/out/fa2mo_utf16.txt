@@ -1,0 +1,244 @@
+rjjjj
+Yjjjj
+jjjjj
+(null)
+MISSING
+         (((((                  H
+Run Tiberian Sun
+Ctrl+Z
+Ctrl+Y
+Ctrl+C
+Ctrl+V
+Westwood.com
+FinalAlert 2(tm) 
+CTRL-A
+CTRL-L
+FinalAlert 2 (tm) 
+Tahoma
+just to prohibite enter to quit.
+and that one to prevent cancelling
+As FinalAlert was dialog based in earlier versions, we need to have this.
+Tip of the day
+&Show tips at program start
+&Next tip
+&Close
+Basic Settings
+Note: some of the settings are probably just ignored
+Next scenario:
+Alt. next scenario:
+Name:
+New INI format:
+CarryOverCap:
+EndOfGame
+Skip Score:
+One Time Only:
+Skip map select:
+Official
+Ignore global AI triggers
+Truck crate:
+Train crate:
+Percent: (?)
+Multiplayer Only:
+Tiberium growth enabled:
+Vein growth enabled:
+Ice growth enabled:
+Tiberium death to visceroid:
+Free radar:
+Init time:
+Required add on:
+ INI 
+Except useable size just for information.
+Size of map data
+"Useable" size
+The "physical" size of the map. Format: 0,0,Width,Height.
+The "useable" size of the map. This specifies where you can place buildings etc. Has the following format: Left,Top,Right,Bottom
+Theater:
+Dialog
+Static
+              
+:                   
+ http://www.westwood.com!
+(c) 2001 ELECTRONIC ARTS INC.   
+Westwood Studios(tm)
+Electronic Arts(tm) 
+(c) 2001 Electronic Arts Inc. Westwood Studios and Electronic Arts
+ Electronic Arts Inc.
+Visceroids:
+Infantry options
+Cancel
+House:
+Strength:
+msctls_trackbar32
+Slider1
+State:
+Param1:
+Param2:
+Param3:
+Param4:
+Direction:
+Param5:
+Building options
+AI repairs:
+Energy:
+Upgrade count:
+Param
+s are unknown (some integers, some strings?). Note: 0 means no, 1 means yes
+Spotlight:
+Upgrade 1:
+Upgrade 2:
+Upgrade 3:
+Param 2:
+Show name:
+Unit Options
+s are unknown (integers?).
+Param6:
+Houses
+DESC [quite long]
+Add house
+Standard houses
+Delete house
+Edge:
+Color
+Allies:
+Credits (x100):
+Acts like:
+Nodecount:
+Techlevel:
+Build activity (%):
+Player control:
+Human Player:
+Aircraft Options
+MS Sans Serif
+Recruitable:
+msctls_progress32
+Progress1
+ : http://www.westwood.com
+(c) 2001 ELECTRONIC ARTS INC.  
+Westwood Studios(tm) 
+Electronic Arts(tm)
+Ion immune
+Old Trigger Editor - UNUSED
+Trigger:
+New trigger
+Delete trigger
+Flags:
+Events which let the trigger start
+Actions - What the trigger will do
+Event:
+Delete
+Parameter 1:
+Parameter 2:
+Action:
+Type:
+Waypoint:
+Trigger??? :
+Data:
+MinDiff:
+New map assistant
+Browse
+Import options
+Import Trees
+Import Overlay
+Import Units/Buildings
+Multiplayer
+Prepare standard houses
+Player house:
+Set Auto-Production triggers
+Import existing map
+Create new map
+New map options
+Width:
+Height:
+Ground height:
+Singleplayer Map Settings
+Movies && other singleplayer stuff.
+Movies
+Intro:
+Brief:
+Lose:
+PostScore:
+PreMapSelect:
+Starting dropships:
+Carry over money (percent):
+Inherit timer:
+Fill silos:
+SysListView32
+List1
+Matthias Wagner
+IsoMapPack5 
+Olaf van der Spek
+Jonathan Wilson
+ XCC 
+Ben Lankamp
+Daniel Bj?rktegen
+Omer Strulovich
+DeeZire
+Felix Kelm
+Harvard Bonin
+Progress4
+FinalAlert 2: Mental Omega 
+ :-) 
+Chickmac
+"Tic Tac Toe"
+: AI 
+SysTabControl32
+                                                                      
+ParentCountry
+ RA2 
+(BMP)
+(AI Auto Production)
+ 100x100 
+TEMPERATE
+Compress map
+t compress map (use this if any problems with the map occur in RA2/TS)
+Compression
+ 150x150
+Specify file type
+Please specify if you want to save your multiplayer map as *.mmx map or as *.mpr map. While *.mmx maps are the recommended method, as they are fully supported and do not slow down RA2 when loading, they are never transferred automatically to other players!
+Save as *.mmx (no automatic map transfer)
+Save as *.mpr (many mpr
+s slow down RA2 while loading)
+MMX options
+If description tag does not exist, RA2 will place MISSING: in front of the map name, this does not affect the game!
+Description tag:
+Standard
+Meatgrind
+Naval War
+Nuke War
+Air War
+Mega Wealth
+Cooperative
+Min players:
+Max players:
+Auto Update
+Download
+Updates available:
+Description:
+Download locations:
+Westwood Studios Version 1.02
+Version 1.02
+VS_VERSION_INFO
+StringFileInfo
+040904b0
+Comments
+FinalAlert 2 YR(tm) Map Editor Westwood Studios Version 1.02
+CompanyName
+FileDescription
+FinalAlert(tm)
+FileVersion
+InternalName
+FinalAlert(tm) Map Editor
+LegalCopyright
+ 2001 ELECTRONIC ARTS INC.   ALL RIGHTS RESERVED
+Westwood Studios(tm) is an Electronic Arts(tm) brand
+LegalTrademarks
+OriginalFilename
+FinalAlert2YR.EXE
+PrivateBuild
+Alpha
+ProductName
+ProductVersion
+SpecialBuild
+Westwood Version
+VarFileInfo
+Translation

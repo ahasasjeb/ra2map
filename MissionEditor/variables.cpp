@@ -228,3 +228,8 @@ int yuri_mode=0;
 int editor_mode=0;
 int yuri_mode=0;
 #endif
+
+// Mental Omega mode is a runtime toggle (set from FinalAlert.ini [MentalOmega] Enable=1
+// or auto-detected from rulesmo.ini / expandmo*.mix presence). Default off so the
+// stock YR editor behaviour is unchanged.
+int mental_omega_mode=0;
