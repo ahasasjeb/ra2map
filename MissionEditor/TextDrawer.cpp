@@ -112,7 +112,83 @@ bool TextDrawer::isValid() const
     return m_fontSurface != nullptr;
 }
 
-void TextDrawer::RenderText(IDirectDrawSurface4* target, int x, int y, const std::string& text, bool centered) const
+TextDrawer::CachedString& TextDrawer::GetCachedString(const std::string& text)
+{
+    const auto it = m_stringCache.find(text);
+    if (it != m_stringCache.end())
+        return it->second;
+
+    if (m_stringCache.size() >= m_maxCacheEntries)
+        m_stringCache.clear();
+
+    CachedString cached;
+    const auto extent = GetExtent(text);
+    cached.w = extent.x;
+    cached.h = extent.y;
+    if (cached.w <= 0 || cached.h <= 0 || !m_fontSurface)
+    {
+        m_stringCache[text] = cached;
+        return m_stringCache[text];
+    }
+
+    CComPtr<IDirectDraw4> pDD;
+    if (m_fontSurface->GetDDInterface(reinterpret_cast<void**>(&pDD)) != DD_OK)
+    {
+        m_stringCache[text] = cached;
+        return m_stringCache[text];
+    }
+
+    DDSURFACEDESC2 desc = { 0 };
+    desc.dwSize = sizeof(desc);
+    desc.dwFlags = DDSD_CAPS | DDSD_HEIGHT | DDSD_WIDTH;
+    desc.ddsCaps.dwCaps = DDSCAPS_OFFSCREENPLAIN;
+    desc.dwWidth = cached.w;
+    desc.dwHeight = cached.h;
+
+    if (pDD->CreateSurface(&desc, &cached.main, nullptr) != DD_OK)
+    {
+        m_stringCache[text] = cached;
+        return m_stringCache[text];
+    }
+
+    if (m_shadowCol != CLR_INVALID)
+    {
+        if (pDD->CreateSurface(&desc, &cached.shadow, nullptr) != DD_OK)
+        {
+            m_stringCache[text] = cached;
+            return m_stringCache[text];
+        }
+    }
+
+    const int cw = m_charExtent.x;
+    const int ch = m_charExtent.y;
+    const int lineOffset = ch / 4;
+    int curx = 0;
+    int cury = 0;
+    for (const auto c : text)
+    {
+        if (c == '\n')
+        {
+            curx = 0;
+            cury += ch + lineOffset;
+        }
+        else if (c >= 32 && c <= 126)
+        {
+            const auto i = c - 32;
+            RECT sMain{ i * cw, 0, i * cw + cw, ch };
+            RECT sShadow{ i * cw, ch, i * cw + cw, ch + ch };
+            cached.main->BltFast(curx, cury, m_fontSurface, &sMain, DDBLTFAST_SRCCOLORKEY | DDBLTFAST_WAIT);
+            if (cached.shadow)
+                cached.shadow->BltFast(curx, cury, m_fontSurface, &sShadow, DDBLTFAST_SRCCOLORKEY | DDBLTFAST_WAIT);
+            curx += cw;
+        }
+    }
+
+    m_stringCache[text] = cached;
+    return m_stringCache[text];
+}
+
+void TextDrawer::RenderText(IDirectDrawSurface4* target, int x, int y, const std::string& text, bool centered)
 {
     if (!isValid())
         return;
@@ -129,7 +205,20 @@ void TextDrawer::RenderText(IDirectDrawSurface4* target, int x, int y, const std
         cur -= GetExtent(text) / 2;
     }
 
-    for (const auto c: text)
+    if (m_stringCache.count(text) != 0 || text.size() >= 4)
+    {
+        // for longer strings it pays off to render them once and blit them as a whole
+        CachedString& cached = GetCachedString(text);
+        if (cached.main)
+        {
+            if (cached.shadow && m_shadowCol != CLR_INVALID)
+                target->BltFast(cur.x + shadowOffset, cur.y + shadowOffset, cached.shadow, nullptr, DDBLTFAST_SRCCOLORKEY | DDBLTFAST_WAIT);
+            target->BltFast(cur.x, cur.y, cached.main, nullptr, DDBLTFAST_SRCCOLORKEY | DDBLTFAST_WAIT);
+            return;
+        }
+    }
+
+    for (const auto c : text)
     {
         if (c == '\n')
         {

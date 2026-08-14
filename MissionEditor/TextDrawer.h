@@ -21,6 +21,7 @@
 #include <ddraw.h>
 #include <afx.h>
 #include <string>
+#include <map>
 #include "Vec2.h"
 
 // Very simple class that renders text through a prepared DirectDraw surface
@@ -33,15 +34,29 @@ public:
 
     bool isValid() const;
 
-    void RenderText(IDirectDrawSurface4* target, int x, int y, const std::string& text, bool centered=false) const;
+    void RenderText(IDirectDrawSurface4* target, int x, int y, const std::string& text, bool centered=false);
 
     ProjectedVec GetExtent(const std::string& text) const;
 
 private:
+    struct CachedString
+    {
+        CComPtr<IDirectDrawSurface4> main;
+        CComPtr<IDirectDrawSurface4> shadow;
+        int w = 0;
+        int h = 0;
+    };
+
+    CachedString& GetCachedString(const std::string& text);
+
     CComPtr<IDirectDrawSurface4> m_fontSurface;
     ProjectedVec m_charExtent;
     int m_fontSizeInPoints;
     int m_fontSizeInPixels;
     COLORREF m_col;
     COLORREF m_shadowCol;
+
+    // Cache of fully rendered strings to avoid per-character blits every frame
+    std::map<std::string, CachedString> m_stringCache;
+    static constexpr size_t m_maxCacheEntries = 512;
 };

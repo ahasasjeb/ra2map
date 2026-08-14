@@ -85,6 +85,7 @@ IMPLEMENT_DYNCREATE(CIsoView, CScrollView)
 
 BOOL bNoThreadDraw = FALSE;
 BOOL bDrawStats = TRUE;
+BOOL bIncrementalPan = TRUE;
 
 /*UINT PaintThreadProc( LPVOID pParam )
 {
@@ -166,6 +167,7 @@ CIsoView::CIsoView()
 	m_NoMove = FALSE;
 	b_IsLoading = FALSE;
 	m_viewOffset = ProjectedVec(0, 0);
+	m_lastViewOffset = ProjectedVec(0, 0);
 	dd = NULL;
 	dd_1 = NULL;
 	lpds = NULL;
@@ -1025,6 +1027,7 @@ void CIsoView::OnMouseMove(UINT nFlags, CPoint point)
 			ReleaseCapture();
 			KillTimer(11);
 			rscroll = FALSE;
+			m_bPanFastPath = FALSE;
 			ShowCursor(TRUE);
 
 			CMyViewFrame& dlg = *(CMyViewFrame*)owner;
@@ -2037,6 +2040,7 @@ void CIsoView::OnRButtonUp(UINT nFlags, CPoint point)
 
 		ReleaseCapture();
 		KillTimer(11);
+		m_bPanFastPath = FALSE;
 		ShowCursor(TRUE);
 		CMyViewFrame& dlg = *(CMyViewFrame*)owner;
 		dlg.m_minimap.RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW);
@@ -3473,6 +3477,8 @@ void CIsoView::OnSize(UINT nType, int cx, int cy)
 	// CView::OnSize(nType, cx, cy);
 	if (lpds == NULL) return;
 
+	m_lastFrameValid = false;
+
 	LPDIRECTDRAWCLIPPER ddc;
 
 	lpds->GetClipper(&ddc);
@@ -3488,6 +3494,23 @@ void CIsoView::OnSize(UINT nType, int cx, int cy)
 }
 
 COLORREF CIsoView::GetColor(const char* house, const char* vcolor)
+{
+	// houses are looked up repeatedly while drawing the map - cache the result for the current frame
+	if (!vcolor && house && *house)
+	{
+		auto it = m_colorCache.find(house);
+		if (it != m_colorCache.end())
+			return it->second;
+
+		COLORREF result = GetColorImpl(house, nullptr);
+		m_colorCache[house] = result;
+		return result;
+	}
+
+	return GetColorImpl(house, vcolor);
+}
+
+COLORREF CIsoView::GetColorImpl(const char* house, const char* vcolor)
 {
 
 	COLORREF neutral = RGB(120, 120, 120);
@@ -3621,6 +3644,18 @@ COLORREF CIsoView::GetColor(const char* house, const char* vcolor)
 
 }
 
+CString CIsoView::GetCachedUnitPictureFilename(LPCTSTR type, int dir)
+{
+	const std::string key = std::string((LPCSTR)type) + "|" + std::to_string(dir);
+	const auto it = m_picFileCache.find(key);
+	if (it != m_picFileCache.end())
+		return it->second;
+
+	const CString result = GetUnitPictureFilename(type, dir);
+	m_picFileCache[key] = result;
+	return result;
+}
+
 
 
 
@@ -3694,6 +3729,7 @@ void CIsoView::ReInitializeDDraw()
 
 
 	missingimages.clear();
+	m_picFileCache.clear();
 
 	theApp.m_loading->FreeAll();
 	theApp.m_loading->InitDirectDraw();
@@ -3712,6 +3748,9 @@ void CIsoView::ReInitializeDDraw()
 
 
 	b_IsLoading = FALSE;
+
+	// the last rendered frame does not match the new map content anymore
+	m_lastFrameValid = false;
 
 	//Sleep(2500);
 
@@ -3810,6 +3849,8 @@ void CIsoView::OnDeadChar(UINT nChar, UINT nRepCnt, UINT nFlags)
 void CIsoView::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
 {
 	int nPos;
+
+	m_bPanFastPath = FALSE;
 
 
 
@@ -5235,10 +5276,16 @@ void CIsoView::OnTimer(UINT nIDEvent)
 		// BUGSEARCH
 		//if(b_IsLoading) return;	
 		// 
+		const ProjectedVec oldOffset = m_viewOffset;
 		m_viewOffset += ProjectedVec((cur_x_mouse - rclick_x) / 2, (cur_y_mouse - rclick_y) / 2);
 
 		SetScroll(m_viewOffset.x, m_viewOffset.y);
 
+		// nothing moved (or the scroll position is clamped at the map border) - skip the redraw
+		if (m_viewOffset == oldOffset)
+			return;
+
+		m_bPanFastPath = TRUE;
 		InvalidateRect(NULL, FALSE);
 	}
 	else
@@ -5625,6 +5672,11 @@ void CIsoView::DrawMap()
 
 	if (Map->GetIsoSize() == 0) return;
 
+	m_colorCache.clear();
+
+	// the picture filename cache depends on the loaded pictures (SHP vs BMP fallback) - invalidate it when new pictures were loaded
+	const size_t picsCountAtFrameStart = pics.size();
+
 	auto startTime = std::chrono::steady_clock::now();
 
 	// draw a white background
@@ -5697,6 +5749,15 @@ void CIsoView::DrawMap()
 	lpdsBack->GetSurfaceDesc(&ddsd);
 
 
+
+#ifdef NOSURFACES
+	if (m_bPanFastPath && bIncrementalPan && rscroll)
+	{
+		m_bPanFastPath = FALSE;
+		if (DrawMapPan(left, right, top, bottom, MM_heightstart, bMarbleHeight))
+			return;
+	}
+#endif
 #ifdef NOSURFACES				
 	lpdsBack->Lock(NULL, &ddsd, DDLOCK_SURFACEMEMORYPTR | DDLOCK_WAIT | DDLOCK_NOSYSLOCK, NULL);
 #endif
@@ -5704,6 +5765,9 @@ void CIsoView::DrawMap()
 	// we render texts and waypoints last as they should be always visible anyway and because text rendering is currently done using GDI -> getting a DC for every text is too slow nowadays
 	m_texts_to_render.clear();
 	m_waypoints_to_render.clear();
+	m_celltags_to_render.clear();
+
+	const DrawMapCellContext ctx = { ddsd, r, MM_heightstart, bMarbleHeight, false };
 
 	for (u = left;u < right;u++)
 	{
@@ -5726,62 +5790,9 @@ void CIsoView::DrawMap()
 			if (m.wGround >= (*tiledata_count))
 				m.wGround = 0;
 
-			DWORD dwOrigGround = m.wGround;
-
-			if (theApp.m_Options.bMarbleMadness)
-			{
-				if ((*tiledata)[m.wGround].wMarbleGround != 0xFFFF)
-				{
-
-					m.wGround = (*tiledata)[m.wGround].wMarbleGround;
-				}
-				else if (bMarbleHeight)
-				{
-					//drawy+=f_y*m.bHeight;
-
-					m.wGround = MM_heightstart + m.bHeight;
-					m.bSubTile = 0;
-				}
-			}
-
 			if (!m.bRedrawTerrain)
-			{
+				DrawMapTerrainCell(m, drawCoords, ctx);
 
-				TILEDATA* td = &(*tiledata)[m.wGround];
-				if (td->bReplacementCount)
-				{
-					if (m.bRNDImage > 0)
-					{
-						m.bRNDImage <= td->bReplacementCount ? td = &td->lpReplacements[m.bRNDImage - 1] : td = &td->lpReplacements[td->bReplacementCount - 1];
-					}
-				}
-
-				if (m.bSubTile < td->wTileCount && td->tiles[m.bSubTile].pic != NULL)
-				{
-					const SUBTILE& st = td->tiles[m.bSubTile];
-					const auto stDrawCoords = drawCoords + st.drawOffset();
-
-
-					if (!m.bHide && (*tiledata)[dwOrigGround].bHide == FALSE)
-					{
-#ifndef NOSURFACES
-						Blit(st.pic, stDrawCoords.x, stDrawCoords.y, st.wWidth, st.wHeight);
-#else
-						BlitTerrain(ddsd.lpSurface, stDrawCoords.x, stDrawCoords.y, r.left, r.top, ddsd.lPitch, r.right, r.bottom, st);
-#endif
-					}
-					else // draw soemthing representing the tile
-					{
-#ifndef NOSURFACES
-						DrawCell(stDrawCoords.x, stDrawCoords.y, 1, 1, RGB(0, 140, 0), FALSE, FALSE);
-#else
-						BlitTerrainHalfTransp(ddsd.lpSurface, stDrawCoords.x, stDrawCoords.y, r.left, r.top, ddsd.lPitch, r.right, r.bottom, st);
-#endif							
-
-					}
-				}
-
-			}
 
 		}
 	}
@@ -5806,708 +5817,14 @@ void CIsoView::DrawMap()
 			if (m.wGround == 0xFFFF)
 				m.wGround = 0;
 
-			DWORD dwOrigGround = m.wGround;
-
-			if (theApp.m_Options.bMarbleMadness)
-			{
-				if ((*tiledata)[m.wGround].wMarbleGround != 0xFFFF)
-				{
-					m.wGround = (*tiledata)[m.wGround].wMarbleGround;
-				}
-				else if (bMarbleHeight)
-				{
-					//y+=f_y*m.bHeight;										
-					m.wGround = MM_heightstart + m.bHeight;
-					m.bSubTile = 0;
-				}
-			}
+			const DWORD dwOrigGround = m.wGround;
 
 			if (m.bRedrawTerrain)
-			{
-				// draw cliff again to hide buildings behind
+				DrawMapTerrainCell(m, drawCoords, ctx);
 
-				if (m.wGround < *tiledata_count)
-				{
-					TILEDATA* td = &(*tiledata)[m.wGround];
-					if (td->bReplacementCount)
-					{
-						if (m.bRNDImage > 0)
-						{
-							m.bRNDImage <= td->bReplacementCount ? td = &td->lpReplacements[m.bRNDImage - 1] : td = &td->lpReplacements[td->bReplacementCount - 1];
-						}
-					}
+			DrawMapTerrainAnim(m, drawCoords, ctx, dwOrigGround);
 
-					if (m.bSubTile < td->wTileCount && td->tiles[m.bSubTile].pic != NULL)
-					{
-						const SUBTILE& st = td->tiles[m.bSubTile];
-						const auto stDrawCoords = drawCoords + st.drawOffset();
-
-
-						if (!m.bHide && (*tiledata)[dwOrigGround].bHide == FALSE)
-						{
-#ifndef NOSURFACES
-							Blit(st.pic, stDrawCoords.x, stDrawCoords.y, st.wWidth, st.wHeight);
-#else
-							BlitTerrain(ddsd.lpSurface, stDrawCoords.x, stDrawCoords.y, r.left, r.top, ddsd.lPitch, r.right, r.bottom, st);
-							if (st.anim)
-							{
-								const auto animDrawCoords = drawCoords + ProjectedVec(f_x / 2 - st.anim->wMaxWidth / 2, f_y / 2 - st.anim->wMaxHeight / 2) + st.anim->drawOffset();
-								BlitPic(ddsd.lpSurface, animDrawCoords.x, animDrawCoords.y, r.left, r.top, ddsd.lPitch, r.right, r.bottom, *st.anim);
-							}
-#endif
-
-						}
-						else // draw soemthing representing the tile
-						{
-#ifndef NOSURFACES
-							DrawCell(stDrawCoords.x, stDrawCoords.y, 1, 1, RGB(0, 140, 0), FALSE, FALSE);
-#else
-							BlitTerrainHalfTransp(ddsd.lpSurface, stDrawCoords.x, stDrawCoords.y, r.left, r.top, ddsd.lPitch, r.right, r.bottom, st);
-#endif							
-
-						}
-					}
-
-				}
-			}
-
-			// draw terrain animation (tunnel tops, waterfalls)
-			// tunnel tops might be repainted later so that units do not appear on top - this probably could be done in CLoading so that instead of a back tile a front tile is responsible for drawing the animation
-			{
-				if (m.wGround < *tiledata_count)
-				{
-					TILEDATA* td = &(*tiledata)[m.wGround];
-
-					if (m.bSubTile < td->wTileCount)
-					{
-						const SUBTILE& st = td->tiles[m.bSubTile];
-
-						if (!m.bHide && (*tiledata)[dwOrigGround].bHide == FALSE && st.anim)
-						{
-#ifndef NOSURFACES
-#else
-							const auto animDrawCoords = drawCoords + ProjectedVec(f_x / 2 - st.anim->wMaxWidth / 2, f_y / 2 - st.anim->wMaxHeight / 2) + st.anim->drawOffset();
-							BlitPic(ddsd.lpSurface, animDrawCoords.x, animDrawCoords.y, r.left, r.top, ddsd.lPitch, r.right, r.bottom, *st.anim);
-#endif
-						}
-
-					}
-				}
-			}
-
-			// draw overlay
-			if (m.overlay != 0xFF)
-			{
-				PICDATA pic;
-				pic.pic = NULL;
-
-				if (ovrlpics[m.overlay][m.overlaydata] != NULL)
-				{
-					pic = *ovrlpics[m.overlay][m.overlaydata];
-				}
-
-
-				if (pic.pic == NULL)
-				{
-					if (!pic.bTried)
-					{
-						SetError(GetLanguageStringACP("LoadingGraphics"));
-						theApp.m_loading->LoadOverlayGraphic(*rules.sections["OverlayTypes"].GetValue(m.overlay), m.overlay);
-						UpdateOverlayPictures(m.overlay);
-						if (ovrlpics[m.overlay][m.overlaydata] != NULL)
-							pic = *ovrlpics[m.overlay][m.overlaydata];
-					}
-
-					if (pic.pic == NULL)
-					{
-						if (!(m.overlay >= 0x4a && m.overlay <= 0x65) && !(m.overlay >= 0xcd && m.overlay <= 0xec))
-						{
-							char cd[50];
-							cd[0] = '0';
-							cd[1] = 'x';
-							itoa(m.overlay, cd + 2, 16);
-
-							m_texts_to_render.push_back({ cd, drawCoords.x + f_x / 2, drawCoords.y + f_y / 2, RGB(0,0,0), false, true, true});
-							// TextOut(drawx,drawy, cd, RGB(0,0,0));
-						}
-					}
-				}
-
-				if (pic.pic != NULL)
-				{
-					ProjectedVec offset(f_x / 2 - pic.wMaxWidth / 2, -pic.wMaxHeight / 2);
-
-					if (m.overlay == OVRL_VEINHOLE) // veinhole, big, special case
-					{
-						offset.y -= f_y * 3 / 2;
-					}
-					else if (isBigBridge(m.overlay)) // bridge special case
-					{
-						// drawy-=f_y;
-						if (m.overlaydata >= 0x09 && m.overlaydata <= 0x11)
-						{
-							offset.y -= f_y / 2;
-						}
-
-						offset.x -= 1; // hmm... strange, but this is needed
-
-					}
-					else if (isTrack(m.overlay))
-						offset.y += f_y / 2;
-
-					if (m.overlay >= 0x4a && m.overlay <= 0x65) offset.y += f_y / 2;
-					if (m.overlay >= 0xcd && m.overlay <= 0xec) offset.y += f_y / 2;
-
-
-					const auto drawCoordsOvrl = drawCoords + offset;
-
-#ifndef NOSURFACES
-					Blit(pic.pic, drawCoordsOvrl.x, drawCoordsOvrl.y);
-#else
-
-#ifdef RA2_MODE
-					BlitPic(ddsd.lpSurface, drawCoordsOvrl.x, drawCoordsOvrl.y, r.left, r.top, ddsd.lPitch, r.right, r.bottom, pic);
-#endif
-#ifdef TS_MODE 
-					if (!isGreenTiberium(m.overlay) && !(m.overlay == 0x7f)) // no tib
-						BlitPic(ddsd.lpSurface, drawCoordsOvrl.x, drawCoordsOvrl.y, r.left, r.top, ddsd.lPitch, r.right, r.bottom, pic);
-					else if (m.overlay == 0x7f) // blue tib
-					{
-						int n = RGB(200, 0, 0);
-						BlitPic(ddsd.lpSurface, drawCoordsOvrl.x, drawCoordsOvrl.y, r.left, r.top, ddsd.lPitch, r.right, r.bottom, pic, &n);
-					}
-					else
-					{
-						int n = RGB(0, 200, 0);
-						BlitPic(ddsd.lpSurface, drawCoordsOvrl.x, drawCoordsOvrl.y, r.left, r.top, ddsd.lPitch, r.right, r.bottom, pic, &n);
-					}
-#endif
-
-#endif
-
-				}
-			}
-
-			if (m.structure != -1)
-			{
-				last_succeeded_operation = 10101;
-
-				// for structures we need to check if they weren´t drawn earlier
-				// (every field that this building achieves has this building as .structure)
-				if (Map->GetStructureAt(mapCoords - MapVec(-1, 0)) != m.structure && Map->GetStructureAt(mapCoords - MapVec(0, -1)) != m.structure)
-				{
-
-					STRUCTUREPAINT objp;
-					Map->GetStructurePaint(m.structure, &objp);
-
-					const auto drawCoordsBld = GetRenderTargetCoordinates(MapCoords(objp.x, objp.y));
-					int id = m.structuretype;
-
-
-					int w = 1, h = 1;
-					PICDATA pic;
-					if (id > -1 && id < 0x0F00)
-					{
-						w = buildinginfo[id].w;
-						h = buildinginfo[id].h;
-						int dir = objp.direction / 32;
-
-						// MW April 13th 2001: fix for building direction
-						dir = (7 - dir) % 8;
-
-						pic = buildinginfo[id].pic[dir];
-						if (pic.pic == NULL) pic = buildinginfo[id].pic[0];
-
-					}
-
-#ifndef NOSURFACES
-					DrawCell(drawCoordsBld.x, drawCoordsBld.y, w, h, colorref_conv[objp.col]);
-#else
-					// MW 07/19/01: Paint cell if user chose so...
-					if (theApp.m_Options.bShowCells)
-					{
-						DrawCell(ddsd.lpSurface, ddsd.dwWidth, ddsd.dwHeight, ddsd.lPitch, drawCoordsBld.x, drawCoordsBld.y, w, h, colorref_conv[objp.col]);
-					}
-#endif
-
-
-					if (pic.pic == NULL)
-					{
-						if (!missingimages[objp.type])
-						{
-							SetError(GetLanguageStringACP("LoadingGraphics"));
-							theApp.m_loading->LoadUnitGraphic(objp.type);
-							::Map->UpdateBuildingInfo(objp.type);
-							int dir = (7 - objp.direction / 32) % 8;
-							pic = buildinginfo[id].pic[dir];
-							if (pic.pic == NULL) pic = buildinginfo[id].pic[0];
-						}
-						if (pic.pic == NULL)
-						{
-#ifndef NOSURFACES
-							Blit(pics["HOUSE"].pic, drawCoordsBld.x, drawCoordsBld.y - 19); // draw a ugly house
-#endif
-							missingimages[objp.type] = TRUE;
-						}
-					}
-
-					if (pic.pic) // picture
-					{
-
-						// it was that easy! just center on top end!!!
-						const auto drawCoordsBldShp = drawCoordsBld + ProjectedVec(f_x / 2 - pic.wMaxWidth / 2, -pic.wMaxHeight / 2);
-
-#ifndef NOSURFACES
-						Blit(pic.pic, drawCoordsBldShp.x, drawCoordsBldShp.y, pic.wMaxWidth, pic.wMaxHeight);
-#else
-
-						BlitPic(ddsd.lpSurface, drawCoordsBldShp.x, drawCoordsBldShp.y, r.left, r.top, ddsd.lPitch, r.right, r.bottom, pic, &colorref_conv[objp.col]);
-#endif
-
-						for (int upgrade = 0; upgrade < objp.upradecount; ++upgrade)
-						{
-							const auto& upg = upgrade == 0 ? objp.upgrade1 : (upgrade == 1 ? objp.upgrade2 : objp.upgrade3);
-							if (upg.GetLength() == 0)
-								continue;
-
-							PICDATA pic;
-							int dir = (7 - objp.direction / 32) % 8;
-							pic = pics[GetUnitPictureFilename(upg, dir)];
-							if (!missingimages[upg] && pic.pic == NULL)
-							{
-								SetError(GetLanguageStringACP("LoadingGraphics"));
-								theApp.m_loading->LoadUnitGraphic(upg);
-								::Map->UpdateBuildingInfo(upg);
-								pic = pics[GetUnitPictureFilename(upg, dir)];
-								if (pic.pic == NULL) missingimages[upg] = TRUE;
-							}
-
-							if (pic.pic != NULL)
-							{
-								static const CString LocLookup[3][2] = { {"PowerUp1LocXX", "PowerUp1LocYY"}, {"PowerUp2LocXX", "PowerUp2LocYY"}, {"PowerUp3LocXX", "PowerUp3LocYY"} };
-								const auto drawCoordsPowerUp = drawCoordsBldShp + ProjectedVec(
-									atoi(art.sections[objp.type].values[LocLookup[upgrade][0]]),
-									atoi(art.sections[objp.type].values[LocLookup[upgrade][1]])
-								);
-								// py-=atoi(art.sections[obj.type].values["PowerUp1LocZZ"]); 
-#ifndef NOSURFACES
-								Blit(pic.pic, drawCoordsPowerUp.x, drawCoordsPowerUp.y);
-#else
-								BlitPic(ddsd.lpSurface, drawCoordsPowerUp.x, drawCoordsPowerUp.y, r.left, r.top, ddsd.lPitch, r.right, r.bottom, pic, &colorref_conv[objp.col]);
-#endif
-
-							}
-
-						}
-
-					}
-				}
-
-			}
-
-
-			if (m.node.type > -1)
-			{
-				last_succeeded_operation = 10102;
-
-				CString house = m.node.house;
-				CString tmp;
-						
-				if (Map->GetNodeAt(mapCoords + MapVec(1, 0), tmp) != m.node.index && Map->GetNodeAt(mapCoords + MapVec(0, 1), tmp) != m.node.index)
-				{
-					const auto drawCoordsBld = GetRenderTargetCoordinates(mapCoords - MapVec(buildinginfo[m.node.type].h - 1, buildinginfo[m.node.type].w - 1));
-
-					COLORREF c;
-					c = GetColor(house);
-
-
-					int id = m.node.type;
-					int w = 1, h = 1;
-					PICDATA pic;
-					if (id > -1 && id < 0x0F00)
-					{
-						w = buildinginfo[id].w;
-						h = buildinginfo[id].h;
-						pic = buildinginfo[id].pic[0];
-					}
-
-
-					//#ifndef NOSURFACES							
-#ifdef NOSURFACES 
-					if (m.structure >= 0) // only paint cell if we have a structure preplaced, as we have a half transparent image
-					{
-#endif
-						// place it 2 pixels lower so that user can see the dotted lines even if the building itself has the cells drawn
-						DrawCell(ddsd.lpSurface, ddsd.dwWidth, ddsd.dwHeight, ddsd.lPitch, drawCoordsBld.x, drawCoordsBld.y + 3, w, h, colorref_conv[c], true);
-
-#ifdef NOSURFACES				
-					}
-#endif
-					//#endif
-
-					if (pic.pic == NULL)
-					{
-						if (!missingimages[*rules.sections["BuildingTypes"].GetValue(m.node.type)])
-						{
-							SetError(GetLanguageStringACP("LoadingGraphics"));
-							theApp.m_loading->LoadUnitGraphic(*rules.sections["BuildingTypes"].GetValue(m.node.type));
-							::Map->UpdateBuildingInfo(*rules.sections["BuildingTypes"].GetValue(m.node.type));
-							pic = buildinginfo[id].pic[0];
-						}
-						if (pic.pic == NULL);
-						{
-#ifndef NOSURFACES
-							Blit(pics["HOUSE"].pic, drawCoordsBld.x, drawCoordsBld.y - 19);
-#endif
-							missingimages[*rules.sections["BuildingTypes"].GetValue(m.node.type)] = TRUE;
-						}
-					}
-
-
-					if (pic.pic) // picture
-					{
-						const auto drawCoordsBldShp = drawCoordsBld + ProjectedVec(f_x / 2 - pic.wMaxWidth / 2, -pic.wMaxHeight / 2);
-
-#ifndef NOSURFACES					
-						Blit(pic.pic, drawCoordsBldShp.x, drawCoordsBldShp.y);
-#else
-						BlitPicHalfTransp(ddsd.lpSurface, drawCoordsBldShp.x, drawCoordsBldShp.y, r.left, r.top, ddsd.lPitch, r.right, r.bottom, pic, &colorref_conv[c]);
-#endif
-					}
-				}
-
-			}
-			if (m.unit != -1)
-			{
-
-				UNIT obj;
-				Map->GetUnitData(m.unit, &obj);
-
-				COLORREF c = GetColor(obj.house);
-
-
-				CString lpPicFile = GetUnitPictureFilename(obj.type, atoi(obj.direction) / 32);
-
-#ifndef NOSURFACES
-				DrawCell(drawCoords.x, drawCoords.y, 1, 1, c);
-#endif
-
-				PICDATA p = pics[lpPicFile];
-
-				if (p.pic == NULL || lpPicFile.GetLength() == 0)
-				{
-					if (!missingimages[obj.type])
-					{
-						SetError(GetLanguageStringACP("LoadingGraphics"));
-						theApp.m_loading->LoadUnitGraphic(obj.type);
-						lpPicFile = GetUnitPictureFilename(obj.type, atoi(obj.direction) / 32);
-						p = pics[lpPicFile];
-					}
-
-					if (p.pic == NULL)
-					{
-#ifndef NOSURFACES
-						Blit(pics["TANK"].pic, drawCoords.x, drawCoords.y);
-						// TextOut(drawx+f_x/4,drawy+f_y/4, obj.type,c);
-						m_texts_to_render.push_back({ obj.type, drawCoords.x + f_x / 4, drawCoords.y + f_y / 4, m_color_converter->GetColor(c)});
-#endif
-						missingimages[obj.type] = TRUE;
-					}
-				}
-
-				if (p.pic)// we have a picture!
-				{
-					const auto drawCoordsOffset = (p.bType == PICDATA_TYPE_BMP) ? ProjectedVec((f_y / 4) + p.x, (f_y - p.wHeight) + p.y) - p.drawOffset() :
-						(p.bType == PICDATA_TYPE_SHP) ? ProjectedVec(f_x / 2 - (p.wMaxWidth / 2), f_y / 2 - (p.wMaxHeight / 2)) : ProjectedVec(f_x / 2, f_y / 2) + p.drawOffset();
-					auto drawCoordsUnit = drawCoords + drawCoordsOffset;
-
-#ifndef NOSURFACES
-					Blit(p.pic, drawCoordsUnit.x, drawCoordsUnit.y);
-#else
-					BlitPic(ddsd.lpSurface, drawCoordsUnit.x, drawCoordsUnit.y, r.left, r.top, ddsd.lPitch, r.right, r.bottom, p, &colorref_conv[c]);
-#endif
-				}
-			}
-			if (m.aircraft != -1)
-			{
-				last_succeeded_operation = 10102;
-
-				AIRCRAFT obj;
-				Map->GetAircraftData(m.aircraft, &obj);
-
-				COLORREF c = GetColor(obj.house);
-
-
-				CString lpPicFile = GetUnitPictureFilename(obj.type, atoi(obj.direction) / 32);
-
-#ifndef NOSURFACES
-				DrawCell(drawCoords.x, drawCoords.y, 1, 1, c);
-#endif
-
-				PICDATA p = pics[lpPicFile];
-
-				if (p.pic == NULL)
-				{
-					if (!missingimages[obj.type])
-					{
-						SetError(GetLanguageStringACP("LoadingGraphics"));
-						theApp.m_loading->LoadUnitGraphic(obj.type);
-						p = pics[lpPicFile];
-					}
-
-					if (p.pic == NULL)
-					{
-#ifndef NOSURFACES
-						Blit(pics["TANK"].pic, drawCoords.x, drawCoords.y);
-						//TextOut(drawx+f_x/4,drawy+f_y/4, obj.type,c);
-						m_texts_to_render.push_back({ obj.type, drawCoords.x + f_x / 4, drawCoords.y + f_y / 4, m_color_converter->GetColor(c) });
-#endif
-						missingimages[obj.type] = TRUE;
-					}
-				}
-
-				if (p.pic)// we have a picture!
-				{
-					const auto drawCoordsOffset = (p.bType == PICDATA_TYPE_BMP) ? ProjectedVec(f_x / 2 - p.wWidth / 2, f_y - p.wHeight) - p.drawOffset() :
-						(p.bType == PICDATA_TYPE_SHP) ? ProjectedVec(f_x / 2 - (p.wMaxWidth / 2), f_y / 2 - (p.wMaxHeight / 2)) : ProjectedVec(f_x / 2, f_y / 2) + p.drawOffset();
-					auto drawCoordsAir = drawCoords + drawCoordsOffset;
-
-#ifndef NOSURFACES
-					Blit(p.pic, drawCoordsAir.x, drawCoordsAir.y);
-#else
-					BlitPic(ddsd.lpSurface, drawCoordsAir.x, drawCoordsAir.y, r.left, r.top, ddsd.lPitch, r.right, r.bottom, p, &colorref_conv[c]);
-#endif
-				}
-			}
-			int ic;
-			for (ic = 0;ic < SUBPOS_COUNT;ic++)
-				if (m.infantry[ic] != -1)
-				{
-					last_succeeded_operation = 10103;
-
-					//errstream << "GetInfantryData()" << endl;
-					//errstream.flush();
-
-					INFANTRY obj;
-					Map->GetInfantryData(m.infantry[ic], &obj);
-
-					//errstream << "Done " << (LPCSTR)obj.type << endl;
-					//errstream.flush();
-
-
-					COLORREF c = GetColor(obj.house);
-
-							
-					int dir = (7 - atoi(obj.direction) / 32) % 8;
-					CString lpPicFile = GetUnitPictureFilename(obj.type, dir);
-
-#ifndef NOSURFACES
-					DrawCell(drawCoords.x, drawCoords.y, 1, 1, c);
-#endif
-
-					static const ProjectedVec subPosLookup[5] = { ProjectedVec(0, -f_y / 4), ProjectedVec(f_x / 4 , 0), ProjectedVec(-f_x / 4, 0), ProjectedVec(0, f_y / 4), ProjectedVec()};
-					auto drawCoordsInf = drawCoords + subPosLookup[ic > 4 ? 4 : ic];
-
-					PICDATA p = pics[lpPicFile];
-
-					if (p.pic == NULL)
-					{
-						if (!missingimages[obj.type])
-						{
-							SetError(GetLanguageStringACP("LoadingGraphics"));
-							theApp.m_loading->LoadUnitGraphic(obj.type);
-							p = pics[lpPicFile];
-						}
-
-						if (p.pic == NULL)
-						{
-#ifndef NOSURFACES
-							Blit(pics["MAN"].pic, drawCoordsInf.x, drawCoordsInf.y);
-							// TextOut(drawx+f_x/4,drawy+f_y/4, obj.type,c);
-							m_texts_to_render.push_back({ obj.type, drawCoordsInf.x + f_x / 4, drawCoordsInf.y + f_y / 4, RGB(0,0,0) });
-#endif
-							missingimages[obj.type] = TRUE;
-						}
-					}
-
-
-
-					if (p.pic)// we have a picture!
-					{
-						auto drawCoordsInfShp = drawCoordsInf + ProjectedVec(f_x / 2 - (p.wMaxWidth / 2), f_y / 2 - (p.wMaxHeight / 2));
-
-#ifndef NOSURFACES
-						Blit(p.pic, drawCoordsInfShp.x, drawCoordsInfShp.y, p.wWidth, p.wHeight);
-#else
-						BlitPic(ddsd.lpSurface, drawCoordsInfShp.x, drawCoordsInfShp.y, r.left, r.top, ddsd.lPitch, r.right, r.bottom, p, &colorref_conv[c]);
-#endif
-
-					}
-
-				}
-			if (m.terrain != -1)
-			{
-				last_succeeded_operation = 10104;
-
-
-				int id = m.terraintype;
-				int w = 1, h = 1;
-				PICDATA pic;
-				if (id > -1 && id < 0x0F00)
-				{
-					w = treeinfo[id].w;
-					h = treeinfo[id].h;
-					pic = treeinfo[id].pic;
-				}
-
-				//CString lpPicFile=GetUnitPictureFilename(type, 0);				
-
-				if (pic.pic == NULL)
-				{
-					CString type;
-					Map->GetTerrainData(m.terrain, &type);
-
-					if (missingimages.find(type) == missingimages.end())
-					{
-						SetError(GetLanguageStringACP("LoadingGraphics"));
-						theApp.m_loading->LoadUnitGraphic(type);
-						::Map->UpdateTreeInfo(type);
-						pic = treeinfo[id].pic;
-					}
-					if (pic.pic == NULL)
-					{
-#ifndef NOSURFACES
-						Blit(pics["TREE"].pic, drawCoords.x, drawCoords.y - 19);
-#endif
-						missingimages[type] = TRUE;
-					}
-				}
-
-				if (pic.pic);
-				{
-
-					auto drawCoordsTerrain = drawCoords + ProjectedVec(f_x / 2 - (pic.wMaxWidth / 2), f_y / 2 - 3 - (pic.wMaxHeight / 2));
-
-#ifndef NOSURFACES
-					Blit(pic.pic, drawCoordsTerrain.x, drawCoordsTerrain.y);
-#else
-					BlitPic(ddsd.lpSurface, drawCoordsTerrain.x, drawCoordsTerrain.y, r.left, r.top, ddsd.lPitch, r.right, r.bottom, pic);
-
-#endif
-
-
-				}
-
-			}
-
-
-#ifdef SMUDGE_SUPP
-			if (m.smudge != -1)
-			{
-				last_succeeded_operation = 10104;
-
-
-				int id = m.smudgetype;
-
-				PICDATA pic;
-				if (id > -1 && id < 0x0F00)
-				{
-					pic = smudgeinfo[id].pic;
-				}
-
-				if (pic.pic == NULL)
-				{
-					SMUDGE data;
-					CString& type = data.type;
-					Map->GetSmudgeData(m.smudge, &data);
-
-					if (missingimages.find(type) == missingimages.end())
-					{
-						SetError(GetLanguageStringACP("LoadingGraphics"));
-						theApp.m_loading->LoadUnitGraphic(type);
-						::Map->UpdateSmudgeInfo(type);
-						pic = smudgeinfo[id].pic;
-					}
-					if (pic.pic == NULL)
-					{
-#ifndef NOSURFACES
-						// Blit(pics["TREE"].pic,drawCoords.x,drawCoords.y-19);
-#endif
-						missingimages[type] = TRUE;
-					}
-				}
-
-				if (pic.pic)
-				{
-					auto drawCoordsSmudge = drawCoords + ProjectedVec(f_x / 2 - (pic.wMaxWidth / 2), /*f_y / 2 - 3*/ - (pic.wMaxHeight / 2));
-
-#ifndef NOSURFACES
-					Blit(pic.pic, drawCoordsSmudge.x, drawCoordsSmudge.y);
-#else
-					BlitPic(ddsd.lpSurface, drawCoordsSmudge.x, drawCoordsSmudge.y, r.left, r.top, ddsd.lPitch, r.right, r.bottom, pic);
-
-#endif
-
-
-				}
-
-			}
-#endif
-
-
-			if (m.celltag != -1)
-			{
-
-#ifdef NOSURFACES
-				lpdsBack->Unlock(NULL);
-#endif
-				Blit((LPDIRECTDRAWSURFACE4)pics["CELLTAG"].pic, drawCoords.x - 1, drawCoords.y - 1);
-
-#ifdef NOSURFACES				
-				lpdsBack->Lock(NULL, &ddsd, DDLOCK_SURFACEMEMORYPTR | DDLOCK_WAIT | DDLOCK_NOSYSLOCK, NULL);
-#endif
-			}
-
-			if (m.waypoint != -1)
-			{
-
-				DWORD dwPos;
-				CString ID;
-				Map->GetWaypointData(m.waypoint, &ID, &dwPos);
-
-
-#ifdef NOSURFACES
-				lpdsBack->Unlock(NULL);
-#endif
-
-				// move the graphic and text into place
-#ifdef RA2_MODE
-				int image_fudge_x = 4;
-				int image_fudge_y = -20;
-				int text_fudge_x = 12;
-				int text_fudge_y = -24;
-#else
-				int image_fudge_x = 4;
-				int image_fudge_y = -15;
-				int text_fudge_x = 9;
-				int text_fudge_y = -17;
-#endif
-
-				const ProjectedVec waypointImageOffset(image_fudge_x, image_fudge_y);
-				const ProjectedVec waypointTextOffset((f_x / 2) + text_fudge_x, (f_y / 2) + text_fudge_y);
-#ifdef RA2_MODE
-				bool useFont9 = false;
-#else
-				bool useFont9 = true;
-#endif
-				const auto waypointImageCoords = ProjectedCoords({ drawCoords.x, drawCoords.y }) + waypointImageOffset;
-				const auto waypointTextCoords = ProjectedCoords({ drawCoords.x, drawCoords.y }) + waypointTextOffset;
-				m_waypoints_to_render.push_back({ waypointImageCoords.x, waypointImageCoords.y });
-				m_texts_to_render.push_back({ ID.GetString(), waypointTextCoords.x, waypointTextCoords.y, RGB(0,0,255), false, useFont9, true});
-#ifdef NOSURFACES				
-				lpdsBack->Lock(NULL, &ddsd, DDLOCK_SURFACEMEMORYPTR | DDLOCK_WAIT | DDLOCK_NOSYSLOCK, NULL);
-#endif
-			}
+			DrawMapObjectsCell(mapCoords, m, drawCoords, ctx);
 
 		}
 
@@ -6573,7 +5890,1008 @@ void CIsoView::DrawMap()
 	FlipHighResBuffer();
 	last_succeeded_operation = 10100;
 
+	m_lastViewOffset = m_viewOffset;
+	m_lastFrameValid = true;
+
+	if (pics.size() != picsCountAtFrameStart)
+		m_picFileCache.clear();
+
 }
+
+void CIsoView::DrawMapTerrainCell(FIELDDATA& m, const ProjectedCoords& drawCoords, const DrawMapCellContext& ctx)
+{
+	const DDSURFACEDESC2& ddsd = ctx.ddsd;
+	const RECT& r = ctx.r;
+
+	const DWORD dwOrigGround = m.wGround;
+
+	if (theApp.m_Options.bMarbleMadness)
+	{
+		if ((*tiledata)[m.wGround].wMarbleGround != 0xFFFF)
+		{
+			m.wGround = (*tiledata)[m.wGround].wMarbleGround;
+		}
+		else if (ctx.bMarbleHeight)
+		{
+			m.wGround = ctx.MM_heightstart + m.bHeight;
+			m.bSubTile = 0;
+		}
+	}
+
+	if (m.wGround < *tiledata_count)
+	{
+		TILEDATA* td = &(*tiledata)[m.wGround];
+		if (td->bReplacementCount)
+		{
+			if (m.bRNDImage > 0)
+			{
+				m.bRNDImage <= td->bReplacementCount ? td = &td->lpReplacements[m.bRNDImage - 1] : td = &td->lpReplacements[td->bReplacementCount - 1];
+			}
+		}
+
+		if (m.bSubTile < td->wTileCount && td->tiles[m.bSubTile].pic != NULL)
+		{
+			const SUBTILE& st = td->tiles[m.bSubTile];
+			const auto stDrawCoords = drawCoords + st.drawOffset();
+
+			if (!m.bHide && (*tiledata)[dwOrigGround].bHide == FALSE)
+			{
+#ifndef NOSURFACES
+				Blit(st.pic, stDrawCoords.x, stDrawCoords.y, st.wWidth, st.wHeight);
+#else
+				BlitTerrain(ddsd.lpSurface, stDrawCoords.x, stDrawCoords.y, r.left, r.top, ddsd.lPitch, r.right, r.bottom, st);
+#endif
+			}
+			else // draw soemthing representing the tile
+			{
+#ifndef NOSURFACES
+				DrawCell(stDrawCoords.x, stDrawCoords.y, 1, 1, RGB(0, 140, 0), FALSE, FALSE);
+#else
+				BlitTerrainHalfTransp(ddsd.lpSurface, stDrawCoords.x, stDrawCoords.y, r.left, r.top, ddsd.lPitch, r.right, r.bottom, st);
+#endif
+			}
+		}
+	}
+}
+
+
+void CIsoView::DrawMapTerrainAnim(FIELDDATA& m, const ProjectedCoords& drawCoords, const DrawMapCellContext& ctx, DWORD dwOrigGround)
+{
+	const DDSURFACEDESC2& ddsd = ctx.ddsd;
+	const RECT& r = ctx.r;
+
+	if (m.wGround < *tiledata_count)
+	{
+		TILEDATA* td = &(*tiledata)[m.wGround];
+
+		if (m.bSubTile < td->wTileCount)
+		{
+			const SUBTILE& st = td->tiles[m.bSubTile];
+
+			if (!m.bHide && (*tiledata)[dwOrigGround].bHide == FALSE && st.anim)
+			{
+#ifndef NOSURFACES
+#else
+				const auto animDrawCoords = drawCoords + ProjectedVec(f_x / 2 - st.anim->wMaxWidth / 2, f_y / 2 - st.anim->wMaxHeight / 2) + st.anim->drawOffset();
+				BlitPic(ddsd.lpSurface, animDrawCoords.x, animDrawCoords.y, r.left, r.top, ddsd.lPitch, r.right, r.bottom, *st.anim);
+#endif
+			}
+		}
+	}
+}
+
+
+void CIsoView::DrawMapObjectsCell(const MapCoords& mapCoords, FIELDDATA& m, const ProjectedCoords& drawCoords, const DrawMapCellContext& ctx)
+{
+	DDSURFACEDESC2& ddsd = ctx.ddsd;
+	const RECT& r = ctx.r;
+
+	// draw overlay
+	if (m.overlay != 0xFF)
+	{
+		PICDATA pic;
+		pic.pic = NULL;
+
+		if (ovrlpics[m.overlay][m.overlaydata] != NULL)
+		{
+			pic = *ovrlpics[m.overlay][m.overlaydata];
+		}
+
+
+		if (pic.pic == NULL)
+		{
+			if (!pic.bTried)
+			{
+				SetError(GetLanguageStringACP("LoadingGraphics"));
+				theApp.m_loading->LoadOverlayGraphic(*rules.sections["OverlayTypes"].GetValue(m.overlay), m.overlay);
+				UpdateOverlayPictures(m.overlay);
+				if (ovrlpics[m.overlay][m.overlaydata] != NULL)
+					pic = *ovrlpics[m.overlay][m.overlaydata];
+			}
+
+			if (pic.pic == NULL)
+			{
+				if (!(m.overlay >= 0x4a && m.overlay <= 0x65) && !(m.overlay >= 0xcd && m.overlay <= 0xec))
+				{
+					char cd[50];
+					cd[0] = '0';
+					cd[1] = 'x';
+					itoa(m.overlay, cd + 2, 16);
+
+					m_texts_to_render.push_back({ cd, drawCoords.x + f_x / 2, drawCoords.y + f_y / 2, RGB(0,0,0), false, true, true});
+					// TextOut(drawx,drawy, cd, RGB(0,0,0));
+				}
+			}
+		}
+
+		if (pic.pic != NULL)
+		{
+			ProjectedVec offset(f_x / 2 - pic.wMaxWidth / 2, -pic.wMaxHeight / 2);
+
+			if (m.overlay == OVRL_VEINHOLE) // veinhole, big, special case
+			{
+				offset.y -= f_y * 3 / 2;
+			}
+			else if (isBigBridge(m.overlay)) // bridge special case
+			{
+				// drawy-=f_y;
+				if (m.overlaydata >= 0x09 && m.overlaydata <= 0x11)
+				{
+					offset.y -= f_y / 2;
+				}
+
+				offset.x -= 1; // hmm... strange, but this is needed
+
+			}
+			else if (isTrack(m.overlay))
+				offset.y += f_y / 2;
+
+			if (m.overlay >= 0x4a && m.overlay <= 0x65) offset.y += f_y / 2;
+			if (m.overlay >= 0xcd && m.overlay <= 0xec) offset.y += f_y / 2;
+
+
+			const auto drawCoordsOvrl = drawCoords + offset;
+
+#ifndef NOSURFACES
+			Blit(pic.pic, drawCoordsOvrl.x, drawCoordsOvrl.y);
+#else
+
+#ifdef RA2_MODE
+			BlitPic(ddsd.lpSurface, drawCoordsOvrl.x, drawCoordsOvrl.y, r.left, r.top, ddsd.lPitch, r.right, r.bottom, pic);
+#endif
+#ifdef TS_MODE 
+			if (!isGreenTiberium(m.overlay) && !(m.overlay == 0x7f)) // no tib
+				BlitPic(ddsd.lpSurface, drawCoordsOvrl.x, drawCoordsOvrl.y, r.left, r.top, ddsd.lPitch, r.right, r.bottom, pic);
+			else if (m.overlay == 0x7f) // blue tib
+			{
+				int n = RGB(200, 0, 0);
+				BlitPic(ddsd.lpSurface, drawCoordsOvrl.x, drawCoordsOvrl.y, r.left, r.top, ddsd.lPitch, r.right, r.bottom, pic, &n);
+			}
+			else
+			{
+				int n = RGB(0, 200, 0);
+				BlitPic(ddsd.lpSurface, drawCoordsOvrl.x, drawCoordsOvrl.y, r.left, r.top, ddsd.lPitch, r.right, r.bottom, pic, &n);
+			}
+#endif
+
+#endif
+
+		}
+	}
+
+	if (m.structure != -1)
+	{
+		last_succeeded_operation = 10101;
+
+		// for structures we need to check if they weren´t drawn earlier
+		// (every field that this building achieves has this building as .structure)
+		if (Map->GetStructureAt(mapCoords - MapVec(-1, 0)) != m.structure && Map->GetStructureAt(mapCoords - MapVec(0, -1)) != m.structure)
+		{
+
+			STRUCTUREPAINT objp;
+			Map->GetStructurePaint(m.structure, &objp);
+
+			const auto drawCoordsBld = GetRenderTargetCoordinates(MapCoords(objp.x, objp.y));
+			int id = m.structuretype;
+
+
+			int w = 1, h = 1;
+			PICDATA pic;
+			if (id > -1 && id < 0x0F00)
+			{
+				w = buildinginfo[id].w;
+				h = buildinginfo[id].h;
+				int dir = objp.direction / 32;
+
+				// MW April 13th 2001: fix for building direction
+				dir = (7 - dir) % 8;
+
+				pic = buildinginfo[id].pic[dir];
+				if (pic.pic == NULL) pic = buildinginfo[id].pic[0];
+
+			}
+
+#ifndef NOSURFACES
+			DrawCell(drawCoordsBld.x, drawCoordsBld.y, w, h, colorref_conv[objp.col]);
+#else
+			// MW 07/19/01: Paint cell if user chose so...
+			if (theApp.m_Options.bShowCells)
+			{
+				DrawCell(ddsd.lpSurface, ddsd.dwWidth, ddsd.dwHeight, ddsd.lPitch, drawCoordsBld.x, drawCoordsBld.y, w, h, colorref_conv[objp.col]);
+			}
+#endif
+
+
+			if (pic.pic == NULL)
+			{
+				if (!missingimages[objp.type])
+				{
+					SetError(GetLanguageStringACP("LoadingGraphics"));
+					theApp.m_loading->LoadUnitGraphic(objp.type);
+					::Map->UpdateBuildingInfo(objp.type);
+					int dir = (7 - objp.direction / 32) % 8;
+					pic = buildinginfo[id].pic[dir];
+					if (pic.pic == NULL) pic = buildinginfo[id].pic[0];
+				}
+				if (pic.pic == NULL)
+				{
+#ifndef NOSURFACES
+					Blit(pics["HOUSE"].pic, drawCoordsBld.x, drawCoordsBld.y - 19); // draw a ugly house
+#endif
+					missingimages[objp.type] = TRUE;
+				}
+			}
+
+			if (pic.pic) // picture
+			{
+
+				// it was that easy! just center on top end!!!
+				const auto drawCoordsBldShp = drawCoordsBld + ProjectedVec(f_x / 2 - pic.wMaxWidth / 2, -pic.wMaxHeight / 2);
+
+#ifndef NOSURFACES
+				Blit(pic.pic, drawCoordsBldShp.x, drawCoordsBldShp.y, pic.wMaxWidth, pic.wMaxHeight);
+#else
+
+				BlitPic(ddsd.lpSurface, drawCoordsBldShp.x, drawCoordsBldShp.y, r.left, r.top, ddsd.lPitch, r.right, r.bottom, pic, &colorref_conv[objp.col]);
+#endif
+
+				for (int upgrade = 0; upgrade < objp.upradecount; ++upgrade)
+				{
+					const auto& upg = upgrade == 0 ? objp.upgrade1 : (upgrade == 1 ? objp.upgrade2 : objp.upgrade3);
+					if (upg.GetLength() == 0)
+						continue;
+
+					PICDATA pic;
+					int dir = (7 - objp.direction / 32) % 8;
+					pic = pics[GetCachedUnitPictureFilename(upg, dir)];
+					if (!missingimages[upg] && pic.pic == NULL)
+					{
+						SetError(GetLanguageStringACP("LoadingGraphics"));
+						theApp.m_loading->LoadUnitGraphic(upg);
+						::Map->UpdateBuildingInfo(upg);
+						pic = pics[GetCachedUnitPictureFilename(upg, dir)];
+						if (pic.pic == NULL) missingimages[upg] = TRUE;
+					}
+
+					if (pic.pic != NULL)
+					{
+						static const CString LocLookup[3][2] = { {"PowerUp1LocXX", "PowerUp1LocYY"}, {"PowerUp2LocXX", "PowerUp2LocYY"}, {"PowerUp3LocXX", "PowerUp3LocYY"} };
+						const auto drawCoordsPowerUp = drawCoordsBldShp + ProjectedVec(
+							atoi(art.sections[objp.type].values[LocLookup[upgrade][0]]),
+							atoi(art.sections[objp.type].values[LocLookup[upgrade][1]])
+						);
+						// py-=atoi(art.sections[obj.type].values["PowerUp1LocZZ"]); 
+#ifndef NOSURFACES
+						Blit(pic.pic, drawCoordsPowerUp.x, drawCoordsPowerUp.y);
+#else
+						BlitPic(ddsd.lpSurface, drawCoordsPowerUp.x, drawCoordsPowerUp.y, r.left, r.top, ddsd.lPitch, r.right, r.bottom, pic, &colorref_conv[objp.col]);
+#endif
+
+					}
+
+				}
+
+			}
+		}
+
+	}
+
+
+	if (m.node.type > -1)
+	{
+		last_succeeded_operation = 10102;
+
+		CString house = m.node.house;
+		CString tmp;
+				
+		if (Map->GetNodeAt(mapCoords + MapVec(1, 0), tmp) != m.node.index && Map->GetNodeAt(mapCoords + MapVec(0, 1), tmp) != m.node.index)
+		{
+			const auto drawCoordsBld = GetRenderTargetCoordinates(mapCoords - MapVec(buildinginfo[m.node.type].h - 1, buildinginfo[m.node.type].w - 1));
+
+			COLORREF c;
+			c = GetColor(house);
+
+
+			int id = m.node.type;
+			int w = 1, h = 1;
+			PICDATA pic;
+			if (id > -1 && id < 0x0F00)
+			{
+				w = buildinginfo[id].w;
+				h = buildinginfo[id].h;
+				pic = buildinginfo[id].pic[0];
+			}
+
+
+			//#ifndef NOSURFACES							
+#ifdef NOSURFACES 
+			if (m.structure >= 0) // only paint cell if we have a structure preplaced, as we have a half transparent image
+			{
+#endif
+				// place it 2 pixels lower so that user can see the dotted lines even if the building itself has the cells drawn
+				DrawCell(ddsd.lpSurface, ddsd.dwWidth, ddsd.dwHeight, ddsd.lPitch, drawCoordsBld.x, drawCoordsBld.y + 3, w, h, colorref_conv[c], true);
+
+#ifdef NOSURFACES				
+			}
+#endif
+			//#endif
+
+			if (pic.pic == NULL)
+			{
+				if (!missingimages[*rules.sections["BuildingTypes"].GetValue(m.node.type)])
+				{
+					SetError(GetLanguageStringACP("LoadingGraphics"));
+					theApp.m_loading->LoadUnitGraphic(*rules.sections["BuildingTypes"].GetValue(m.node.type));
+					::Map->UpdateBuildingInfo(*rules.sections["BuildingTypes"].GetValue(m.node.type));
+					pic = buildinginfo[id].pic[0];
+				}
+				if (pic.pic == NULL);
+				{
+#ifndef NOSURFACES
+					Blit(pics["HOUSE"].pic, drawCoordsBld.x, drawCoordsBld.y - 19);
+#endif
+					missingimages[*rules.sections["BuildingTypes"].GetValue(m.node.type)] = TRUE;
+				}
+			}
+
+
+			if (pic.pic) // picture
+			{
+				const auto drawCoordsBldShp = drawCoordsBld + ProjectedVec(f_x / 2 - pic.wMaxWidth / 2, -pic.wMaxHeight / 2);
+
+#ifndef NOSURFACES					
+				Blit(pic.pic, drawCoordsBldShp.x, drawCoordsBldShp.y);
+#else
+				BlitPicHalfTransp(ddsd.lpSurface, drawCoordsBldShp.x, drawCoordsBldShp.y, r.left, r.top, ddsd.lPitch, r.right, r.bottom, pic, &colorref_conv[c]);
+#endif
+			}
+		}
+
+	}
+	if (m.unit != -1)
+	{
+
+		UNIT obj;
+		Map->GetUnitData(m.unit, &obj);
+
+		COLORREF c = GetColor(obj.house);
+
+
+		CString lpPicFile = GetCachedUnitPictureFilename(obj.type, atoi(obj.direction) / 32);
+
+#ifndef NOSURFACES
+		DrawCell(drawCoords.x, drawCoords.y, 1, 1, c);
+#endif
+
+		PICDATA p = pics[lpPicFile];
+
+		if (p.pic == NULL || lpPicFile.GetLength() == 0)
+		{
+			if (!missingimages[obj.type])
+			{
+				SetError(GetLanguageStringACP("LoadingGraphics"));
+				theApp.m_loading->LoadUnitGraphic(obj.type);
+				lpPicFile = GetCachedUnitPictureFilename(obj.type, atoi(obj.direction) / 32);
+				p = pics[lpPicFile];
+			}
+
+			if (p.pic == NULL)
+			{
+#ifndef NOSURFACES
+				Blit(pics["TANK"].pic, drawCoords.x, drawCoords.y);
+				// TextOut(drawx+f_x/4,drawy+f_y/4, obj.type,c);
+				m_texts_to_render.push_back({ obj.type, drawCoords.x + f_x / 4, drawCoords.y + f_y / 4, m_color_converter->GetColor(c)});
+#endif
+				missingimages[obj.type] = TRUE;
+			}
+		}
+
+		if (p.pic)// we have a picture!
+		{
+			const auto drawCoordsOffset = (p.bType == PICDATA_TYPE_BMP) ? ProjectedVec((f_y / 4) + p.x, (f_y - p.wHeight) + p.y) - p.drawOffset() :
+				(p.bType == PICDATA_TYPE_SHP) ? ProjectedVec(f_x / 2 - (p.wMaxWidth / 2), f_y / 2 - (p.wMaxHeight / 2)) : ProjectedVec(f_x / 2, f_y / 2) + p.drawOffset();
+			auto drawCoordsUnit = drawCoords + drawCoordsOffset;
+
+#ifndef NOSURFACES
+			Blit(p.pic, drawCoordsUnit.x, drawCoordsUnit.y);
+#else
+			BlitPic(ddsd.lpSurface, drawCoordsUnit.x, drawCoordsUnit.y, r.left, r.top, ddsd.lPitch, r.right, r.bottom, p, &colorref_conv[c]);
+#endif
+		}
+	}
+	if (m.aircraft != -1)
+	{
+		last_succeeded_operation = 10102;
+
+		AIRCRAFT obj;
+		Map->GetAircraftData(m.aircraft, &obj);
+
+		COLORREF c = GetColor(obj.house);
+
+
+		CString lpPicFile = GetCachedUnitPictureFilename(obj.type, atoi(obj.direction) / 32);
+
+#ifndef NOSURFACES
+		DrawCell(drawCoords.x, drawCoords.y, 1, 1, c);
+#endif
+
+		PICDATA p = pics[lpPicFile];
+
+		if (p.pic == NULL)
+		{
+			if (!missingimages[obj.type])
+			{
+				SetError(GetLanguageStringACP("LoadingGraphics"));
+				theApp.m_loading->LoadUnitGraphic(obj.type);
+				p = pics[lpPicFile];
+			}
+
+			if (p.pic == NULL)
+			{
+#ifndef NOSURFACES
+				Blit(pics["TANK"].pic, drawCoords.x, drawCoords.y);
+				//TextOut(drawx+f_x/4,drawy+f_y/4, obj.type,c);
+				m_texts_to_render.push_back({ obj.type, drawCoords.x + f_x / 4, drawCoords.y + f_y / 4, m_color_converter->GetColor(c) });
+#endif
+				missingimages[obj.type] = TRUE;
+			}
+		}
+
+		if (p.pic)// we have a picture!
+		{
+			const auto drawCoordsOffset = (p.bType == PICDATA_TYPE_BMP) ? ProjectedVec(f_x / 2 - p.wWidth / 2, f_y - p.wHeight) - p.drawOffset() :
+				(p.bType == PICDATA_TYPE_SHP) ? ProjectedVec(f_x / 2 - (p.wMaxWidth / 2), f_y / 2 - (p.wMaxHeight / 2)) : ProjectedVec(f_x / 2, f_y / 2) + p.drawOffset();
+			auto drawCoordsAir = drawCoords + drawCoordsOffset;
+
+#ifndef NOSURFACES
+			Blit(p.pic, drawCoordsAir.x, drawCoordsAir.y);
+#else
+			BlitPic(ddsd.lpSurface, drawCoordsAir.x, drawCoordsAir.y, r.left, r.top, ddsd.lPitch, r.right, r.bottom, p, &colorref_conv[c]);
+#endif
+		}
+	}
+	int ic;
+	for (ic = 0;ic < SUBPOS_COUNT;ic++)
+		if (m.infantry[ic] != -1)
+		{
+			last_succeeded_operation = 10103;
+
+			//errstream << "GetInfantryData()" << endl;
+			//errstream.flush();
+
+			INFANTRY obj;
+			Map->GetInfantryData(m.infantry[ic], &obj);
+
+			//errstream << "Done " << (LPCSTR)obj.type << endl;
+			//errstream.flush();
+
+
+			COLORREF c = GetColor(obj.house);
+
+					
+			int dir = (7 - atoi(obj.direction) / 32) % 8;
+			CString lpPicFile = GetCachedUnitPictureFilename(obj.type, dir);
+
+#ifndef NOSURFACES
+			DrawCell(drawCoords.x, drawCoords.y, 1, 1, c);
+#endif
+
+			static const ProjectedVec subPosLookup[5] = { ProjectedVec(0, -f_y / 4), ProjectedVec(f_x / 4 , 0), ProjectedVec(-f_x / 4, 0), ProjectedVec(0, f_y / 4), ProjectedVec()};
+			auto drawCoordsInf = drawCoords + subPosLookup[ic > 4 ? 4 : ic];
+
+			PICDATA p = pics[lpPicFile];
+
+			if (p.pic == NULL)
+			{
+				if (!missingimages[obj.type])
+				{
+					SetError(GetLanguageStringACP("LoadingGraphics"));
+					theApp.m_loading->LoadUnitGraphic(obj.type);
+					p = pics[lpPicFile];
+				}
+
+				if (p.pic == NULL)
+				{
+#ifndef NOSURFACES
+					Blit(pics["MAN"].pic, drawCoordsInf.x, drawCoordsInf.y);
+					// TextOut(drawx+f_x/4,drawy+f_y/4, obj.type,c);
+					m_texts_to_render.push_back({ obj.type, drawCoordsInf.x + f_x / 4, drawCoordsInf.y + f_y / 4, RGB(0,0,0) });
+#endif
+					missingimages[obj.type] = TRUE;
+				}
+			}
+
+
+
+			if (p.pic)// we have a picture!
+			{
+				auto drawCoordsInfShp = drawCoordsInf + ProjectedVec(f_x / 2 - (p.wMaxWidth / 2), f_y / 2 - (p.wMaxHeight / 2));
+
+#ifndef NOSURFACES
+				Blit(p.pic, drawCoordsInfShp.x, drawCoordsInfShp.y, p.wWidth, p.wHeight);
+#else
+				BlitPic(ddsd.lpSurface, drawCoordsInfShp.x, drawCoordsInfShp.y, r.left, r.top, ddsd.lPitch, r.right, r.bottom, p, &colorref_conv[c]);
+#endif
+
+			}
+
+		}
+	if (m.terrain != -1)
+	{
+		last_succeeded_operation = 10104;
+
+
+		int id = m.terraintype;
+		int w = 1, h = 1;
+		PICDATA pic;
+		if (id > -1 && id < 0x0F00)
+		{
+			w = treeinfo[id].w;
+			h = treeinfo[id].h;
+			pic = treeinfo[id].pic;
+		}
+
+		//CString lpPicFile=GetUnitPictureFilename(type, 0);				
+
+		if (pic.pic == NULL)
+		{
+			CString type;
+			Map->GetTerrainData(m.terrain, &type);
+
+			if (missingimages.find(type) == missingimages.end())
+			{
+				SetError(GetLanguageStringACP("LoadingGraphics"));
+				theApp.m_loading->LoadUnitGraphic(type);
+				::Map->UpdateTreeInfo(type);
+				pic = treeinfo[id].pic;
+			}
+			if (pic.pic == NULL)
+			{
+#ifndef NOSURFACES
+				Blit(pics["TREE"].pic, drawCoords.x, drawCoords.y - 19);
+#endif
+				missingimages[type] = TRUE;
+			}
+		}
+
+		if (pic.pic);
+		{
+
+			auto drawCoordsTerrain = drawCoords + ProjectedVec(f_x / 2 - (pic.wMaxWidth / 2), f_y / 2 - 3 - (pic.wMaxHeight / 2));
+
+#ifndef NOSURFACES
+			Blit(pic.pic, drawCoordsTerrain.x, drawCoordsTerrain.y);
+#else
+			BlitPic(ddsd.lpSurface, drawCoordsTerrain.x, drawCoordsTerrain.y, r.left, r.top, ddsd.lPitch, r.right, r.bottom, pic);
+
+#endif
+
+
+		}
+
+	}
+
+
+#ifdef SMUDGE_SUPP
+	if (m.smudge != -1)
+	{
+		last_succeeded_operation = 10104;
+
+
+		int id = m.smudgetype;
+
+		PICDATA pic;
+		if (id > -1 && id < 0x0F00)
+		{
+			pic = smudgeinfo[id].pic;
+		}
+
+		if (pic.pic == NULL)
+		{
+			SMUDGE data;
+			CString& type = data.type;
+			Map->GetSmudgeData(m.smudge, &data);
+
+			if (missingimages.find(type) == missingimages.end())
+			{
+				SetError(GetLanguageStringACP("LoadingGraphics"));
+				theApp.m_loading->LoadUnitGraphic(type);
+				::Map->UpdateSmudgeInfo(type);
+				pic = smudgeinfo[id].pic;
+			}
+			if (pic.pic == NULL)
+			{
+#ifndef NOSURFACES
+				// Blit(pics["TREE"].pic,drawCoords.x,drawCoords.y-19);
+#endif
+				missingimages[type] = TRUE;
+			}
+		}
+
+		if (pic.pic)
+		{
+			auto drawCoordsSmudge = drawCoords + ProjectedVec(f_x / 2 - (pic.wMaxWidth / 2), /*f_y / 2 - 3*/ - (pic.wMaxHeight / 2));
+
+#ifndef NOSURFACES
+			Blit(pic.pic, drawCoordsSmudge.x, drawCoordsSmudge.y);
+#else
+			BlitPic(ddsd.lpSurface, drawCoordsSmudge.x, drawCoordsSmudge.y, r.left, r.top, ddsd.lPitch, r.right, r.bottom, pic);
+
+#endif
+
+
+		}
+
+	}
+#endif
+
+
+	if (m.celltag != -1)
+	{
+
+#ifdef NOSURFACES
+	if (!ctx.bPanMode)
+		lpdsBack->Unlock(NULL);
+#endif
+	if (ctx.bPanMode)
+	{
+		m_celltags_to_render.push_back(ProjectedCoords(drawCoords.x, drawCoords.y));
+	}
+	else
+	{
+		Blit((LPDIRECTDRAWSURFACE4)pics["CELLTAG"].pic, drawCoords.x - 1, drawCoords.y - 1);
+
+#ifdef NOSURFACES
+		lpdsBack->Lock(NULL, &ddsd, DDLOCK_SURFACEMEMORYPTR | DDLOCK_WAIT | DDLOCK_NOSYSLOCK, NULL);
+#endif
+	}
+	}
+
+	if (m.waypoint != -1)
+	{
+
+		DWORD dwPos;
+		CString ID;
+		Map->GetWaypointData(m.waypoint, &ID, &dwPos);
+#ifdef NOSURFACES
+		if (!ctx.bPanMode)
+			lpdsBack->Unlock(NULL);
+#endif
+
+		// move the graphic and text into place
+#ifdef RA2_MODE
+		int image_fudge_x = 4;
+		int image_fudge_y = -20;
+		int text_fudge_x = 12;
+		int text_fudge_y = -24;
+#else
+		int image_fudge_x = 4;
+		int image_fudge_y = -15;
+		int text_fudge_x = 9;
+		int text_fudge_y = -17;
+#endif
+
+		const ProjectedVec waypointImageOffset(image_fudge_x, image_fudge_y);
+		const ProjectedVec waypointTextOffset((f_x / 2) + text_fudge_x, (f_y / 2) + text_fudge_y);
+#ifdef RA2_MODE
+		bool useFont9 = false;
+#else
+		bool useFont9 = true;
+#endif
+		const auto waypointImageCoords = ProjectedCoords({ drawCoords.x, drawCoords.y }) + waypointImageOffset;
+		const auto waypointTextCoords = ProjectedCoords({ drawCoords.x, drawCoords.y }) + waypointTextOffset;
+		m_waypoints_to_render.push_back({ waypointImageCoords.x, waypointImageCoords.y });
+		m_texts_to_render.push_back({ ID.GetString(), waypointTextCoords.x, waypointTextCoords.y, RGB(0,0,255), false, useFont9, true});
+#ifdef NOSURFACES
+		if (!ctx.bPanMode)
+			lpdsBack->Lock(NULL, &ddsd, DDLOCK_SURFACEMEMORYPTR | DDLOCK_WAIT | DDLOCK_NOSYSLOCK, NULL);
+#endif
+	}
+}
+
+
+bool CIsoView::DrawMapPan(int left, int right, int top, int bottom, DWORD MM_heightstart, BOOL bMarbleHeight)
+{
+	if (!m_lastFrameValid || lpdsTemp == nullptr || bCancelDraw)
+		return false;
+
+	const size_t picsCountAtFrameStart = pics.size();
+
+	const ProjectedVec delta = m_viewOffset - m_lastViewOffset;
+	if (delta.x == 0 && delta.y == 0)
+		return true;  // nothing moved, caller considers the frame done
+
+	RECT r = GetScaledDisplayRect();
+	const int windowWidth = r.right - r.left;
+	const int windowHeight = r.bottom - r.top;
+
+	// the already drawn content shifts by the negative delta; for large jumps a full redraw is cheaper/cleaner
+	const int sx = -delta.x;
+	const int sy = -delta.y;
+	if (abs(sx) > windowWidth / 2 || abs(sy) > windowHeight / 2)
+		return false;
+
+	SurfaceLocker locker(lpdsTemp);
+	DDSURFACEDESC2* desc = locker.ensure_locked();
+	if (!desc || desc->lpSurface == nullptr)
+		return false;
+
+	BYTE* const surface = static_cast<BYTE*>(desc->lpSurface);
+	const int pitch = desc->lPitch;
+	const int rowBytes = windowWidth * bpp;
+
+	// shift the existing scene
+	if (sy >= 0)
+	{
+		for (int y = r.bottom - 1; y >= r.top; --y)
+		{
+			BYTE* dst = surface + (y + sy) * pitch + (r.left + sx) * bpp;
+			BYTE* src = surface + y * pitch + r.left * bpp;
+			memmove(dst, src, rowBytes);
+		}
+	}
+	else
+	{
+		for (int y = r.top; y < r.bottom; ++y)
+		{
+			BYTE* dst = surface + (y + sy) * pitch + (r.left + sx) * bpp;
+			BYTE* src = surface + y * pitch + r.left * bpp;
+			memmove(dst, src, rowBytes);
+		}
+	}
+
+	// clear the newly exposed L-shaped region with the background color
+	auto fillRectWhite = [&](int x0, int y0, int x1, int y1)
+	{
+		if (x1 <= x0 || y1 <= y0) return;
+		if (bpp == 4)
+		{
+			for (int y = y0; y < y1; ++y)
+				memset(surface + y * pitch + x0 * bpp, 0xFF, (x1 - x0) * bpp);
+		}
+		else
+		{
+			const int white = m_color_converter->GetColor(RGB(255, 255, 255));
+			for (int y = y0; y < y1; ++y)
+				for (int x = x0; x < x1; ++x)
+					memcpy(surface + y * pitch + x * bpp, &white, bpp);
+		}
+	};
+
+	if (sx > 0) fillRectWhite(r.left, r.top, r.left + sx, r.bottom);
+	else if (sx < 0) fillRectWhite(r.right + sx, r.top, r.right, r.bottom);
+	if (sy > 0) fillRectWhite(r.left, r.top, r.right, r.top + sy);
+	else if (sy < 0) fillRectWhite(r.left, r.bottom + sy, r.right, r.bottom);
+
+	// exposed strip bands (in surface coordinates)
+	RECT stripX;
+	stripX.top = r.top;
+	stripX.bottom = r.bottom;
+	if (sx > 0) { stripX.left = r.left; stripX.right = min(r.right, r.left + sx); }
+	else { stripX.left = max(r.left, r.right + sx); stripX.right = r.right; }
+
+	RECT stripY;
+	stripY.left = r.left;
+	stripY.right = r.right;
+	if (sy > 0) { stripY.top = r.top; stripY.bottom = min(r.bottom, r.top + sy); }
+	else { stripY.top = max(r.top, r.bottom + sy); stripY.bottom = r.bottom; }
+
+	// margin around the exposed region so that tall sprites crossing the border get redrawn too
+	const int marginX = 8 * f_x;
+	const int marginY = 8 * f_y;
+	RECT stripXExp = stripX;
+	if (stripXExp.left < stripXExp.right)
+	{
+		stripXExp.left = max(r.left, stripXExp.left - marginX);
+		stripXExp.right = min(r.right, stripXExp.right + marginX);
+	}
+	RECT stripYExp = stripY;
+	if (stripYExp.top < stripYExp.bottom)
+	{
+		stripYExp.top = max(r.top, stripYExp.top - marginY);
+		stripYExp.bottom = min(r.bottom, stripYExp.bottom + marginY);
+	}
+
+	// the terrain pass uses a slightly inflated region, as tiles can stick out of their cell bounds
+	RECT stripXTerrain = stripX;
+	if (stripXTerrain.left < stripXTerrain.right)
+	{
+		stripXTerrain.left = max(r.left, stripXTerrain.left - f_x);
+		stripXTerrain.right = min(r.right, stripXTerrain.right + f_x);
+	}
+	RECT stripYTerrain = stripY;
+	if (stripYTerrain.top < stripYTerrain.bottom)
+	{
+		stripYTerrain.top = max(r.top, stripYTerrain.top - f_y);
+		stripYTerrain.bottom = min(r.bottom, stripYTerrain.bottom + f_y);
+	}
+
+	const DrawMapCellContext ctx = { *desc, r, MM_heightstart, bMarbleHeight, true };
+
+	const int mapwidth = Map->GetWidth();
+	const int mapheight = Map->GetHeight();
+
+	auto cellInBounds = [&](int u, int v)
+	{
+		return !(u < 1 || v < 1 || u + v < mapwidth + 1 || u + v > mapwidth + mapheight * 2 || (v + 1 > mapwidth && u - 1 < v - mapwidth) || (u + 1 > mapwidth && v + mapwidth - 1 < u));
+	};
+
+	auto overlapsStrip = [&](int x0, int y0, int x1, int y1, const RECT& bandA, const RECT& bandB)
+	{
+		auto overlap = [](const RECT& band, int bx0, int by0, int bx1, int by1)
+		{
+			if (band.left >= band.right || band.top >= band.bottom) return false;
+			return bx0 < band.right && bx1 > band.left && by0 < band.bottom && by1 > band.top;
+		};
+		return overlap(bandA, x0, y0, x1, y1) || overlap(bandB, x0, y0, x1, y1);
+	};
+
+	// move the already collected texts/waypoints/celltags along with the map content
+	for (auto& t : m_texts_to_render)
+	{
+		if (!t.fixedScreenPos)
+		{
+			t.drawx -= delta.x;
+			t.drawy -= delta.y;
+		}
+	}
+	m_texts_to_render.erase(
+		std::remove_if(m_texts_to_render.begin(), m_texts_to_render.end(), [&](const TextToRender& t)
+			{
+				return !t.fixedScreenPos && (t.drawx < r.left - 512 || t.drawy < r.top - 512 || t.drawx > r.right + 512 || t.drawy > r.bottom + 512);
+			}),
+		m_texts_to_render.end());
+
+	for (auto& w : m_waypoints_to_render)
+	{
+		w.drawx -= delta.x;
+		w.drawy -= delta.y;
+	}
+	m_waypoints_to_render.erase(
+		std::remove_if(m_waypoints_to_render.begin(), m_waypoints_to_render.end(), [&](const WaypointToRender& w)
+			{
+				return w.drawx < r.left - 512 || w.drawy < r.top - 512 || w.drawx > r.right + 512 || w.drawy > r.bottom + 512;
+			}),
+		m_waypoints_to_render.end());
+
+	for (auto& c : m_celltags_to_render)
+	{
+		c.x -= delta.x;
+		c.y -= delta.y;
+	}
+	m_celltags_to_render.erase(
+		std::remove_if(m_celltags_to_render.begin(), m_celltags_to_render.end(), [&](const ProjectedCoords& c)
+			{
+				return c.x < r.left - 512 || c.y < r.top - 512 || c.x > r.right + 512 || c.y > r.bottom + 512;
+			}),
+		m_celltags_to_render.end());
+
+	// pass 1: terrain of the newly exposed cells
+	for (int u = left; u < right; ++u)
+	{
+		for (int v = top; v < bottom; ++v)
+		{
+			if (!cellInBounds(u, v)) continue;
+
+			const MapCoords mapCoords(u, v);
+			FIELDDATA m = *Map->GetFielddataAt(mapCoords);
+			const auto drawCoords = GetRenderTargetCoordinates(mapCoords);
+			const int x0 = drawCoords.x;
+			const int y0 = drawCoords.y;
+
+			if (!overlapsStrip(x0, y0, x0 + f_x, y0 + f_y, stripXTerrain, stripYTerrain))
+				continue;
+
+			if (m.wGround >= (*tiledata_count))
+				m.wGround = 0;
+
+			if (!m.bRedrawTerrain)
+				DrawMapTerrainCell(m, drawCoords, ctx);
+		}
+	}
+
+	// pass 2: cliffs, overlays and objects of the exposed cells plus a margin around them
+	for (int u = left; u < right; ++u)
+	{
+		for (int v = top; v < bottom; ++v)
+		{
+			if (!cellInBounds(u, v)) continue;
+
+			const MapCoords mapCoords(u, v);
+			FIELDDATA m = *Map->GetFielddataAt(mapCoords);
+			const auto drawCoords = GetRenderTargetCoordinates(mapCoords);
+			const int x0 = drawCoords.x;
+			const int y0 = drawCoords.y;
+
+			if (!overlapsStrip(x0, y0, x0 + f_x, y0 + f_y, stripXExp, stripYExp))
+				continue;
+
+			if (m.wGround == 0xFFFF)
+				m.wGround = 0;
+
+			const DWORD dwOrigGround = m.wGround;
+
+			if (m.bRedrawTerrain)
+				DrawMapTerrainCell(m, drawCoords, ctx);
+
+			DrawMapTerrainAnim(m, drawCoords, ctx, dwOrigGround);
+			DrawMapObjectsCell(mapCoords, m, drawCoords, ctx);
+		}
+	}
+
+	// tubes may cross the exposed region
+	for (const auto& tube : Map->GetTubes())
+	{
+		DrawTube(*tube, desc);
+	}
+
+	locker.ensure_unlocked();
+
+	// copy the shifted + patched scene to the back buffer
+	lpdsBack->Blt(NULL, lpdsTemp, NULL, 0, 0);
+
+	// deferred celltags of the exposed region
+	for (const auto& pos : m_celltags_to_render)
+	{
+		Blit((LPDIRECTDRAWSURFACE4)pics["CELLTAG"].pic, pos.x - 1, pos.y - 1);
+	}
+
+	// waypoint flags
+	for (const auto& wp : m_waypoints_to_render)
+	{
+		Blit((LPDIRECTDRAWSURFACE4)pics["FLAG"].pic, wp.drawx, wp.drawy);
+	}
+
+	if (m_cellCursor != MapCoords(-1, -1))
+	{
+		SurfaceLocker lockerBack(lpdsBack);
+		auto backDesc = lockerBack.ensure_locked();
+		if (backDesc)
+			DrawCellCursor(m_cellCursor, *backDesc);
+	}
+
+	if (rscroll)
+	{
+		const auto& sc = pics["SCROLLCURSOR"];
+		Blit((LPDIRECTDRAWSURFACE4)sc.pic, rclick_x * m_viewScale.x + r.left - sc.wWidth / 2, rclick_y * m_viewScale.y + r.top - sc.wHeight / 2);
+	}
+
+	BlitBackbufferToHighRes();
+	RenderUIOverlay();
+	if (theApp.m_Options.bVSync)
+		dd->WaitForVerticalBlank(DDWAITVB_BLOCKBEGIN, NULL);
+	FlipHighResBuffer();
+	last_succeeded_operation = 10100;
+
+	m_lastViewOffset = m_viewOffset;
+	m_lastFrameValid = true;
+
+	if (pics.size() != picsCountAtFrameStart)
+		m_picFileCache.clear();
+
+	return true;
+}
+
 
 void CIsoView::RenderUIOverlay()
 {
@@ -6720,6 +7038,7 @@ void CIsoView::OnKillFocus(CWnd* pNewWnd)
 
 		ReleaseCapture();
 		KillTimer(11);
+		m_bPanFastPath = FALSE;
 		ShowCursor(TRUE);
 		rscroll = FALSE;
 		bDoNotAllowScroll = TRUE;

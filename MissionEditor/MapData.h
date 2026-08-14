@@ -688,6 +688,7 @@ protected:
 	vector<TERRAIN> m_terrain;
 	vector<INFANTRY> m_infantry;
 	vector<UNIT> m_units;
+	vector<AIRCRAFT> m_aircraft;
 	vector<STRUCTURE> m_structures;
 
 	// we use a dib to draw the minimap

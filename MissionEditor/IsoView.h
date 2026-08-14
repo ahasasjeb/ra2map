@@ -35,6 +35,8 @@
 
 #include <vector>
 #include <memory>
+#include <map>
+#include <string>
 #include "MissionEditorPackLib.h"
 #include "Structs.h"
 
@@ -50,6 +52,8 @@ struct TextToRender
 	bool useFont9 = false;
 	bool centered = false;
 };
+
+struct FIELDDATA;
 
 struct WaypointToRender
 {
@@ -93,6 +97,14 @@ private:
 
 	std::vector<TextToRender> m_texts_to_render;
 	std::vector<WaypointToRender> m_waypoints_to_render;
+	std::vector<ProjectedCoords> m_celltags_to_render;
+	std::map<CString, COLORREF> m_colorCache;  // per-frame house color cache, cleared at DrawMap start
+	std::map<std::string, CString> m_picFileCache;  // (unit type + direction) -> picture filename
+
+	// incremental pan fast-path state
+	BOOL m_bPanFastPath = FALSE;   // next DrawMap should use the incremental pan path
+	bool m_lastFrameValid = false; // a full/pan frame was rendered successfully before
+	ProjectedVec m_lastViewOffset; // view offset of the last rendered frame
 
 	
 
@@ -157,6 +169,18 @@ public:
 	void GetScroll(int& xscroll, int& yscroll) const;
 	void SetScroll(int xscroll, int yscroll);
 	void DrawMap();
+	bool DrawMapPan(int left, int right, int top, int bottom, DWORD MM_heightstart, BOOL bMarbleHeight);
+	struct DrawMapCellContext
+	{
+		DDSURFACEDESC2& ddsd;
+		RECT r;
+		DWORD MM_heightstart;
+		BOOL bMarbleHeight;
+		bool bPanMode;
+	};
+	void DrawMapTerrainCell(FIELDDATA& m, const ProjectedCoords& drawCoords, const DrawMapCellContext& ctx);
+	void DrawMapTerrainAnim(FIELDDATA& m, const ProjectedCoords& drawCoords, const DrawMapCellContext& ctx, DWORD dwOrigGround);
+	void DrawMapObjectsCell(const MapCoords& mapCoords, FIELDDATA& m, const ProjectedCoords& drawCoords, const DrawMapCellContext& ctx);
 	void AutoLevel();
 	void FillArea(DWORD dwX, DWORD dwY, DWORD dwID, BYTE bSubTile);
 	BOOL m_NoMove;
@@ -265,6 +289,8 @@ public:
 	CWnd* owner;
 	void ReInitializeDDraw();
 	COLORREF GetColor(const char* house, const char* color=NULL);
+	COLORREF GetColorImpl(const char* house, const char* color);
+	CString GetCachedUnitPictureFilename(LPCTSTR type, int dir);
 	void Blit(LPDIRECTDRAWSURFACE4 pic, int x, int y, int width=-1, int height=-1)
 	{
 		if(pic==NULL) return;

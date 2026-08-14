@@ -1614,6 +1614,7 @@ void CMapData::UpdateAircraft(BOOL bSave)
 			fielddata[i].aircraft = -1;
 		}
 
+		m_aircraft.clear();
 
 		if (m_mapfile.sections.find("Aircraft") != m_mapfile.sections.end())
 		{
@@ -1621,10 +1622,28 @@ void CMapData::UpdateAircraft(BOOL bSave)
 
 			for (i = 0;i < sec.values.size();i++)
 			{
-				int x = atoi(GetParam(*sec.GetValue(i), 4));
-				int y = atoi(GetParam(*sec.GetValue(i), 3));
+				CString data = *sec.GetValue(i);
+
+				int x = atoi(GetParam(data, 4));
+				int y = atoi(GetParam(data, 3));
 				int pos = x + y * GetIsoSize();
 				if (pos < fielddata_size) fielddata[pos].aircraft = i;
+
+				AIRCRAFT a;
+				a.deleted = 0;
+				a.house = GetParam(data, 0);
+				a.type = GetParam(data, 1);
+				a.strength = GetParam(data, 2);
+				a.y = GetParam(data, 3);
+				a.x = GetParam(data, 4);
+				a.direction = GetParam(data, 5);
+				a.action = GetParam(data, 6);
+				a.tag = GetParam(data, 7);
+				a.flag1 = GetParam(data, 8);
+				a.flag2 = GetParam(data, 9);
+				a.flag3 = GetParam(data, 10);
+				a.flag4 = GetParam(data, 11);
+				m_aircraft.push_back(a);
 
 				Mini_UpdatePos(x, y, IsMultiplayer());
 			}
@@ -1805,6 +1824,7 @@ void CMapData::UpdateUnits(BOOL bSave)
 			fielddata[i].unit = -1;
 		}
 
+		m_units.clear();
 
 		if (m_mapfile.sections.find("Units") != m_mapfile.sections.end())
 		{
@@ -1812,10 +1832,30 @@ void CMapData::UpdateUnits(BOOL bSave)
 
 			for (i = 0;i < sec.values.size();i++)
 			{
-				int x = atoi(GetParam(*sec.GetValue(i), 4));
-				int y = atoi(GetParam(*sec.GetValue(i), 3));
+				CString data = *sec.GetValue(i);
+
+				int x = atoi(GetParam(data, 4));
+				int y = atoi(GetParam(data, 3));
 				int pos = x + y * GetIsoSize();
 				if (pos < fielddata_size) fielddata[pos].unit = i;
+
+				UNIT u;
+				u.deleted = 0;
+				u.house = GetParam(data, 0);
+				u.type = GetParam(data, 1);
+				u.strength = GetParam(data, 2);
+				u.y = GetParam(data, 3);
+				u.x = GetParam(data, 4);
+				u.direction = GetParam(data, 5);
+				u.action = GetParam(data, 6);
+				u.tag = GetParam(data, 7);
+				u.flag1 = GetParam(data, 8);
+				u.flag2 = GetParam(data, 9);
+				u.flag3 = GetParam(data, 10);
+				u.flag4 = GetParam(data, 11);
+				u.flag5 = GetParam(data, 12);
+				u.flag6 = GetParam(data, 13);
+				m_units.push_back(u);
 
 				Mini_UpdatePos(x, y, IsMultiplayer());
 			}
@@ -2649,48 +2689,18 @@ void CMapData::GetInfantryData(DWORD dwIndex, INFANTRY* lpInfantry) const
 
 void CMapData::GetUnitData(DWORD dwIndex, UNIT* lpUnit) const
 {
-	const auto section = m_mapfile.GetSection("Units");
-	if (!section || dwIndex >= section->values.size())
+	if (dwIndex >= m_units.size())
 		return;
 
-	CString data = *section->GetValue(dwIndex);
-
-	lpUnit->house = GetParam(data, 0);
-	lpUnit->type = GetParam(data, 1);
-	lpUnit->strength = GetParam(data, 2);
-	lpUnit->y = GetParam(data, 3);
-	lpUnit->x = GetParam(data, 4);
-	lpUnit->direction = GetParam(data, 5);
-	lpUnit->action = GetParam(data, 6);
-	lpUnit->tag = GetParam(data, 7);
-	lpUnit->flag1 = GetParam(data, 8);
-	lpUnit->flag2 = GetParam(data, 9);
-	lpUnit->flag3 = GetParam(data, 10);
-	lpUnit->flag4 = GetParam(data, 11);
-	lpUnit->flag5 = GetParam(data, 12);
-	lpUnit->flag6 = GetParam(data, 13);
+	*lpUnit = m_units[dwIndex];
 }
 
 void CMapData::GetAircraftData(DWORD dwIndex, AIRCRAFT* lpAircraft) const
 {
-	const auto section = m_mapfile.GetSection("Aircraft");
-	if (!section || dwIndex >= section->values.size())
+	if (dwIndex >= m_aircraft.size())
 		return;
 
-	CString data = *section->GetValue(dwIndex);
-
-	lpAircraft->house = GetParam(data, 0);
-	lpAircraft->type = GetParam(data, 1);
-	lpAircraft->strength = GetParam(data, 2);
-	lpAircraft->y = GetParam(data, 3);
-	lpAircraft->x = GetParam(data, 4);
-	lpAircraft->direction = GetParam(data, 5);
-	lpAircraft->action = GetParam(data, 6);
-	lpAircraft->tag = GetParam(data, 7);
-	lpAircraft->flag1 = GetParam(data, 8);
-	lpAircraft->flag2 = GetParam(data, 9);
-	lpAircraft->flag3 = GetParam(data, 10);
-	lpAircraft->flag4 = GetParam(data, 11);
+	*lpAircraft = m_aircraft[dwIndex];
 }
 
 BOOL CMapData::AddCelltag(LPCTSTR lpTag, DWORD dwPos)
