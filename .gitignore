@@ -70,3 +70,4 @@ vcpkg_installed/
 vcpkg_downloads/
 [Tt]emplate/
 心理终结地图编辑器/
+.venv/
