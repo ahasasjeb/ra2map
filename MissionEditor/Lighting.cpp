@@ -90,16 +90,18 @@ void CLighting::UpdateDialog()
 {
 	CIniFile& ini=Map->GetIniFile();
 
-	m_Ambient.SetWindowText(ini.sections["Lighting"].values["Ambient"]);
-	m_Ambient2.SetWindowText(ini.sections["Lighting"].values["IonAmbient"]);
-	m_Level.SetWindowText(ini.sections["Lighting"].values["Level"]);
-	m_Level2.SetWindowText(ini.sections["Lighting"].values["IonLevel"]);
-	m_Red.SetWindowText(ini.sections["Lighting"].values["Red"]);
-	m_Red2.SetWindowText(ini.sections["Lighting"].values["IonRed"]);
-	m_Green.SetWindowText(ini.sections["Lighting"].values["Green"]);
-	m_Green2.SetWindowText(ini.sections["Lighting"].values["IonGreen"]);
-	m_Blue.SetWindowText(ini.sections["Lighting"].values["Blue"]);
-	m_Blue2.SetWindowText(ini.sections["Lighting"].values["IonBlue"]);
+	// use the const accessor: reading missing keys must not insert empty values,
+	// they would end up in the saved map file otherwise
+	m_Ambient.SetWindowText(ini.GetValueByName("Lighting", "Ambient", CString()));
+	m_Ambient2.SetWindowText(ini.GetValueByName("Lighting", "IonAmbient", CString()));
+	m_Level.SetWindowText(ini.GetValueByName("Lighting", "Level", CString()));
+	m_Level2.SetWindowText(ini.GetValueByName("Lighting", "IonLevel", CString()));
+	m_Red.SetWindowText(ini.GetValueByName("Lighting", "Red", CString()));
+	m_Red2.SetWindowText(ini.GetValueByName("Lighting", "IonRed", CString()));
+	m_Green.SetWindowText(ini.GetValueByName("Lighting", "Green", CString()));
+	m_Green2.SetWindowText(ini.GetValueByName("Lighting", "IonGreen", CString()));
+	m_Blue.SetWindowText(ini.GetValueByName("Lighting", "Blue", CString()));
+	m_Blue2.SetWindowText(ini.GetValueByName("Lighting", "IonBlue", CString()));
 	//MessageBox(ini.sections["Lightning"].values["Ambient"]);
 }
 

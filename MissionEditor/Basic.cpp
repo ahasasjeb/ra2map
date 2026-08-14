@@ -122,35 +122,31 @@ void CBasic::UpdateDialog()
 {
 	CIniFile& ini=Map->GetIniFile();
 
-	m_AltNextScenario.SetWindowText(ini.sections["Basic"].values["AltNextScenario"]);
-	m_Name.SetWindowText(ini.sections["Basic"].values["Name"]);
-	m_CarryOverCap.SetWindowText(ini.sections["Basic"].values["CarryOverCap"]);
-	m_EndOfGame.SetWindowText(ini.sections["Basic"].values["EndOfGame"]);
-	m_FreeRadar.SetWindowText(ini.sections["Basic"].values["FreeRadar"]);
-	m_IceGrowthEnabled.SetWindowText(ini.sections["Basic"].values["IceGrowthEnabled"]);
-	m_IgnoreGlobalAITriggers.SetWindowText(ini.sections["Basic"].values["IgnoreGlobalAITriggers"]);
-	m_InitTime.SetWindowText(ini.sections["Basic"].values["InitTime"]);
-	m_MultiplayerOnly.SetWindowText(ini.sections["Basic"].values["MultiplayerOnly"]);
-	m_NewINIFormat.SetWindowText(ini.sections["Basic"].values["NewINIFormat"]);
-	m_NextScenario.SetWindowText(ini.sections["Basic"].values["NextScenario"]);
-	m_Official.SetWindowText(ini.sections["Basic"].values["Official"]);
-	m_OneTimeOnly.SetWindowText(ini.sections["Basic"].values["OneTimeOnly"]);
-	m_Percent.SetWindowText(ini.sections["Basic"].values["Percent"]);
-	m_SkipMapSelect.SetWindowText(ini.sections["Basic"].values["SkipMapSelect"]);
-	m_SkipScore.SetWindowText(ini.sections["Basic"].values["SkipScore"]);
-	m_TiberiumDeathToVisceroid.SetWindowText(ini.sections["Basic"].values["TiberiumDeathToVisceroid"]);
-	m_TiberiumGrowthEnabled.SetWindowText(ini.sections["Basic"].values["TiberiumGrowthEnabled"]);
-	m_TrainCrate.SetWindowText(ini.sections["Basic"].values["TrainCrate"]);
-	m_TruckCrate.SetWindowText(ini.sections["Basic"].values["TruckCrate"]);
-	m_VeinGrowthEnabled.SetWindowText(ini.sections["Basic"].values["VeinGrowthEnabled"]);
+	// use the const accessor: reading missing keys must not insert empty values,
+	// they would end up in the saved map file otherwise
+	m_AltNextScenario.SetWindowText(ini.GetValueByName("Basic", "AltNextScenario", CString()));
+	m_Name.SetWindowText(ini.GetValueByName("Basic", "Name", CString()));
+	m_CarryOverCap.SetWindowText(ini.GetValueByName("Basic", "CarryOverCap", CString()));
+	m_EndOfGame.SetWindowText(ini.GetValueByName("Basic", "EndOfGame", CString()));
+	m_FreeRadar.SetWindowText(ini.GetValueByName("Basic", "FreeRadar", CString()));
+	m_IceGrowthEnabled.SetWindowText(ini.GetValueByName("Basic", "IceGrowthEnabled", CString()));
+	m_IgnoreGlobalAITriggers.SetWindowText(ini.GetValueByName("Basic", "IgnoreGlobalAITriggers", CString()));
+	m_InitTime.SetWindowText(ini.GetValueByName("Basic", "InitTime", CString()));
+	m_MultiplayerOnly.SetWindowText(ini.GetValueByName("Basic", "MultiplayerOnly", CString()));
+	m_NewINIFormat.SetWindowText(ini.GetValueByName("Basic", "NewINIFormat", CString()));
+	m_NextScenario.SetWindowText(ini.GetValueByName("Basic", "NextScenario", CString()));
+	m_Official.SetWindowText(ini.GetValueByName("Basic", "Official", CString()));
+	m_OneTimeOnly.SetWindowText(ini.GetValueByName("Basic", "OneTimeOnly", CString()));
+	m_Percent.SetWindowText(ini.GetValueByName("Basic", "Percent", CString()));
+	m_SkipMapSelect.SetWindowText(ini.GetValueByName("Basic", "SkipMapSelect", CString()));
+	m_SkipScore.SetWindowText(ini.GetValueByName("Basic", "SkipScore", CString()));
+	m_TiberiumDeathToVisceroid.SetWindowText(ini.GetValueByName("Basic", "TiberiumDeathToVisceroid", CString()));
+	m_TiberiumGrowthEnabled.SetWindowText(ini.GetValueByName("Basic", "TiberiumGrowthEnabled", CString()));
+	m_TrainCrate.SetWindowText(ini.GetValueByName("Basic", "TrainCrate", CString()));
+	m_TruckCrate.SetWindowText(ini.GetValueByName("Basic", "TruckCrate", CString()));
+	m_VeinGrowthEnabled.SetWindowText(ini.GetValueByName("Basic", "VeinGrowthEnabled", CString()));
 
-	if(ini.sections["Basic"].values.find("RequiredAddOn")!=ini.sections["Basic"].values.end())
-	{
-		m_RequiredAddOn.SetWindowText(ini.sections["Basic"].values["RequiredAddOn"]);
-	}
-	else
-		m_RequiredAddOn.SetWindowText("0");
-
+	m_RequiredAddOn.SetWindowText(ini.GetValueByName("Basic", "RequiredAddOn", "0"));
 }
 
 void CBasic::OnChangeName() 

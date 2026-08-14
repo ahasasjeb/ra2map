@@ -82,9 +82,9 @@ void CMapD::UpdateDialog()
 {
 	CIniFile& ini=Map->GetIniFile();
 
-	m_LocalSize.SetWindowText( ini.sections["Map"].values["LocalSize"] );
+	m_LocalSize.SetWindowText( ini.GetValueByName("Map", "LocalSize", CString()) );
 	//m_Size.SetWindowText( ini.sections["Map"].values["Size"] );
-	m_Theater.SetWindowText( ini.sections["Map"].values["Theater"] );
+	m_Theater.SetWindowText( ini.GetValueByName("Map", "Theater", CString()) );
 
 	char c[50];
 	itoa(Map->GetWidth(), c, 10);

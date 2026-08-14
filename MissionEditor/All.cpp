@@ -163,7 +163,7 @@ void CAll::OnSelchangeKeys()
 	CString cuKey;
 	m_Keys.GetText(m_Keys.GetCurSel(), cuKey) ;
 	
-	m_Value.SetWindowText(ini.sections[cuSection].values[cuKey]);
+	m_Value.SetWindowText(ini.GetValueByName(cuSection, cuKey, CString()));
 }
 
 void CAll::OnUpdateValue() 

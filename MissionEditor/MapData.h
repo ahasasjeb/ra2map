@@ -89,6 +89,10 @@ struct MAPFIELDDATA
 };
 #define MAPFIELDDATA_SIZE 11
 
+// the extracted overlay pack is stored in a fixed 512x512 grid, independent of the map size
+constexpr int OVERLAY_PACK_GRID_SIZE = 512;
+constexpr int OVERLAY_PACK_GRID_AREA = OVERLAY_PACK_GRID_SIZE * OVERLAY_PACK_GRID_SIZE; // 262144
+
 /*
 struct TILEDATA{};
 
@@ -132,6 +136,8 @@ struct FIELDDATA
 struct SNAPSHOTDATA
 {
 	SNAPSHOTDATA();
+	// frees all allocated field buffers and resets the pointers, safe to call multiple times
+	void Free();
 	int left;
 	int top;
 	int bottom;
@@ -658,8 +664,8 @@ private:
 #ifdef SMUDGE_SUPP
 	map<CString, int> smudgeid;
 #endif
-	BYTE m_Overlay[262144]; // overlay byte values (extracted)
-	BYTE m_OverlayData[262144]; // overlay data byte values (extracted)
+	BYTE m_Overlay[OVERLAY_PACK_GRID_AREA]; // overlay byte values (extracted)
+	BYTE m_OverlayData[OVERLAY_PACK_GRID_AREA]; // overlay data byte values (extracted)
 	BYTE* m_mfd;	// map field data buffer
 	DWORD dwIsoMapSize;
 	CIniFile m_mapfile;

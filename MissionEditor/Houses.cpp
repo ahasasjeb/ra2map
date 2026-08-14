@@ -151,9 +151,10 @@ void CHouses::UpdateDialog()
 		}
 
 		
-		if(ini.sections["Basic"].values.find("Player")!=ini.sections["Basic"].values.end())
+		const CIniFileSection* basicSec = ini.GetSection("Basic");
+		if(basicSec && basicSec->values.find("Player")!=basicSec->values.end())
 		{
-			m_HumanPlayer.SetCurSel(m_HumanPlayer.FindStringExact(0, TranslateHouse(ini.sections["Basic"].values["Player"], TRUE)));
+			m_HumanPlayer.SetCurSel(m_HumanPlayer.FindStringExact(0, TranslateHouse(basicSec->GetValueByName("Player", CString()), TRUE)));
 			
 		}
 

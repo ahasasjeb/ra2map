@@ -142,7 +142,7 @@ void CWaypoints::OnSelchangeWaypoints()
 	str.SetAt(str.Find(",",0), 0);
 
 	// ok str now specifies the waypoint id
-	m_Pos.SetWindowText(ini.sections["Waypoints"].values[(char*)(LPCTSTR)str].data());
+	m_Pos.SetWindowText(ini.GetValueByName("Waypoints", str, CString()));
 }
 
 void CWaypoints::OnKillfocusPos() 

@@ -893,24 +893,25 @@ void ListBuildings(CComboBox& cb, BOOL bININame)
 {
 	while(cb.DeleteString(0)!=CB_ERR);
 
-	int i;
-	for(i=0;i<rules.sections["BuildingTypes"].values.size();i++)
-	{
-		if(rules.sections["BuildingTypes"].GetValueOrigPos(i)<0) continue;
+	const CIniFileSection* sec = rules.GetSection("BuildingTypes");
+	if(!sec) return;
 
-		char c[50];
-		itoa(rules.sections["BuildingTypes"].GetValueOrigPos(i),c,10);
-		CString s=c;
+	for(const auto& entry : sec->values)
+	{
+		const auto origPos = sec->value_orig_pos.find(entry.first);
+		if(origPos == sec->value_orig_pos.end()) continue;
+
+		CString s=std::to_string(origPos->second).c_str();
 		
 		
 		//s+=rules.sections[*rules.sections["BuildingTypes"].GetValue(i)].values["Name"];
 		//s+=Map->GetUnitName(*rules.sections["BuildingTypes"].GetValue(i));
 		
-		if(bININame) s=*rules.sections["BuildingTypes"].GetValue(i);
+		if(bININame) s=entry.second;
 		
 		s+=" ";
 
-		CString t=Map->GetUnitName(*rules.sections["BuildingTypes"].GetValue(i));
+		CString t=Map->GetUnitName(entry.second);
 		//if(t!="MISSING")
 		{
 			s+=t;
@@ -922,18 +923,20 @@ void ListBuildings(CComboBox& cb, BOOL bININame)
 void ListInfantry(CComboBox& cb)
 {
 	while(cb.DeleteString(0)!=CB_ERR);
-	int i;
-	for(i=0;i<rules.sections["InfantryTypes"].values.size();i++)
-	{
-		if(rules.sections["InfantryTypes"].GetValueOrigPos(i)<0) continue;
 
-		char c[50];
-		itoa(rules.sections["InfantryTypes"].GetValueOrigPos(i),c,10);
-		CString s=c;
+	const CIniFileSection* sec = rules.GetSection("InfantryTypes");
+	if(!sec) return;
+
+	for(const auto& entry : sec->values)
+	{
+		const auto origPos = sec->value_orig_pos.find(entry.first);
+		if(origPos == sec->value_orig_pos.end()) continue;
+
+		CString s=std::to_string(origPos->second).c_str();
 		
 		s+=" ";
 		//s+=Map->GetUnitName(*rules.sections["InfantryTypes"].GetValue(i));
-		CString t=Map->GetUnitName(*rules.sections["InfantryTypes"].GetValue(i));
+		CString t=Map->GetUnitName(entry.second);
 		//if(t!="MISSING")
 		{
 			s+=t;
@@ -945,18 +948,20 @@ void ListInfantry(CComboBox& cb)
 void ListUnits(CComboBox& cb)
 {
 	while(cb.DeleteString(0)!=CB_ERR);
-	int i;
-	for(i=0;i<rules.sections["VehicleTypes"].values.size();i++)
-	{
-		if(rules.sections["VehicleTypes"].GetValueOrigPos(i)<0) continue;
 
-		char c[50];
-		itoa(rules.sections["VehicleTypes"].GetValueOrigPos(i),c,10);
-		CString s=c;
+	const CIniFileSection* sec = rules.GetSection("VehicleTypes");
+	if(!sec) return;
+
+	for(const auto& entry : sec->values)
+	{
+		const auto origPos = sec->value_orig_pos.find(entry.first);
+		if(origPos == sec->value_orig_pos.end()) continue;
+
+		CString s=std::to_string(origPos->second).c_str();
 		
 		s+=" ";
 		//s+=rules.sections[*rules.sections["VehicleTypes"].GetValue(i)].values["Name"];
-		CString t=Map->GetUnitName(*rules.sections["VehicleTypes"].GetValue(i));
+		CString t=Map->GetUnitName(entry.second);
 		//if(t!="MISSING")
 		{
 			s+=t;
@@ -968,18 +973,20 @@ void ListUnits(CComboBox& cb)
 void ListAircraft(CComboBox& cb)
 {
 	while(cb.DeleteString(0)!=CB_ERR);
-	int i;
-	for(i=0;i<rules.sections["AircraftTypes"].values.size();i++)
-	{
-		if(rules.sections["AircraftTypes"].GetValueOrigPos(i)<0) continue;
 
-		char c[50];
-		itoa(rules.sections["AircraftTypes"].GetValueOrigPos(i),c,10);
-		CString s=c;
+	const CIniFileSection* sec = rules.GetSection("AircraftTypes");
+	if(!sec) return;
+
+	for(const auto& entry : sec->values)
+	{
+		const auto origPos = sec->value_orig_pos.find(entry.first);
+		if(origPos == sec->value_orig_pos.end()) continue;
+
+		CString s=std::to_string(origPos->second).c_str();
 		
 		s+=" ";
 		//s+=rules.sections[*rules.sections["AircraftTypes"].GetValue(i)].values["Name"];
-		CString t=Map->GetUnitName(*rules.sections["AircraftTypes"].GetValue(i));
+		CString t=Map->GetUnitName(entry.second);
 		//if(t!="MISSING")
 		{
 			s+=t;
@@ -991,73 +998,27 @@ void ListAircraft(CComboBox& cb)
 void ListTechtypes(CComboBox& cb)
 {
 	while(cb.DeleteString(0)!=CB_ERR);
-	int i;
-	for(i=0;i<rules.sections["AircraftTypes"].values.size();i++)
-	{
-		if(rules.sections["AircraftTypes"].GetValueOrigPos(i)<0) continue;
 
-		//char c[50];
-		//itoa(rules.sections["AircraftTypes"].GetValueOrigPos(i),c,10);
-		CString s=*rules.sections["AircraftTypes"].GetValue(i);
-		
-		s+=" ";
-		//s+=rules.sections[*rules.sections["AircraftTypes"].GetValue(i)].values["Name"];
-		CString t=Map->GetUnitName(*rules.sections["AircraftTypes"].GetValue(i));
-		//if(t!="MISSING")
-		{
-			s+=t;
-			cb.AddString(s);
-		}
-	}
-	for(i=0;i<rules.sections["InfantryTypes"].values.size();i++)
+	const char* typeSections[] = { "AircraftTypes", "InfantryTypes", "VehicleTypes", "BuildingTypes" };
+	for(const char* sectionName : typeSections)
 	{
-		if(rules.sections["InfantryTypes"].GetValueOrigPos(i)<0) continue;
+		const CIniFileSection* sec = rules.GetSection(sectionName);
+		if(!sec) continue;
 
-		//char c[50];
-		//itoa(rules.sections["InfantryTypes"].GetValueOrigPos(i),c,10);
-		CString s=*rules.sections["InfantryTypes"].GetValue(i);
-		
-		s+=" ";
-		//s+=rules.sections[*rules.sections["InfantryTypes"].GetValue(i)].values["Name"];
-		CString t=Map->GetUnitName(*rules.sections["InfantryTypes"].GetValue(i));
-		//if(t!="MISSING")
+		for(const auto& entry : sec->values)
 		{
-			s+=t;
-			cb.AddString(s);
-		}
-	}
-	for(i=0;i<rules.sections["VehicleTypes"].values.size();i++)
-	{
-		if(rules.sections["VehicleTypes"].GetValueOrigPos(i)<0) continue;
+			if(sec->value_orig_pos.find(entry.first) == sec->value_orig_pos.end()) continue;
 
-		//char c[50];
-		//itoa(rules.sections["VehicleTypes"].GetValueOrigPos(i),c,10);
-		CString s=*rules.sections["VehicleTypes"].GetValue(i);
-		
-		s+=" ";
-		//s+=rules.sections[*rules.sections["VehicleTypes"].GetValue(i)].values["Name"];
-		CString t=Map->GetUnitName(*rules.sections["VehicleTypes"].GetValue(i));
-		//if(t!="MISSING")
-		{
-			s+=t;
-			cb.AddString(s);
-		}
-	}
-	for(i=0;i<rules.sections["BuildingTypes"].values.size();i++)
-	{
-		if(rules.sections["BuildingTypes"].GetValueOrigPos(i)<0) continue;
-
-		//char c[50];
-		//itoa(rules.sections["BuildingTypes"].GetValueOrigPos(i),c,10);
-		CString s=*rules.sections["BuildingTypes"].GetValue(i);
-		
-		s+=" ";
-		//s+=rules.sections[*rules.sections["BuildingTypes"].GetValue(i)].values["Name"];
-		CString t=Map->GetUnitName(*rules.sections["BuildingTypes"].GetValue(i));
-		//if(t!="MISSING")
-		{
-			s+=t;
-			cb.AddString(s);
+			CString s=entry.second;
+			
+			s+=" ";
+			//s+=rules.sections[*rules.sections["AircraftTypes"].GetValue(i)].values["Name"];
+			CString t=Map->GetUnitName(entry.second);
+			//if(t!="MISSING")
+			{
+				s+=t;
+				cb.AddString(s);
+			}
 		}
 	}
 }
@@ -1066,13 +1027,15 @@ void ListTechtypes(CComboBox& cb)
 void ListGlobals(CComboBox& cb)
 {
 	while(cb.DeleteString(0)!=CB_ERR);
-	int i;
 	CIniFile& ini=Map->GetIniFile();
-	for(i=0;i<ini.sections["VariableNames"].values.size();i++)
+	const CIniFileSection* sec = ini.GetSection("VariableNames");
+	if(!sec) return;
+
+	for(const auto& entry : sec->values)
 	{
-		CString s=*ini.sections["VariableNames"].GetValueName(i);
+		CString s=entry.first;
 		s+=" ";
-		s+=*ini.sections["VariableNames"].GetValue(i);
+		s+=entry.second;
 		
 		cb.AddString(s);
 	}
@@ -1081,12 +1044,14 @@ void ListGlobals(CComboBox& cb)
 void ListRulesGlobals(CComboBox& cb)
 {
 	while(cb.DeleteString(0)!=CB_ERR);
-	int i;
-	for(i=0;i<rules.sections["VariableNames"].values.size();i++)
+	const CIniFileSection* sec = rules.GetSection("VariableNames");
+	if(!sec) return;
+
+	for(const auto& entry : sec->values)
 	{
-		CString s=*rules.sections["VariableNames"].GetValueName(i);
+		CString s=entry.first;
 		s+=" ";
-		s+=*rules.sections["VariableNames"].GetValue(i);
+		s+=entry.second;
 		
 		cb.AddString(s);
 	}
@@ -1098,17 +1063,20 @@ void ListTutorial(CComboBox& cb)
 	while(cb.DeleteString(0)!=CB_ERR);
 
 #ifndef RA2_MODE
-	int i;
-	for(i=0;i<tutorial.sections["Tutorial"].values.size();i++)
+	const CIniFileSection* sec = tutorial.GetSection("Tutorial");
+	if(sec)
 	{
-		CString s;
-		s=*tutorial.sections["Tutorial"].GetValueName(i);
+		for(const auto& entry : sec->values)
+		{
+			CString s;
+			s=entry.first;
 
-		s+=" ";
+			s+=" ";
 
-		s+=*tutorial.sections["Tutorial"].GetValue(i);
+			s+=entry.second;
 
-		cb.AddString(s);
+			cb.AddString(s);
+		}
 	}
 #else
 	
@@ -1138,17 +1106,16 @@ void ListTutorial(CComboBox& cb)
 void ListTriggers(CComboBox& cb)
 {
 	while(cb.DeleteString(0)!=CB_ERR);
-	int i;
 	CIniFile& ini=Map->GetIniFile();
-	for(i=0;i<ini.sections["Triggers"].values.size();i++)
+	const CIniFileSection* sec = ini.GetSection("Triggers");
+	if(!sec) return;
+
+	for(const auto& entry : sec->values)
 	{
-		CString type;
 		CString s;
-		type=*ini.sections["Triggers"].GetValueName(i);
-		
-		s=type;
+		s=entry.first;
 		s+=" (";
-		s+=GetParam(ini.sections["Triggers"].values[type], 2);
+		s+=GetParam(entry.second, 2);
 		s+=")";
 
 		cb.AddString(s);
@@ -1166,13 +1133,12 @@ void ListSounds(CComboBox& cb)
 {
 	while(cb.DeleteString(0)!=CB_ERR);
 #ifdef RA2_MODE
-	int i;
-	for(i=0;i<sound.sections["SoundList"].values.size();i++)
-	{
-		CString s;
-		s=*sound.sections["SoundList"].GetValue(i);
+	const CIniFileSection* sec = sound.GetSection("SoundList");
+	if(!sec) return;
 
-		cb.AddString(s);
+	for(const auto& entry : sec->values)
+	{
+		cb.AddString(entry.second);
 	}
 #endif
 }
@@ -1180,18 +1146,21 @@ void ListThemes(CComboBox& cb)
 {
 	while(cb.DeleteString(0)!=CB_ERR);
 #ifdef RA2_MODE
-	int i;
-	for(i=0;i<theme.sections["Themes"].values.size();i++)
+	const CIniFileSection* sec = theme.GetSection("Themes");
+	if(!sec) return;
+
+	for(const auto& entry : sec->values)
 	{
 		CString s;
-		s=*theme.sections["Themes"].GetValue(i);
+		s=entry.second;
 
 		TruncSpace(s);
 
 		if(s.GetLength()==0) continue;
 
 		s+=" ";
-		s+=AllStrings[sound.sections[s].values["Name"]].cString;
+		const CIniFileSection* soundSec = sound.GetSection(s);
+		s+=AllStrings[soundSec ? soundSec->GetValueByName("Name", CString()) : CString()].cString;
 
 		cb.AddString(s);
 	}
@@ -1201,30 +1170,31 @@ void ListSpeeches(CComboBox& cb)
 {
 	while(cb.DeleteString(0)!=CB_ERR);
 #ifdef RA2_MODE
-	int i;
-	for(i=0;i<eva.sections["DialogList"].values.size();i++)
-	{
-		CString s;
-		s=*eva.sections["DialogList"].GetValue(i);
+	const CIniFileSection* sec = eva.GetSection("DialogList");
+	if(!sec) return;
 
-		cb.AddString(s);
+	for(const auto& entry : sec->values)
+	{
+		cb.AddString(entry.second);
 	}
 #endif
 }
 void ListSpecialWeapons(CComboBox& cb)
 {
 	while(cb.DeleteString(0)!=CB_ERR);
-	int i;
-	for(i=0;i<rules.sections["SuperWeaponTypes"].values.size();i++)
+	const CIniFileSection* sec = rules.GetSection("SuperWeaponTypes");
+	if(!sec) return;
+
+	for(const auto& entry : sec->values)
 	{
-		CString s;
-		char c[50];
-		itoa(rules.sections["SuperWeaponTypes"].GetValueOrigPos(i),c,10);
-		s=c;
+		const auto origPos = sec->value_orig_pos.find(entry.first);
+		if(origPos == sec->value_orig_pos.end()) continue;
+
+		CString s=std::to_string(origPos->second).c_str();
 
 		s+=" ";
 
-		s+=*rules.sections["SuperWeaponTypes"].GetValue(i);
+		s+=entry.second;
 
 		cb.AddString(s);
 	}	
@@ -1233,16 +1203,18 @@ void ListSpecialWeapons(CComboBox& cb)
 void ListAnimations(CComboBox& cb)
 {
 	while(cb.DeleteString(0)!=CB_ERR);
-	int i;
-	for(i=0;i<rules.sections["Animations"].values.size();i++)
+	const CIniFileSection* sec = rules.GetSection("Animations");
+	if(!sec) return;
+
+	for(const auto& entry : sec->values)
 	{
-		CString s;
-		char c[50];
-		itoa(rules.sections["Animations"].GetValueOrigPos(i),c,10);
-		s=c;
+		const auto origPos = sec->value_orig_pos.find(entry.first);
+		if(origPos == sec->value_orig_pos.end()) continue;
+
+		CString s=std::to_string(origPos->second).c_str();
 
 		s+=" ";
-		s+=*rules.sections["Animations"].GetValue(i);
+		s+=entry.second;
 
 		cb.AddString(s);
 	}	
@@ -1251,16 +1223,18 @@ void ListAnimations(CComboBox& cb)
 void ListParticles(CComboBox& cb)
 {
 	while(cb.DeleteString(0)!=CB_ERR);
-	int i;
-	for(i=0;i<rules.sections["Particles"].values.size();i++)
+	const CIniFileSection* sec = rules.GetSection("Particles");
+	if(!sec) return;
+
+	for(const auto& entry : sec->values)
 	{
-		CString s;
-		char c[50];
-		itoa(rules.sections["Particles"].GetValueOrigPos(i),c,10);
-		s=c;
+		const auto origPos = sec->value_orig_pos.find(entry.first);
+		if(origPos == sec->value_orig_pos.end()) continue;
+
+		CString s=std::to_string(origPos->second).c_str();
 
 		s+=" ";
-		s+=*rules.sections["Particles"].GetValue(i);
+		s+=entry.second;
 
 		cb.AddString(s);
 	}
@@ -1277,20 +1251,25 @@ void ListSpeechBubbleTypes(CComboBox& cb)
 
 void ListMovies(CComboBox& cb, BOOL bListNone, BOOL bListParam)
 {
+	const CIniFileSection* sec = art.GetSection("Movies");
+	const int start = atoi(g_data.GetValueByName("MovieList", "Start", CString()));
+
 	if(!bListParam)
 	{
 		int sel=cb.GetCurSel();
 
 		while(cb.DeleteString(0)!=CB_ERR);
 
-		int i;
+		int i=0;
 		if(bListNone) cb.AddString("<none>");
-		for(i=0;i<art.sections["Movies"].values.size();i++)
+		if(sec)
 		{
-			if(i<atoi(g_data.sections["MovieList"].values["Start"])) continue;
+			for(const auto& entry : sec->values)
+			{
+				if(i++<start) continue;
 
-			CString s=*art.sections["Movies"].GetValue(i);
-			cb.AddString(s);
+				cb.AddString(entry.second);
+			}
 		}
 		if(sel>=0) cb.SetCurSel(sel);
 	}
@@ -1299,17 +1278,19 @@ void ListMovies(CComboBox& cb, BOOL bListNone, BOOL bListParam)
 		
 		while(cb.DeleteString(0)!=CB_ERR);
 
-		int i;
-		for(i=0;i<art.sections["Movies"].values.size();i++)
-		{
-			if(i<atoi(g_data.sections["MovieList"].values["Start"])) continue;
+		if(!sec) return;
 
-			CString s;
-			char c[50];
-			itoa(art.sections["Movies"].GetValueOrigPos(i),c,10);
-			s=c;
+		int i=0;
+		for(const auto& entry : sec->values)
+		{
+			if(i++<start) continue;
+
+			const auto origPos = sec->value_orig_pos.find(entry.first);
+			if(origPos == sec->value_orig_pos.end()) continue;
+
+			CString s=std::to_string(origPos->second).c_str();
 			s+=" ";
-			s+=*art.sections["Movies"].GetValue(i);
+			s+=entry.second;
 			
 			cb.AddString(s);
 
@@ -1326,16 +1307,18 @@ void ListTags(CComboBox& cb, BOOL bListNone)
 
 	while(cb.DeleteString(0)!=CB_ERR);
 
-	int i;
 	if(bListNone) cb.AddString("None");
-	for(i=0;i<ini.sections["Tags"].values.size();i++)
+	const CIniFileSection* sec = ini.GetSection("Tags");
+	if(sec)
 	{
-		CString type=*ini.sections["Tags"].GetValueName(i);
-		CString s=type;
-		s+=" ";
-		s+=GetParam(*ini.sections["Tags"].GetValue(i), 1);
+		for(const auto& entry : sec->values)
+		{
+			CString s=entry.first;
+			s+=" ";
+			s+=GetParam(entry.second, 1);
 
-		cb.AddString(s);
+			cb.AddString(s);
+		}
 	}
 
 	if(sel>=0) cb.SetCurSel(sel);
@@ -1343,11 +1326,13 @@ void ListTags(CComboBox& cb, BOOL bListNone)
 
 int GetRulesHousesSize()
 {
-	int i;
+	const CIniFileSection* sec = rules.GetSection(HOUSES);
+	if(!sec) return 0;
+
 	int count=0;
-	for(i=0;i<rules.sections[HOUSES].values.size();i++)
+	for(const auto& entry : sec->values)
 	{
-		if(rules.sections[HOUSES].GetValueOrigPos(i)<0) continue;
+		if(sec->value_orig_pos.find(entry.first) == sec->value_orig_pos.end()) continue;
 		count++;
 	}
 
@@ -1357,29 +1342,15 @@ int GetRulesHousesSize()
 // a bug adds an empty house to the rules section, delete it here
 int RepairRulesHouses()
 {
-	int i;
-	int count=0;
-	int delcount=0;
-	CString* toDelete;
-	toDelete=new(CString[rules.sections[HOUSES].values.size()]);
+	CIniFileSection* sec = rules.GetSection(HOUSES);
+	if(!sec) return 0;
 
-	for(i=0;i<rules.sections[HOUSES].values.size();i++)
-	{
-		if(rules.sections[HOUSES].GetValueOrigPos(i)<0)
-		{
-			toDelete[delcount]=*rules.sections[HOUSES].GetValueName(i);						
-			delcount++;
-		}
-		else
-			count++;
-	}
+	// houses added at runtime have no original position, remove them
+	std::erase_if(sec->values, [sec](const auto& entry) {
+		return sec->value_orig_pos.find(entry.first) == sec->value_orig_pos.end();
+	});
 
-	for(i=0;i<delcount;i++)
-		rules.sections[HOUSES].values.erase(toDelete[i]);
-
-	delete[] toDelete;
-
-	return count;
+	return (int)sec->values.size();
 }
 
 // MW 07/27/01: Modified for <Player @ A> etc in YR

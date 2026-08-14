@@ -147,6 +147,28 @@ SNAPSHOTDATA::SNAPSHOTDATA()
 	memset(this, 0, sizeof(SNAPSHOTDATA));
 }
 
+void SNAPSHOTDATA::Free()
+{
+	delete[] bHeight;
+	bHeight = NULL;
+	delete[] bMapData;
+	bMapData = NULL;
+	delete[] bSubTile;
+	bSubTile = NULL;
+	delete[] bMapData2;
+	bMapData2 = NULL;
+	delete[] wGround;
+	wGround = NULL;
+	delete[] bRedrawTerrain;
+	bRedrawTerrain = NULL;
+	delete[] overlay;
+	overlay = NULL;
+	delete[] overlaydata;
+	overlaydata = NULL;
+	delete[] bRNDData;
+	bRNDData = NULL;
+}
+
 
 NODEDATA::NODEDATA()
 {
@@ -249,15 +271,7 @@ CMapData::~CMapData()
 
 	for (i = 0;i < dwSnapShotCount;i++)
 	{
-		delete[] m_snapshots[i].bHeight;
-		delete[] m_snapshots[i].bMapData;
-		delete[] m_snapshots[i].bSubTile;
-		delete[] m_snapshots[i].bMapData2;
-		delete[] m_snapshots[i].wGround;
-		delete[] m_snapshots[i].bRedrawTerrain;
-		delete[] m_snapshots[i].overlay;
-		delete[] m_snapshots[i].overlaydata;
-		// m_snapshots[i].mapfile.Clear();
+		m_snapshots[i].Free();
 	}
 	if (m_snapshots) delete[] m_snapshots;
 	m_snapshots = NULL;
@@ -565,15 +579,7 @@ void CMapData::LoadMap(const std::string& file)
 	int i;
 	for (i = 0;i < dwSnapShotCount;i++)
 	{
-		delete[] m_snapshots[i].bHeight;
-		delete[] m_snapshots[i].bMapData;
-		delete[] m_snapshots[i].bSubTile;
-		delete[] m_snapshots[i].bMapData2;
-		delete[] m_snapshots[i].wGround;
-		delete[] m_snapshots[i].bRedrawTerrain;
-		delete[] m_snapshots[i].overlay;
-		delete[] m_snapshots[i].overlaydata;
-		// m_snapshots[i].mapfile.Clear();
+		m_snapshots[i].Free();
 	}
 	if (m_snapshots != NULL) delete[] m_snapshots;
 
@@ -1380,7 +1386,7 @@ void CMapData::SetOverlayAt(DWORD dwPos, BYTE bValue)
 	int y = dwPos / m_IsoSize;
 	int x = dwPos % m_IsoSize;
 
-	if (y + x * 512 > 262144 || dwPos > m_IsoSize * m_IsoSize) return;
+	if (y + x * OVERLAY_PACK_GRID_SIZE >= OVERLAY_PACK_GRID_AREA || dwPos >= m_IsoSize * m_IsoSize) return;
 
 	BYTE& ovrl = m_Overlay[y + x * 512];
 	BYTE& ovrld = m_OverlayData[y + x * 512];
@@ -1416,7 +1422,7 @@ void CMapData::SetOverlayAt(DWORD dwPos, BYTE bValue)
 
 BYTE CMapData::GetOverlayAt(DWORD dwPos)
 {
-	if (dwPos > fielddata_size) return 0;
+	if (dwPos >= (DWORD)fielddata_size) return 0;
 	return fielddata[dwPos].overlay;
 }
 
@@ -1426,7 +1432,7 @@ void CMapData::SetOverlayDataAt(DWORD dwPos, BYTE bValue)
 	int y = dwPos / m_IsoSize;
 	int x = dwPos % m_IsoSize;
 
-	if (y + x * 512 > 262144 || dwPos > m_IsoSize * m_IsoSize) return;
+	if (y + x * OVERLAY_PACK_GRID_SIZE >= OVERLAY_PACK_GRID_AREA || dwPos >= m_IsoSize * m_IsoSize) return;
 
 	BYTE& ovrl = m_Overlay[y + x * 512];
 	BYTE& ovrld = m_OverlayData[y + x * 512];
@@ -4039,15 +4045,7 @@ void CMapData::CreateMap(DWORD dwWidth, DWORD dwHeight, LPCTSTR lpTerrainType, D
 	int i;
 	for (i = 0;i < dwSnapShotCount;i++)
 	{
-		delete[] m_snapshots[i].bHeight;
-		delete[] m_snapshots[i].bMapData;
-		delete[] m_snapshots[i].bSubTile;
-		delete[] m_snapshots[i].bMapData2;
-		delete[] m_snapshots[i].wGround;
-		delete[] m_snapshots[i].bRedrawTerrain;
-		delete[] m_snapshots[i].overlay;
-		delete[] m_snapshots[i].overlaydata;
-		// m_snapshots[i].mapfile.Clear();
+		m_snapshots[i].Free();
 	}
 	if (m_snapshots != NULL) delete[] m_snapshots;
 
@@ -4836,16 +4834,7 @@ void CMapData::TakeSnapshot(BOOL bEraseFollowing, int left, int top, int right, 
 	{
 		for (e = dwSnapShotCount - 1;e > m_cursnapshot;e--)
 		{
-			delete[] m_snapshots[e].bHeight;
-			delete[] m_snapshots[e].bMapData;
-			delete[] m_snapshots[e].bSubTile;
-			delete[] m_snapshots[e].bMapData2;
-			delete[] m_snapshots[e].overlay;
-			delete[] m_snapshots[e].overlaydata;
-			delete[] m_snapshots[e].wGround;
-			delete[] m_snapshots[e].bRedrawTerrain;
-			delete[] m_snapshots[e].bRNDData;
-			// m_snapshots[0].mapfile.Clear();
+			m_snapshots[e].Free();
 		}
 		dwSnapShotCount = m_cursnapshot + 1;
 	}
@@ -4859,16 +4848,7 @@ void CMapData::TakeSnapshot(BOOL bEraseFollowing, int left, int top, int right, 
 		dwSnapShotCount = 64;
 		m_cursnapshot = 63;
 		int i;
-		delete[] m_snapshots[0].bHeight;
-		delete[] m_snapshots[0].bMapData;
-		delete[] m_snapshots[0].bSubTile;
-		delete[] m_snapshots[0].bMapData2;
-		delete[] m_snapshots[0].overlay;
-		delete[] m_snapshots[0].overlaydata;
-		delete[] m_snapshots[0].wGround;
-		delete[] m_snapshots[0].bRedrawTerrain;
-		delete[] m_snapshots[0].bRNDData;
-		// m_snapshots[0].mapfile.Clear();
+		m_snapshots[0].Free();
 		for (i = 1;i < dwSnapShotCount;i++)
 		{
 			m_snapshots[i - 1] = m_snapshots[i];
@@ -5102,7 +5082,7 @@ void CMapData::SmoothAllAt(DWORD dwPos)
 {
 	if (theApp.m_Options.bDisableAutoLat) return;
 
-	if (dwPos > fielddata_size) return;
+	if (dwPos >= (DWORD)fielddata_size) return;
 
 	int set = 0, ground = fielddata[dwPos].wGround;
 
@@ -6637,15 +6617,7 @@ void CMapData::ResizeMap(int iLeft, int iTop, DWORD dwNewWidth, DWORD dwNewHeigh
 	// but for now we just delete them...
 	for (i = 0;i < dwSnapShotCount;i++)
 	{
-		delete[] m_snapshots[i].bHeight;
-		delete[] m_snapshots[i].bMapData;
-		delete[] m_snapshots[i].bSubTile;
-		delete[] m_snapshots[i].bMapData2;
-		delete[] m_snapshots[i].wGround;
-		delete[] m_snapshots[i].bRedrawTerrain;
-		delete[] m_snapshots[i].overlay;
-		delete[] m_snapshots[i].overlaydata;
-		// m_snapshots[i].mapfile.Clear();
+		m_snapshots[i].Free();
 	}
 	if (m_snapshots != NULL) delete[] m_snapshots;
 

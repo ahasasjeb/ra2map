@@ -291,14 +291,17 @@ BOOL CIniFile::SaveFile(const std::string& Filename) const
 
 	file.open(Filename, ios::out | ios::trunc);
 
-	int i;
-	for (i = 0;i < sections.size();i++)
+	for (const auto& section : sections)
 	{
-		file << "[" << (LPCTSTR)*GetSectionName(i) << "]" << endl;
-		int e;
-		for (e = 0;e < GetSection(i)->values.size();e++)
+		// skip sections without any values. They carry no information and are
+		// usually the result of read accesses that accidentally created them.
+		if (section.second.values.empty())
+			continue;
+
+		file << "[" << (LPCTSTR)section.first << "]" << endl;
+		for (const auto& value : section.second.values)
 		{
-			file << (LPCTSTR) * (GetSection(i)->GetValueName(e)) << "=" << (LPCTSTR)*GetSection(i)->GetValue(e) << endl;
+			file << (LPCTSTR)value.first << "=" << (LPCTSTR)value.second << endl;
 		}
 		file << endl;
 	}
