@@ -100,6 +100,21 @@ void CTSOptions::OnOK()
 BOOL CTSOptions::OnInitDialog() 
 {
 	CDialog::OnInitDialog();
+
+	if (theApp.m_Options.LanguageName.IsEmpty())
+		theApp.m_Options.LanguageName = DetectPreferredLanguageName();
+
+	ApplyEditorUIFont(this);
+	SetWindowText(GetLanguageStringACP("OptCaption"));
+	SetDlgItemText(IDC_OPT_EXE_LABEL, GetLanguageStringACP("OptExeLabel"));
+	SetDlgItemText(IDC_OPT_LANG_LABEL, GetLanguageStringACP("OptLanguage"));
+	SetDlgItemText(IDC_OPT_SUPPORT_GROUP, GetLanguageStringACP("OptSupportGroup"));
+	SetDlgItemText(IDC_CHOOSE, GetLanguageStringACP("OptBrowse"));
+	SetDlgItemText(IDC_RULESLIKETS, GetLanguageStringACP("OptSupportMods"));
+	SetDlgItemText(IDC_ONLYORIGINAL, GetLanguageStringACP("OptOnlyOriginal"));
+	SetDlgItemText(IDC_PREFER_LOCAL_THEATER_FILES, GetLanguageStringACP("OptPreferLocalTheater"));
+	SetDlgItemText(IDOK, GetLanguageStringACP("OK"));
+	SetDlgItemText(IDCANCEL, GetLanguageStringACP("Cancel"));
 	
 	m_TSExe.SetWindowText((LPCTSTR)theApp.m_Options.TSExe);
 	
@@ -113,15 +128,22 @@ BOOL CTSOptions::OnInitDialog()
 	int i;
 	for(i=0;i<language.sections["Languages"].values.size();i++)
 	{
-		CString lang=*language.sections["Languages"].GetValue(i);
-		lang=language.sections[lang+"Header"].values["Name"];
+		CString langId=*language.sections["Languages"].GetValue(i);
+		CString langName=language.sections[langId+"Header"].values["Name"];
 
-		
-
-		m_Language.SetItemData(m_Language.AddString(lang),i);
-		if (lang=="English")
-			m_Language.SetCurSel(i);
+		const int idx = m_Language.AddString(langName);
+		m_Language.SetItemData(idx,i);
 	}
+
+	int selected = 0;
+	for(i=0;i<m_Language.GetCount();i++)
+	{
+		const int langIndex = static_cast<int>(m_Language.GetItemData(i));
+		CString langId=*language.sections["Languages"].GetValue(langIndex);
+		if (langId == theApp.m_Options.LanguageName)
+			selected = i;
+	}
+	m_Language.SetCurSel(selected);
 
 	
 	return TRUE;  

@@ -90,10 +90,17 @@ void CTriggerEditorDlg::OnCancel()
 BOOL CTriggerEditorDlg::OnInitDialog() 
 {
 	CDialog::OnInitDialog();
+	ApplyEditorUIFont(this);
 
 	m_tab.InsertItem(0, TranslateStringACP("Trigger options"));
 	m_tab.InsertItem(1, TranslateStringACP("Events"));
 	m_tab.InsertItem(2, TranslateStringACP("Actions"));
+	SetWindowText(TranslateStringACP("Trigger editor"));
+	SetDlgItemText(IDC_LTRIGGERSELECT, GetLanguageStringACP("SelectCurrentTrigger"));
+	SetDlgItemText(IDC_NEWTRIGGER, GetLanguageStringACP("NewTrigger"));
+	SetDlgItemText(IDC_DELETETRIGGER, GetLanguageStringACP("DeleteTriggerBtn"));
+	SetDlgItemText(IDC_PLACEONMAP, GetLanguageStringACP("PlaceOnMap"));
+	SetDlgItemText(IDC_CLONE, GetLanguageStringACP("CloneTrigger"));
 
 	m_TriggerOptions.Create(CTriggerOptionsDlg::IDD, &m_tab);
 	RECT r;
@@ -193,7 +200,7 @@ void CTriggerEditorDlg::OnDeletetrigger()
 	if(sel<0) return;
 	int curtrig=m_Trigger.GetItemData(sel);
 
-	int res=MessageBox("If you want to delete all attached tags, too, press 'Yes'.\nIf you don´t want to delete these tags, press 'No'.\nIf you want to cancel deletion of the trigger, press 'Cancel'.\n\nNote: CellTags will never be deleted using this function","Delete trigger", MB_YESNOCANCEL);
+	int res=MessageBox(GetLanguageStringACP("DeleteTriggerTags"),GetLanguageStringACP("DeleteTriggerCap"), MB_YESNOCANCEL);
 	if(res==IDCANCEL) return;
 	
 	CString trigger=*ini.sections["Triggers"].GetValueName(curtrig);

@@ -600,7 +600,7 @@ void CTeamTypes::OnDeleteteamtype()
 
 	if(m_TeamTypes.GetCurSel()!=-1)
 	{
-		int res=MessageBox("Are you sure that you want to delete the selected team-type? If you delete it, don´t forget to delete any reference to the team-type.","Delete team-type",MB_YESNO);
+		int res=MessageBox(GetLanguageStringACP("DeleteTeamType"),GetLanguageStringACP("DeleteTeamTypeCap"),MB_YESNO);
 		if(res==IDNO) return;
 
 		CString str;

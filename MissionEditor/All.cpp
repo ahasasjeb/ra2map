@@ -26,6 +26,7 @@
 #include "All.h"
 #include "mapdata.h"
 #include "variables.h"
+#include "functions.h"
 
 
 #ifdef _DEBUG
@@ -188,14 +189,14 @@ void CAll::OnDeletesection()
 	int cusection;
 	cusection=m_Sections.GetCurSel();
 	if(cusection==-1) {
-		MessageBox("You cannot delete a section without choosing one.");
+		MessageBox(GetLanguageStringACP("IniNeedChooseSection"));
 		return;
 	}
 
 	CString str;
 	m_Sections.GetLBText(cusection, str);
 
-	if(MessageBox(CString((CString)"Are you sure you want to delete " + str + "? You should be really careful, you may not be able to use the map afterwards."), "Delete section", MB_YESNO)==IDNO) return;
+	if(MessageBox(TranslateStringVariables(1, GetLanguageStringACP("IniConfirmDelete"), str), GetLanguageStringACP("IniDeleteSectionCap"), MB_YESNO)==IDNO) return;
 	
 	ini.sections.erase(str);
 
@@ -210,7 +211,7 @@ void CAll::OnDeletekey()
 	if(m_Sections.GetCurSel()<0) return;
 	cukey=m_Keys.GetCurSel();
 	if(cukey==-1) {
-		MessageBox("You cannot delete a key without choosing one.");
+		MessageBox(GetLanguageStringACP("IniNeedChooseKey"));
 		return;
 	}
 
@@ -220,7 +221,7 @@ void CAll::OnDeletekey()
 	m_Sections.GetLBText(cuSection, sec);
 	m_Keys.GetText(cukey, str);
 
-	if(MessageBox(CString((CString)"Are you sure you want to delete " + str + "? You should be really careful, you may not be able to use the map afterwards."), "Delete key", MB_YESNO)==IDNO) return;
+	if(MessageBox(TranslateStringVariables(1, GetLanguageStringACP("IniConfirmDelete"), str), GetLanguageStringACP("IniDeleteKeyCap"), MB_YESNO)==IDNO) return;
 	
 	ini.sections[sec].values.erase(str);
 
@@ -236,7 +237,7 @@ void CAll::OnAddkey()
 	int cusection;
 	cusection=m_Sections.GetCurSel();
 	if(cusection==-1) {
-		MessageBox("You need to specify a section first.");
+		MessageBox(GetLanguageStringACP("IniNeedSection"));
 		return;
 	}
 	

@@ -24,6 +24,7 @@
 #include "stdafx.h"
 #include "finalsun.h"
 #include "ShutDownDlg.h"
+#include "functions.h"
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -64,6 +65,14 @@ END_MESSAGE_MAP()
 /////////////////////////////////////////////////////////////////////////////
 // Behandlungsroutinen für Nachrichten CShutDownDlg 
 
+BOOL CShutDownDlg::OnInitDialog()
+{
+	CDialog::OnInitDialog();
+	ApplyEditorUIFont(this);
+	SetWindowText(GetLanguageStringACP("ShutdownCap"));
+	SetDlgItemText(IDC_DIALOG_DESC, GetLanguageStringACP("ShutdownDesc"));
+	return TRUE;
+}
 
 void CShutDownDlg::PostNcDestroy() 
 {

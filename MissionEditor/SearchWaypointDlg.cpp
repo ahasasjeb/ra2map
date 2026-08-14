@@ -25,6 +25,7 @@
 #include "finalsun.h"
 #include "SearchWaypointDlg.h"
 #include "variables.h"
+#include "functions.h"
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -65,6 +66,11 @@ END_MESSAGE_MAP()
 BOOL CSearchWaypointDlg::OnInitDialog() 
 {
 	CDialog::OnInitDialog();
+	ApplyEditorUIFont(this);
+	SetWindowText(TranslateStringACP("Search Waypoint"));
+	SetDlgItemText(IDC_LWAYPOINTS, GetLanguageStringACP("WaypointsLabel"));
+	SetDlgItemText(IDOK, GetLanguageStringACP("SearchBtn"));
+	SetDlgItemText(IDCANCEL, GetLanguageStringACP("Cancel"));
 
 	CListBox& ctrl=*(CListBox*)GetDlgItem(IDC_WAYPOINTS);
 

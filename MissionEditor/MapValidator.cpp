@@ -69,6 +69,7 @@ END_MESSAGE_MAP()
 
 void CMapValidator::UpdateStrings()
 {
+	ApplyEditorUIFont(this);
 	SetWindowText(GetLanguageStringACP("MapValidatorCap"));
 	SetDlgItemText(IDC_LPROBLEMSFOUND, GetLanguageStringACP("MapValidatorProblemsFound"));
 	SetDlgItemText(IDOK, GetLanguageStringACP("OK"));

@@ -443,7 +443,7 @@ void CTriggerActionsDlg::OnDeleteaction()
 	int sel2=m_Action.GetCurSel();
 	if(sel2<0) return;
 	int curev=m_Action.GetItemData(sel2);
-	if(MessageBox("Do you really want to delete this action?","Delete action", MB_YESNO)==IDNO) return;
+	if(MessageBox(GetLanguageStringACP("DeleteAction"),GetLanguageStringACP("DeleteActionCap"), MB_YESNO)==IDNO) return;
 
 
 	CIniFileSection& sec=ini.sections["Actions"];

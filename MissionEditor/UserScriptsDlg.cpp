@@ -3256,6 +3256,8 @@ nextline_no_update:
 BOOL CUserScriptsDlg::OnInitDialog() 
 {
 	CDialog::OnInitDialog();
+	ApplyEditorUIFont(this);
+	SetWindowText(TranslateStringACP("Map Scripts"));
 
 	int k;
 	CFileFind ff;

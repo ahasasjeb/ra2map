@@ -26,6 +26,7 @@
 #include "ImportINI.h"
 #include "mapdata.h"
 #include "variables.h"
+#include "functions.h"
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -90,7 +91,7 @@ BOOL CImportINI::OnInitDialog()
 	CIniFile inifile;
 	inifile.LoadFile(this->m_FileName);
 	
-	if(inifile.sections.size()<1){MessageBox("File does not have any ini content, abort.","Error");EndDialog(IDCANCEL);return TRUE;}
+	if(inifile.sections.size()<1){MessageBox(GetLanguageStringACP("IniNoContent"),TranslateStringACP("Error"));EndDialog(IDCANCEL);return TRUE;}
 	
 	m_inicount=inifile.sections.size();
 

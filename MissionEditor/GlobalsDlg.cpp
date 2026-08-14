@@ -172,6 +172,8 @@ void CGlobalsDlg::OnSelchangeGlobal()
 BOOL CGlobalsDlg::OnInitDialog() 
 {
 	CDialog::OnInitDialog();
+	ApplyEditorUIFont(this);
+	SetWindowText(TranslateStringACP("Local Variables"));
 
 	UpdateDialog();
 	

@@ -133,6 +133,12 @@ CString TranslateStringACP(CString u8EnglishString);
 // the returned string is in the active codepage (UTF-8 on Windows 10 1909+)
 CString TranslateStringACP(WCHAR* u16EnglishString);
 
+// pick a language listed in FALanguage.ini / FSLanguage.ini from the Windows UI language
+CString DetectPreferredLanguageName();
+
+// apply a CJK-capable UI font when Simplified Chinese is selected
+void ApplyEditorUIFont(CWnd* root);
+
 /****************************************
  sound functions [03/16/2001]
  ****************************************/

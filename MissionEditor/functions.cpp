@@ -361,7 +361,7 @@ void ShowOptionsDialog()
 			(bOldPreferLocalTheaterFiles != theApp.m_Options.bPreferLocalTheaterFiles) ||
 			(bOldSearch != theApp.m_Options.bSearchLikeTS)
 		) && bOptionsStartup == FALSE)
-		MessageBox(0, GetLanguageStringACP("RestartNeeded"), "Restart", 0);
+		MessageBox(0, GetLanguageStringACP("RestartNeeded"), TranslateStringACP("Restart"), 0);
 	
 
 	CString oldLang=theApp.m_Options.LanguageName;
@@ -392,6 +392,129 @@ CString ToACP(const CString& utf8)
 	// convert to process codepage (should be UTF8 on newer systems)
 	auto cp = GetACP();
 	return (cp == CP_UTF8) ? utf8 : CString(utf16ToACP(utf8ToUtf16(utf8)).c_str());
+}
+
+static bool IsListedLanguage(const char* languageId)
+{
+	return language.sections["Languages"].FindValue(languageId) >= 0;
+}
+
+CString DetectPreferredLanguageName()
+{
+	const LANGID lang = GetUserDefaultUILanguage();
+	const WORD primary = PRIMARYLANGID(lang);
+	const WORD sub = SUBLANGID(lang);
+
+	if (primary == LANG_CHINESE
+		&& sub != SUBLANG_CHINESE_TRADITIONAL
+		&& sub != SUBLANG_CHINESE_HONGKONG
+		&& sub != SUBLANG_CHINESE_MACAU
+		&& IsListedLanguage("Chinese"))
+	{
+		return "Chinese";
+	}
+
+	if (primary == LANG_GERMAN && IsListedLanguage("German"))
+		return "German";
+
+	if (primary == LANG_SWEDISH && IsListedLanguage("Swedish"))
+		return "Swedish";
+
+	if (primary == LANG_DUTCH && IsListedLanguage("Nederlands"))
+		return "Nederlands";
+
+	return "English";
+}
+
+static int CALLBACK EditorFontExistsProc(const LOGFONT*, const TEXTMETRIC*, DWORD, LPARAM lParam)
+{
+	*reinterpret_cast<bool*>(lParam) = true;
+	return 0;
+}
+
+static bool EditorFontFaceExists(const char* faceName)
+{
+	bool found = false;
+	LOGFONT lf = {};
+	lf.lfCharSet = DEFAULT_CHARSET;
+	strncpy_s(lf.lfFaceName, faceName, _TRUNCATE);
+	HDC hdc = ::GetDC(NULL);
+	EnumFontFamiliesExA(hdc, &lf, EditorFontExistsProc, reinterpret_cast<LPARAM>(&found), 0);
+	::ReleaseDC(NULL, hdc);
+	return found;
+}
+
+static HFONT GetEditorUIFontHandle()
+{
+	static CFont font;
+	static CString lastLanguage;
+	const CString currentLanguage = theApp.m_Options.LanguageName;
+
+	if (font.GetSafeHandle() != NULL && lastLanguage == currentLanguage)
+		return static_cast<HFONT>(font.GetSafeHandle());
+
+	lastLanguage = currentLanguage;
+
+	NONCLIENTMETRICSA ncm = {};
+	ncm.cbSize = sizeof(ncm);
+	if (!SystemParametersInfoA(SPI_GETNONCLIENTMETRICS, sizeof(ncm), &ncm, 0))
+	{
+		ncm.cbSize = sizeof(ncm) - sizeof(ncm.iPaddedBorderWidth);
+		if (!SystemParametersInfoA(SPI_GETNONCLIENTMETRICS, ncm.cbSize, &ncm, 0))
+			return static_cast<HFONT>(font.GetSafeHandle());
+	}
+	LOGFONTA lf = ncm.lfMessageFont;
+	lf.lfCharSet = DEFAULT_CHARSET;
+
+	if (currentLanguage == "Chinese")
+	{
+		static const char* const faces[] = {
+			"Microsoft YaHei UI",
+			"Microsoft YaHei",
+			"\xE5\xBE\xAE\xE8\xBD\xAF\xE9\x9B\x85\xE9\xBB\x91", // 微软雅黑
+			"SimSun",
+		};
+		for (const char* face : faces)
+		{
+			if (EditorFontFaceExists(face))
+			{
+				strncpy_s(lf.lfFaceName, face, _TRUNCATE);
+				break;
+			}
+		}
+	}
+
+	CFont replacement;
+	if (!replacement.CreateFontIndirectA(&lf))
+		return static_cast<HFONT>(font.GetSafeHandle());
+
+	font.DeleteObject();
+	font.Attach(replacement.Detach());
+	return static_cast<HFONT>(font.GetSafeHandle());
+}
+
+static BOOL CALLBACK ApplyEditorUIFontProc(HWND hwnd, LPARAM lParam)
+{
+	if (::IsWindow(hwnd))
+		::SendMessage(hwnd, WM_SETFONT, static_cast<WPARAM>(lParam), FALSE);
+	return TRUE;
+}
+
+void ApplyEditorUIFont(CWnd* root)
+{
+	if (root == NULL)
+		return;
+
+	const HWND hRoot = root->GetSafeHwnd();
+	if (!::IsWindow(hRoot))
+		return;
+
+	const HFONT hFont = GetEditorUIFontHandle();
+	if (hFont == NULL)
+		return;
+
+	::SendMessage(hRoot, WM_SETFONT, reinterpret_cast<WPARAM>(hFont), FALSE);
+	::EnumChildWindows(hRoot, ApplyEditorUIFontProc, reinterpret_cast<LPARAM>(hFont));
 }
 
 // change all %n (where n is an int) in an string, to another specified string

@@ -157,7 +157,7 @@ void CTriggerEventsDlg::OnDeleteevent()
 	int sel2=m_Event.GetCurSel();
 	if(sel2<0) return;
 	int curev=m_Event.GetItemData(sel2);
-	if(MessageBox("Do you really want to delete this event?","Delete event", MB_YESNO)==IDNO) return;
+	if(MessageBox(GetLanguageStringACP("DeleteEvent"),GetLanguageStringACP("DeleteEventCap"), MB_YESNO)==IDNO) return;
 
 
 	CIniFileSection& sec=ini.sections["Events"];

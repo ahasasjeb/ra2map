@@ -231,6 +231,8 @@ void CNewMap::OnMultiplayer()
 
 void CNewMap::UpdateStrings()
 {
+	ApplyEditorUIFont(this);
+
 	SetDlgItemText(IDC_LDESC, GetLanguageStringACP("NewMapDesc"));
 	SetDlgItemText(IDC_BROWSE, GetLanguageStringACP("NewMapBrowse"));
 	SetDlgItemText(IDC_MULTIPLAYER, GetLanguageStringACP("NewMapMultiplayer"));

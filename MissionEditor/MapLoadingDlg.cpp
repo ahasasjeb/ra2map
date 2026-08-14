@@ -24,6 +24,7 @@
 #include "stdafx.h"
 #include "finalsun.h"
 #include "MapLoadingDlg.h"
+#include "functions.h"
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -63,3 +64,12 @@ END_MESSAGE_MAP()
 
 /////////////////////////////////////////////////////////////////////////////
 // Behandlungsroutinen für Nachrichten CMapLoadingDlg 
+
+BOOL CMapLoadingDlg::OnInitDialog()
+{
+	CDialog::OnInitDialog();
+	ApplyEditorUIFont(this);
+	SetWindowText(GetLanguageStringACP("MapLoadCap"));
+	SetDlgItemText(IDC_DIALOG_DESC, GetLanguageStringACP("MapLoadDesc"));
+	return TRUE;
+}

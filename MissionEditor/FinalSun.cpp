@@ -101,7 +101,7 @@ CFinalSunApp::CFinalSunApp()
 	/*memset(t_tilepics, 0, sizeof(TILEPICDATA)*10000);
 	memset(s_tilepics, 0, sizeof(TILEPICDATA)*10000);*/
 
-	m_Options.LanguageName = "English";
+	m_Options.LanguageName = "English"; // replaced by saved or detected language after FALanguage.ini / FSLanguage.ini is loaded
 	m_Options.bFlat = FALSE;
 	m_Options.bEasy = FALSE;
 	m_Options.bSupportMarbleMadness = FALSE;
@@ -271,6 +271,8 @@ BOOL CFinalSunApp::InitInstance()
 		optini.sections[app].values.find("PreferLocalTheaterFiles") == optini.sections[app].values.end())
 	{
 		opts.bSearchLikeTS = TRUE;
+		if (optini.sections[app].values["Language"].GetLength() == 0)
+			opts.LanguageName = DetectPreferredLanguageName();
 
 		bOptionsStartup = TRUE;
 		ShowOptionsDialog();

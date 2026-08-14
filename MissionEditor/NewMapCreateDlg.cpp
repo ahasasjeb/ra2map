@@ -24,6 +24,7 @@
 #include "stdafx.h"
 #include "finalsun.h"
 #include "NewMapCreateDlg.h"
+#include "functions.h"
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -66,6 +67,15 @@ END_MESSAGE_MAP()
 BOOL CNewMapCreateDlg::OnInitDialog() 
 {
 	CDialog::OnInitDialog();
+
+	ApplyEditorUIFont(this);
+	SetWindowText(GetLanguageStringACP("NewMapStep2Cap"));
+	SetDlgItemText(IDC_DIALOG_DESC, GetLanguageStringACP("NewMapCreateDesc"));
+	SetDlgItemText(IDC_CREATE, GetLanguageStringACP("NewMapCreateNew"));
+	SetDlgItemText(IDC_IMPORT, GetLanguageStringACP("NewMapCreateImport"));
+	SetDlgItemText(IDC_AITRIGGERS, GetLanguageStringACP("NewMapCreateAITriggers"));
+	SetDlgItemText(IDOK, GetLanguageStringACP("Next"));
+	SetDlgItemText(IDCANCEL, GetLanguageStringACP("Cancel"));
 
 	m_CreateType=0;
 	UpdateData(FALSE);

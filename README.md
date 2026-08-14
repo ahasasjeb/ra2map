@@ -2,6 +2,12 @@
 
 This repository contains the source code for the FinalSun/FinalAlert (YR) Mission Editor.
 
+## Languages / 语言
+
+The editor can be switched between English, German and **Simplified Chinese (简体中文)** in **Options → Settings**. On a Chinese Windows system the first run selects 简体中文 automatically.
+
+编辑器可在 **选项 → 设置** 中切换英语、德语和**简体中文**。中文 Windows 首次启动时会自动选择简体中文。语言字符串位于 `MissionEditor/data/FinalAlert2/FALanguage.ini` 与 `MissionEditor/data/FinalSun/FSLanguage.ini`，每日提示位于同目录的 `TIPS.CHS`。
+
 The official version for both applications has been increased to v2.0 in order to illustrate they now run properly on modern operating systems. We also used this opporunity to update the application and fix some known issues.
 
 # Fixes and Changes
@@ -28,21 +34,23 @@ The official version for both applications has been increased to v2.0 in order t
 - Fixed minimap for non-quadratic maps.
 
 # Install build requirements
-- Microsoft Visual Studio 2022
-  1. Install Visual Studio 2022 if you haven't done so already.
+- Microsoft Visual Studio 2022 or newer (Visual Studio 2026 is recommended)
+  1. Install Visual Studio 2026 (or Visual Studio 2022) if you haven't done so already.
   2. (Re-)Start the Visual Studio Installer
-  3. Apply any updates to Visual Studio 2022
+  3. Apply any updates to Visual Studio
   4. Click on Modify.
   5. Under Workloads ensure "Desktop Development with C++" is enabled. Ensure the details are visible on the right panel below "Desktop Development with C++" and enable the following checkboxes:
-     - MSVC v143 - VS 2022 C++-x64/x86 build tools
-     - C++-ATL for v143 build tools x86 & x64
-     - vcpkg package manager: if this item is missing, please check that you have updated Visual Studio 2022!
+     - MSVC v145 - VS 2026 C++-x64/x86 build tools (or MSVC v143 - VS 2022 C++-x64/x86 build tools)
+     - C++-ATL for v145 build tools x86 & x64 (or C++-ATL for v143 build tools x86 & x64)
+     - vcpkg package manager: if this item is missing, please check that you have updated Visual Studio!
      - newest Windows 10 SDK
      - newest Windows 11 SDK
-     - C++-MFC for v143 build tools x86 & x64
+     - C++-MFC for v145 build tools x86 & x64 (or C++-MFC for v143 build tools x86 & x64)
      - Do not untick any other checkboxes!
   6. Apply the changes.
 - Git™ for Windows - Ensure you do not run any other git implementation when using vcpkg.
+
+Note: The projects do not pin a specific platform toolset. They are built with the default toolset of the Visual Studio version you are using (v145 for Visual Studio 2026, v143 for Visual Studio 2022).
 
 # Building the source code
 The source code consists of 2 projects:
@@ -51,12 +59,12 @@ The source code consists of 2 projects:
 
 ## Compilation
 1)	In this example, we are going to build Final Alert 2 (for Red Alert 2). 
-1)	Open MissionEditor.sln with Visual Studio 2022 and set the project configuration to "FinalAlertYRRelease". This will cause an automatic switch to FinalAlert2YR.exe.
+1)	Open MissionEditor.sln with Visual Studio and set the project configuration to "FinalAlertYRRelease". This will cause an automatic switch to FinalAlert2YR.exe.
 2)	Build the project by pressing F7 (Build Solution), once completed it will produce FinalAlert2YR.exe in the "dist/FinalAlert2" subdirectory
 3)	You can now run and debug the editor by pressing F5
 
 ## Updating third-party libraries
-In order to update zlib, bzip, boost and lzo to newest version, start a "Developer Command Prompt for VS 2022", move to the "3rdParty\xcc" folder with vcpkg and Git for Windows in PATH:
+In order to update zlib, bzip, boost and lzo to newest version, start a "Developer Command Prompt for VS", move to the "3rdParty\xcc" folder with vcpkg and Git for Windows in PATH:
    
        git --version
        vcpkg x-update-baseline

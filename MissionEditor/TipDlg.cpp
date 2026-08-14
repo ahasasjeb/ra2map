@@ -218,6 +218,7 @@ BOOL CTipDlg::OnInitDialog()
 	if (m_pStream == NULL)
 		GetDlgItem(IDC_NEXTTIP)->EnableWindow(FALSE);
 
+	ApplyEditorUIFont(this);
 	SetDlgItemText(IDC_STARTUP, GetLanguageStringACP("TipDialogShowAtStartup"));
 	SetDlgItemText(IDC_NEXTTIP, GetLanguageStringACP("TipDialogNext"));
 	SetDlgItemText(IDOK, GetLanguageStringACP("TipDialogClose"));

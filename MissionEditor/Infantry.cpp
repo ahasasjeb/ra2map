@@ -154,6 +154,8 @@ void CInfantrie::Init(CString house, CString strength, CString action, CString d
 
 void CInfantrie::UpdateStrings()
 {
+	ApplyEditorUIFont(this);
+
 	SetWindowText(GetLanguageStringACP("InfCap"));
 	GetDlgItem(IDC_LHOUSE)->SetWindowText(GetLanguageStringACP("InfHouse"));
 	GetDlgItem(IDC_LDESC)->SetWindowText(GetLanguageStringACP("InfDesc"));

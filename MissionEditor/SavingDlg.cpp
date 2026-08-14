@@ -24,6 +24,7 @@
 #include "stdafx.h"
 #include "finalsun.h"
 #include "SavingDlg.h"
+#include "functions.h"
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -63,6 +64,15 @@ END_MESSAGE_MAP()
 
 /////////////////////////////////////////////////////////////////////////////
 // Behandlungsroutinen für Nachrichten CSavingDlg 
+
+BOOL CSavingDlg::OnInitDialog()
+{
+	CDialog::OnInitDialog();
+	ApplyEditorUIFont(this);
+	SetWindowText(GetLanguageStringACP("SavingCap"));
+	SetDlgItemText(IDC_DIALOG_DESC, GetLanguageStringACP("SavingDesc"));
+	return TRUE;
+}
 
 void CSavingDlg::PostNcDestroy() 
 {

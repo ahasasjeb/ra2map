@@ -289,6 +289,8 @@ void CBasic::OnChangeInittime()
 
 void CBasic::UpdateStrings()
 {
+	ApplyEditorUIFont(this);
+
 	SetDlgItemText(IDC_LDESC, GetLanguageStringACP("BasicDesc"));
 	SetDlgItemText(IDC_LNAME, GetLanguageStringACP("BasicName"));
 	SetDlgItemText(IDC_LNEXTSCENARIO, GetLanguageStringACP("BasicNextScenario"));

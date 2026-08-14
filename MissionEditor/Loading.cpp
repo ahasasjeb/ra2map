@@ -690,6 +690,7 @@ void CLoading::InitPics(CProgressCtrl* prog)
 BOOL CLoading::OnInitDialog() 
 {
 	CDialog::OnInitDialog();
+	ApplyEditorUIFont(this);
 
 	CString version;
 	version.LoadString(IDS_VERSIONTEXT);
@@ -6299,7 +6300,7 @@ void CLoading::LoadStrings()
 			
 			if (!lpData)
 			{
-				MessageBox("String file not found, using rules.ini names","Error");
+				MessageBox(GetLanguageStringACP("LanguageFileMissing"),TranslateStringACP("Error"));
 				return;
 			}
 		}

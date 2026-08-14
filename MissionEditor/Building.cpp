@@ -26,6 +26,7 @@
 #include "Building.h"
 #include "mapdata.h"
 #include "variables.h"
+#include "functions.h"
 #include "inlines.h"
 
 
@@ -295,6 +296,8 @@ void CBuilding::Init(CString house, CString strength, CString direction, CString
 
 void CBuilding::UpdateStrings()
 {
+	ApplyEditorUIFont(this);
+
 	SetWindowText(GetLanguageStringACP("StructCap"));
 	GetDlgItem(IDC_LHOUSE)->SetWindowText(GetLanguageStringACP("StructHouse"));
 	GetDlgItem(IDC_LDESC)->SetWindowText(GetLanguageStringACP("StructDesc"));

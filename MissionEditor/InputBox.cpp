@@ -106,6 +106,7 @@ void CInputBox::SetSentence(CString Sentence)
 BOOL CInputBox::OnInitDialog() 
 {
 	CDialog::OnInitDialog();
+	ApplyEditorUIFont(this);
 	
 	SetWindowText(m_Caption);
 	SetDlgItemText(IDC_SENTENCE, m_Text);

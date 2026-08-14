@@ -24,6 +24,7 @@
 #include "stdafx.h"
 #include "finalsun.h"
 #include "NewMapTypeDlg.h"
+#include "functions.h"
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -64,6 +65,14 @@ END_MESSAGE_MAP()
 BOOL CNewMapTypeDlg::OnInitDialog() 
 {
 	CDialog::OnInitDialog();
+
+	ApplyEditorUIFont(this);
+	SetWindowText(GetLanguageStringACP("NewMapStep1Cap"));
+	SetDlgItemText(IDC_DIALOG_DESC, GetLanguageStringACP("NewMapTypeDesc"));
+	SetDlgItemText(IDC_SINGLE, GetLanguageStringACP("NewMapTypeSingle"));
+	SetDlgItemText(IDC_MULTI, GetLanguageStringACP("NewMapTypeMulti"));
+	SetDlgItemText(IDOK, GetLanguageStringACP("Next"));
+	SetDlgItemText(IDCANCEL, GetLanguageStringACP("Cancel"));
 
 	m_Singleplayer=1;
 	UpdateData(FALSE);

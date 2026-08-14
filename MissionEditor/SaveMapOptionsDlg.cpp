@@ -26,6 +26,7 @@
 #include "SaveMapOptionsDlg.h"
 #include "variables.h"
 #include "inifile.h"
+#include "functions.h"
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -96,6 +97,13 @@ END_MESSAGE_MAP()
 BOOL CSaveMapOptionsDlg::OnInitDialog() 
 {
 	CDialog::OnInitDialog();
+	ApplyEditorUIFont(this);
+	SetWindowText(TranslateStringACP("Save options"));
+	SetDlgItemText(IDOK, GetLanguageStringACP("OK"));
+	SetDlgItemText(IDCANCEL, GetLanguageStringACP("Cancel"));
+	SetDlgItemText(IDC_PREVIEWMODE, GetLanguageStringACP("SavePreviewNew"));
+	SetDlgItemText(IDC_EXISTINGPREVIEW, GetLanguageStringACP("SavePreviewExisting"));
+	SetDlgItemText(IDC_NOPREVIEW, GetLanguageStringACP("SavePreviewNone"));
 
 	CIniFile& ini=Map->GetIniFile();
 	if(!Map->IsMultiplayer())

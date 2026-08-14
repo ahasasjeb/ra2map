@@ -25,6 +25,7 @@
 #include "finalsun.h"
 #include "NewMapCreateNewDlg.h"
 #include "variables.h"
+#include "functions.h"
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -72,6 +73,16 @@ BOOL CNewMapCreateNewDlg::OnInitDialog()
 {
 	CDialog::OnInitDialog();
 
+	ApplyEditorUIFont(this);
+	SetWindowText(GetLanguageStringACP("NewMapStep3Cap"));
+	SetDlgItemText(IDC_DIALOG_DESC, GetLanguageStringACP("NewMapCreateNewDesc"));
+	SetDlgItemText(IDC_LWIDTH, GetLanguageStringACP("NewMapWidth"));
+	SetDlgItemText(IDC_LHEIGHT, GetLanguageStringACP("NewMapHeight"));
+	SetDlgItemText(IDC_LTHEATER_NM, GetLanguageStringACP("NewMapTheater"));
+	SetDlgItemText(IDC_LSTARTINGHEIGHT, GetLanguageStringACP("NewMapStartingHeight"));
+	SetDlgItemText(IDOK, GetLanguageStringACP("Next"));
+	SetDlgItemText(IDCANCEL, GetLanguageStringACP("Cancel"));
+
 	CComboBox& theater=*((CComboBox*)GetDlgItem(IDC_THEATER));
 	theater.AddString(THEATER0);
 	theater.AddString(THEATER1);
@@ -104,16 +115,16 @@ void CNewMapCreateNewDlg::OnOK()
 
 	if(m_Width>400 || m_Height>400 || m_Width<16 || m_Height<16 || (m_Width + m_Height) > 512)
 	{
-		MessageBox("Width and Height must both be between 16 and 400 and both added must be less than 512.","Error");
+		MessageBox(GetLanguageStringACP("MapSizeInvalid"),TranslateStringACP("Error"));
 		return;
 	}
 
 	if(m_Width+m_Height>256)
 	{
 #ifdef RA2_MODE
-		int res=MessageBox("Width + height is bigger than 256, this may cause problems in RA2. Continue?","Warning",MB_YESNO);
+		int res=MessageBox(GetLanguageStringACP("MapSizeRA2Warn"),GetLanguageStringACP("Warning"),MB_YESNO);
 #else
-		int res=MessageBox("Width + height is bigger than 256, this may cause problems in TS. Continue?","Warning",MB_YESNO);
+		int res=MessageBox(GetLanguageStringACP("MapSizeTSWarn"),GetLanguageStringACP("Warning"),MB_YESNO);
 #endif
 		if(res==IDNO) return;
 	}

@@ -61,6 +61,7 @@ protected:
 
 	// Generierte Nachrichtenzuordnungsfunktionen
 	//{{AFX_MSG(CProgressDlg)
+	virtual BOOL OnInitDialog();
 	virtual void OnCancel();
 	//}}AFX_MSG
 	DECLARE_MESSAGE_MAP()

@@ -55,7 +55,7 @@ protected:
 
 	// Generierte Nachrichtenzuordnungsfunktionen
 	//{{AFX_MSG(CMapLoadingDlg)
-		// HINWEIS: Der Klassen-Assistent fügt hier Member-Funktionen ein
+	virtual BOOL OnInitDialog();
 	//}}AFX_MSG
 	DECLARE_MESSAGE_MAP()
 };

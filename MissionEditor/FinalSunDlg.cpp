@@ -555,7 +555,7 @@ void CFinalSunDlg::OnFileOpenmap()
 	f.InsertFile(fileToOpen, "Map");
 	if((f.sections["Map"].values["Theater"]==THEATER0 && theApp.m_Options.bDoNotLoadTemperateGraphics) || (f.sections["Map"].values["Theater"]==THEATER1 && theApp.m_Options.bDoNotLoadSnowGraphics))
 	{
-		MessageBox("You have selected to don´t show temperate or snow theater, but this map uses this theater. You cannot load it without restarting FinalSun/FinalAlert 2 with this theater enabled.", "Error");
+		MessageBox(GetLanguageStringACP("TheaterDisabled"), TranslateStringACP("Error"));
 		return;
 	}
 
@@ -585,7 +585,7 @@ void CFinalSunDlg::OnFileOpenmap()
 	BOOL bNoMapFile=FALSE;
 	if(!Map->CheckMapPackData())
 	{
-		int res=MessageBox("This map seems to be corrupt. Do you want to try repairing it? If you click cancel, a empty map will be created, if you click no, it will load the map as it is","Corrupt", MB_YESNOCANCEL);
+		int res=MessageBox(GetLanguageStringACP("MapCorrupt"),GetLanguageStringACP("MapCorruptCap"), MB_YESNOCANCEL);
 		if(res==IDCANCEL)
 		{
 			Map->CreateMap(32,32,THEATER0,0);
@@ -764,7 +764,7 @@ void CFinalSunDlg::OnFileSaveas()
 
 void CFinalSunDlg::OnOptionsExportrulesini() 
 {
-	int res=MessageBox("This will export the Rules.Ini of Tiberian Sun V1.13 MMX. ou should not modify this rules.ini because you won´t be able to play online then and ecause this could cause compatibility problems.\nIf you want to modify the rules.ini, you need to rename it before you play online.", "Export Rules.INI", MB_OK);
+	int res=MessageBox(GetLanguageStringACP("ExportRulesIni"), GetLanguageStringACP("ExportRulesIniCap"), MB_OK);
 
 	CFileDialog dlg(FALSE, ".ini", "rules.ini", OFN_HIDEREADONLY | OFN_OVERWRITEPROMPT, "Rules.INI|rules.ini|");
 
@@ -1114,7 +1114,7 @@ void CFinalSunDlg::SaveMap(CString FileName_)
 		// Map->GetIniFile().sections["Basic"].values["Name"]=opt.m_Description;
 	}	
 	
-	SetText("Packing data...");
+	SetText(GetLanguageStringACP("PackingData"));
 	UpdateWindow();	
 	errstream << "Calling UpdateIniFile()"<<endl;
 	
@@ -1181,7 +1181,7 @@ void CFinalSunDlg::SaveMap(CString FileName_)
 
 	
 	
-	SetText("Saving...");
+	SetText(GetLanguageStringACP("SavingStatus"));
 	UpdateWindow();
 
 	
@@ -1257,7 +1257,7 @@ void CFinalSunDlg::SaveMap(CString FileName_)
 						int percent=e*100/sec.values.size();
 						d=*ini.GetSectionName(i);
 						itoa(percent,c ,10);
-						SetText((CString)"Saving... "+d+"( "+c+"% )");
+						SetText(TranslateStringVariables(2, TranslateStringVariables(1, GetLanguageStringACP("SavingStatusPct"), d), c));
 						UpdateWindow();
 					}
 					
@@ -1302,7 +1302,7 @@ void CFinalSunDlg::SaveMap(CString FileName_)
 						int percent=e*100/sec.values.size();
 						d=*ini.GetSectionName(i);
 						itoa(percent,c ,10);
-						SetText((CString)"Saving... "+d+"( "+c+"% )");
+						SetText(TranslateStringVariables(2, TranslateStringVariables(1, GetLanguageStringACP("SavingStatusPct"), d), c));
 						UpdateWindow();
 					}
 					
@@ -1391,7 +1391,7 @@ void CFinalSunDlg::SaveMap(CString FileName_)
 						int percent=e*100/sec.values.size();
 						d=*ini.GetSectionName(i);
 						itoa(percent,c ,10);
-						SetText((CString)"Saving... "+d+"( "+c+"% )");
+						SetText(TranslateStringVariables(2, TranslateStringVariables(1, GetLanguageStringACP("SavingStatusPct"), d), c));
 						UpdateWindow();
 					}
 					
@@ -1436,7 +1436,7 @@ void CFinalSunDlg::SaveMap(CString FileName_)
 
 		if(!CopyFileW(u16tempfile.c_str(), FileName.c_str(), FALSE))
 		{
-			MessageBox("Error: file cannot be saved. Make sure the file is not read only","Error",MB_OK);
+			MessageBox(GetLanguageStringACP("FileReadOnly"),TranslateStringACP("Error"),MB_OK);
 		}
 		else
 		{
@@ -1559,7 +1559,7 @@ void CFinalSunDlg::OnMenuSelect(UINT nItemID, UINT nFlags, HMENU hSysMenu)
 		SetText(GetLanguageStringACP("HelpTipOfTheDayHelp"));
 		break;
 	case ID_OPTIONS_EXPORTRULESINI:
-		SetText("Export the file rules.ini");
+		SetText(GetLanguageStringACP("ExportRulesHelp"));
 		break;
 	default:
 		SetReady();
@@ -2058,6 +2058,7 @@ void CFinalSunDlg::OnFileNew()
 void CFinalSunDlg::UpdateStrings()
 {
 	last_succeeded_operation=20;
+	ApplyEditorUIFont(this);
 
 	CString str;
 	
@@ -3254,7 +3255,7 @@ void CFinalSunDlg::OnMaptoolsAutolevel()
 	}
 
 	Sound(SOUND_POSITIVE);
-	MessageBox("This tool will try to automatically raise the terrain using the cliffs.\nIt may take some seconds to execute, as there are masses of data to handle.\nAfter this, you should check your map if everything looks fine. If not, you should use the different height tools, especially flatten ground, to fix any errors. You can use Edit->Undo to undo anything that has been done by using this function.", "Auto Leveler");
+	MessageBox(GetLanguageStringACP("AutoLevelerDesc"), GetLanguageStringACP("AutoLevelerCap"));
 
 	m_view.m_isoview->AutoLevel();	
 }
@@ -3462,7 +3463,7 @@ void CFinalSunDlg::OnMaptoolsFrontcliff()
 	}
 	if(Map->GetTheater()==THEATER4)
 	{
-		MessageBox("There are no cliffs in the Lunar theater");
+		MessageBox(GetLanguageStringACP("NoCliffsLunar"));
 		return;
 	}
 
@@ -3479,7 +3480,7 @@ void CFinalSunDlg::OnMaptoolsBackcliff()
 	}
 	if(Map->GetTheater()==THEATER4)
 	{
-		MessageBox("There are no cliffs in the Lunar theater");
+		MessageBox(GetLanguageStringACP("NoCliffsLunar"));
 		return;
 	}
 
@@ -3944,7 +3945,7 @@ void CFinalSunDlg::OpenMap(LPCSTR lpFilename)
 	f.InsertFile(fileToOpen, "Map");
 	if((f.sections["Map"].values["Theater"]==THEATER0 && theApp.m_Options.bDoNotLoadTemperateGraphics) || (f.sections["Map"].values["Theater"]==THEATER1 && theApp.m_Options.bDoNotLoadSnowGraphics))
 	{
-		MessageBox("You have selected to don´t show temperate or snow theater, but this map uses this theater. You cannot load it without restarting FinalSun/FinalAlert 2 with this theater enabled.", "Error");
+		MessageBox(GetLanguageStringACP("TheaterDisabled"), TranslateStringACP("Error"));
 		return;
 	}
 
@@ -3973,7 +3974,7 @@ void CFinalSunDlg::OpenMap(LPCSTR lpFilename)
 	BOOL bNoMapFile=FALSE;
 	if(!Map->CheckMapPackData())
 	{
-		int res=MessageBox("This map seems to be corrupt. Do you want to try repairing it? If you click cancel, a empty map will be created, if you click no, it will load the map as it is","Corrupt", MB_YESNOCANCEL);
+		int res=MessageBox(GetLanguageStringACP("MapCorrupt"),GetLanguageStringACP("MapCorruptCap"), MB_YESNOCANCEL);
 		if(res==IDCANCEL)
 		{
 			Map->CreateMap(32,32,THEATER0,0);

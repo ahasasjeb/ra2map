@@ -1292,7 +1292,7 @@ void CTriggers::OnDeleteevent()
 	if(sel<0) return;
 	int sel2=m_Event.GetCurSel();
 	if(sel2<0) return;
-	if(MessageBox("Do you really want to delete this event?","Delete event", MB_YESNO)==IDNO) return;
+	if(MessageBox(GetLanguageStringACP("DeleteEvent"),GetLanguageStringACP("DeleteEventCap"), MB_YESNO)==IDNO) return;
 
 	CString CurrentTrigger;
 	m_Trigger.GetLBText(sel, CurrentTrigger);
@@ -1371,7 +1371,7 @@ void CTriggers::OnDeleteaction()
 	if(sel<0) return;
 	int sel2=m_Action.GetCurSel();
 	if(sel2<0) return;
-	if(MessageBox("Do you really want to delete this action?","Delete action", MB_YESNO)==IDNO) return;
+	if(MessageBox(GetLanguageStringACP("DeleteAction"),GetLanguageStringACP("DeleteActionCap"), MB_YESNO)==IDNO) return;
 
 	CString CurrentTrigger;
 	m_Trigger.GetLBText(sel, CurrentTrigger);
@@ -1420,7 +1420,7 @@ void CTriggers::OnDeletetrigger()
 	int sel=m_Trigger.GetCurSel();
 	if(sel<0) return;
 
-	if(MessageBox("Do you really want to delete this trigger? Don´t forget to delete the attached tag (important!)","Delete trigger", MB_YESNO)==IDNO) return;
+	if(MessageBox(GetLanguageStringACP("DeleteTriggerAsk"),GetLanguageStringACP("DeleteTriggerCap"), MB_YESNO)==IDNO) return;
 
 	CString CurrentTrigger;
 	m_Trigger.GetLBText(sel, CurrentTrigger);
@@ -1443,7 +1443,7 @@ void CTriggers::OnAddtrigger()
 	ini.sections["Events"].values[ID_T]="0";
 	ini.sections["Actions"].values[ID_T]="0";
 
-	if(MessageBox("Trigger created. If you want to create a simple tag now, press Yes. The tag will be called ""New tag"", you should name it like the trigger (after you have set up the trigger).","Trigger created",MB_YESNO))
+	if(MessageBox(GetLanguageStringACP("TriggerCreated"),GetLanguageStringACP("TriggerCreatedCap"),MB_YESNO))
 	{
 		CString ID_TAG=GetFreeID();
 		ini.sections["Tags"].values[ID_TAG]="0,New tag,";

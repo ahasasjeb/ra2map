@@ -29,35 +29,35 @@
     <OutDir>$(SolutionDir)\build\output\$(Configuration)-$(Platform)\lib\</OutDir>
     <IntDir>$(SolutionDir)\build\intermediate\$(Configuration)-$(Platform)\$(ProjectName)\</IntDir>
     <ConfigurationType>StaticLibrary</ConfigurationType>
+    <PlatformToolset>$(DefaultPlatformToolset)</PlatformToolset>
     <UseOfMfc>Dynamic</UseOfMfc>
     <CharacterSet>MultiByte</CharacterSet>
     <WholeProgramOptimization>true</WholeProgramOptimization>
-    <PlatformToolset>v143</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseMinimal|Win32'" Label="Configuration">
     <OutDir>$(SolutionDir)\build\output\$(Configuration)-$(Platform)\lib\</OutDir>
     <IntDir>$(SolutionDir)\build\intermediate\$(Configuration)-$(Platform)\$(ProjectName)\</IntDir>
     <ConfigurationType>StaticLibrary</ConfigurationType>
+    <PlatformToolset>$(DefaultPlatformToolset)</PlatformToolset>
     <UseOfMfc>Dynamic</UseOfMfc>
     <CharacterSet>MultiByte</CharacterSet>
     <WholeProgramOptimization>true</WholeProgramOptimization>
-    <PlatformToolset>v143</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
     <OutDir>$(SolutionDir)\build\output\$(Configuration)-$(Platform)\lib\</OutDir>
     <IntDir>$(SolutionDir)\build\intermediate\$(Configuration)-$(Platform)\$(ProjectName)\</IntDir>
     <ConfigurationType>StaticLibrary</ConfigurationType>
+    <PlatformToolset>$(DefaultPlatformToolset)</PlatformToolset>
     <UseOfMfc>Dynamic</UseOfMfc>
     <CharacterSet>MultiByte</CharacterSet>
-    <PlatformToolset>v143</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='DebugMinimal|Win32'" Label="Configuration">
     <OutDir>$(SolutionDir)\build\output\$(Configuration)-$(Platform)\lib\</OutDir>
     <IntDir>$(SolutionDir)\build\intermediate\$(Configuration)-$(Platform)\$(ProjectName)\</IntDir>
     <ConfigurationType>StaticLibrary</ConfigurationType>
+    <PlatformToolset>$(DefaultPlatformToolset)</PlatformToolset>
     <UseOfMfc>Dynamic</UseOfMfc>
     <CharacterSet>MultiByte</CharacterSet>
-    <PlatformToolset>v143</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)'=='Release'" Label="XCC">
     <XCC_MINIMAL_BUILD>
@@ -579,7 +579,7 @@
   <Import Project="$(VCINSTALLDIR)vcpkg\scripts\buildsystems\msbuild\vcpkg.props" Condition="'$(IntegratedVCPKG_ROOT)'=='' And Exists('$(VCINSTALLDIR)vcpkg\scripts\buildsystems\msbuild\vcpkg.props')" />
   <Import Project="$(VCINSTALLDIR)vcpkg\scripts\buildsystems\msbuild\vcpkg.targets" Condition="'$(IntegratedVCPKG_ROOT)'=='' And Exists('$(VCINSTALLDIR)vcpkg\scripts\buildsystems\msbuild\vcpkg.targets')" />
   <Target Name="CheckVCPKG" BeforeTargets="BeforeClCompile">
-    <Error Text="You have neither installed VCPKG in your Visual C++ installation nor do you have VCPKG integrated into MSBuild. Please update your Visual Studio 2022 installation and after updating add the VCPKG single component. More details are available in the Readme.md file." Condition="'$(VcpkgRoot)' == ''" />
+    <Error Text="You have neither installed VCPKG in your Visual C++ installation nor do you have VCPKG integrated into MSBuild. Please update your Visual Studio installation and after updating add the VCPKG single component. More details are available in the Readme.md file." Condition="'$(VcpkgRoot)' == ''" />
     <Warning Text="'$(VcpkgRoot)\.vcpkg-root' does not exist. Either VcpkgRoot is set to a invalid location or you may have to repair your VCPKG installation (e.g. using the Visual Studio installer)" Condition="!Exists('$(VcpkgRoot)\.vcpkg-root')" />
   </Target>
 </Project>

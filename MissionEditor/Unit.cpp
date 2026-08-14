@@ -148,6 +148,8 @@ void CUnit::OnOK()
 
 void CUnit::UpdateStrings()
 {
+	ApplyEditorUIFont(this);
+
 
 
 	SetWindowText(GetLanguageStringACP("UnitCap"));

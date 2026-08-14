@@ -513,6 +513,16 @@
 #define IDC_LICENSE_AND_COPYRIGHT       1461
 #define IDC_PREFER_LOCAL_THEATER_INI_FILES 1462
 #define IDC_PREFER_LOCAL_THEATER_FILES  1463
+#define IDC_OPT_EXE_LABEL               1464
+#define IDC_OPT_LANG_LABEL              1465
+#define IDC_OPT_SUPPORT_GROUP           1466
+#define IDC_DIALOG_DESC                 1467
+#define IDC_LWIDTH                      1468
+#define IDC_LHEIGHT                     1469
+#define IDC_LTHEATER_NM                 1470
+#define IDC_LSTARTINGHEIGHT             1471
+#define IDC_LTRIGGERSELECT              1472
+#define IDC_LWAYPOINTS                  1473
 #define ID_FILE_OPENMAP                 40001
 #define ID_FILE_SAVEAS                  40002
 #define ID_FILE_QUIT                    40003
@@ -604,7 +614,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        300
 #define _APS_NEXT_COMMAND_VALUE         40144
-#define _APS_NEXT_CONTROL_VALUE         1464
+#define _APS_NEXT_CONTROL_VALUE         1474
 #define _APS_NEXT_SYMED_VALUE           111
 #endif
 #endif

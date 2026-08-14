@@ -198,6 +198,8 @@ void CSingleplayerSettings::OnEditchangeFillsilos()
 
 void CSingleplayerSettings::UpdateStrings()
 {
+	ApplyEditorUIFont(this);
+
 	SetDlgItemText(IDC_LSTARTINGDROPSHIPS, GetLanguageStringACP("SingleplayerStartingDropships"));
 	SetDlgItemText(IDC_LCARRYOVERMONEY, GetLanguageStringACP("SingleplayerCarryOverMoney"));
 	SetDlgItemText(IDC_LINHERITTIMER, GetLanguageStringACP("SingleplayerTimerInherit"));

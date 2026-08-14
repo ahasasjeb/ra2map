@@ -289,7 +289,7 @@ void CHouses::OnPreparehouses()
 	{
 		if(ini.sections[MAPHOUSES].values.size()>0)
 		{
-			MessageBox("There are already houses in your map. You need to delete these first.");
+			MessageBox(GetLanguageStringACP("HousesAlreadyExist"));
 			return;
 		}
 	}
@@ -307,12 +307,12 @@ void CHouses::AddHouse(const char *name)
 
 	if(ini.sections.find(name)!=ini.sections.end())
 	{
-		MessageBox(((CString)"Sorry this name is not available. " + name + (CString)" is already used in the map file. You need to use another name."));
+		MessageBox(TranslateStringVariables(1, GetLanguageStringACP("HouseNameTaken"), name));
 		return;
 	}
 	if(ini.sections.find(TranslateHouse(name))!=ini.sections.end())
 	{
-		MessageBox(((CString)"Sorry this name is not available. " + name + (CString)" is already used in the map file. You need to use another name."));
+		MessageBox(TranslateStringVariables(1, GetLanguageStringACP("HouseNameTaken"), name));
 		return;
 	}
 #ifdef RA2_MODE
@@ -428,9 +428,9 @@ void CHouses::OnShowWindow(BOOL bShow, UINT nStatus)
 		if(ini.sections.find(MAPHOUSES)==ini.sections.end() && ini.sections.size()>0)
 		{
 #ifndef RA2_MODE
-			 MessageBox("No houses do exist, if you want to use houses, you should use ""Prepare houses"" before doing anything else. Note that in a multiplayer map independent computer players cannot be created by using the names GDI and Nod for the house. Just use something like GDI_AI.");
+			 MessageBox(GetLanguageStringACP("NoHousesExistMP"));
 #else
-			 MessageBox("No houses do exist, if you want to use houses, you should use ""Prepare houses"" before doing anything else.");
+			 MessageBox(GetLanguageStringACP("NoHousesExist"));
 
 #endif
 		}
@@ -793,6 +793,8 @@ void CHouses::OnSelchangeActslike()
 
 void CHouses::UpdateStrings()
 {
+	ApplyEditorUIFont(this);
+
 	SetDlgItemText(IDC_DESC, GetLanguageStringACP("HousesDesc"));
 	SetDlgItemText(IDC_LPLAYER, GetLanguageStringACP("HousesPlayerHouse"));
 	SetDlgItemText(IDC_LHOUSE, GetLanguageStringACP("HousesHouse"));

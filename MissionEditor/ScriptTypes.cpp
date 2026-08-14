@@ -667,7 +667,7 @@ void CScriptTypes::OnDelete()
 	m_ScriptType.GetLBText(m_ScriptType.GetCurSel(), Scripttype);
 	TruncSpace(Scripttype);
 
-	int res=MessageBox("Are you sure to delete this ScriptType? Don´t forget to delete any references to this ScriptType","Delete ScriptType", MB_YESNO | MB_ICONQUESTION);
+	int res=MessageBox(GetLanguageStringACP("DeleteScriptType"),GetLanguageStringACP("DeleteScriptTypeCap"), MB_YESNO | MB_ICONQUESTION);
 	if(res!=IDYES) return;
 
 	ini.sections.erase((LPCTSTR)Scripttype);
@@ -722,6 +722,7 @@ void CScriptTypes::ListBehaviours(CComboBox &cb)
 BOOL CScriptTypes::OnInitDialog() 
 {
 	CDialog::OnInitDialog();
+	ApplyEditorUIFont(this);
 	
 	while(m_Type.DeleteString(0)!=CB_ERR);
 

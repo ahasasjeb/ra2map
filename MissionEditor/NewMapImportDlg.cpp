@@ -25,6 +25,7 @@
 #include "finalsun.h"
 #include "NewMapImportDlg.h"
 #include "variables.h"
+#include "functions.h"
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -94,6 +95,16 @@ void CNewMapImportDlg::OnBrowse()
 BOOL CNewMapImportDlg::OnInitDialog() 
 {
 	CDialog::OnInitDialog();
+
+	ApplyEditorUIFont(this);
+	SetWindowText(GetLanguageStringACP("NewMapStep3Cap"));
+	SetDlgItemText(IDC_DIALOG_DESC, GetLanguageStringACP("NewMapImportDesc"));
+	SetDlgItemText(IDC_BROWSE, GetLanguageStringACP("NewMapBrowse"));
+	SetDlgItemText(IDC_IMPORTTREES, GetLanguageStringACP("NewMapImportTrees"));
+	SetDlgItemText(IDC_IMPORTOVERLAY, GetLanguageStringACP("NewMapImportOverlay"));
+	SetDlgItemText(IDC_IMPORTUNITS, GetLanguageStringACP("NewMapImportUnits"));
+	SetDlgItemText(IDOK, GetLanguageStringACP("Next"));
+	SetDlgItemText(IDCANCEL, GetLanguageStringACP("Cancel"));
 	
 	CComboBox* m_ImportFile=(CComboBox*)GetDlgItem(IDC_IMPORTFILE);
 

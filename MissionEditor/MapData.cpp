@@ -6514,7 +6514,7 @@ void CMapData::SmoothTiberium(DWORD dwPos)
 void CMapData::ResizeMap(int iLeft, int iTop, DWORD dwNewWidth, DWORD dwNewHeight)
 {
 #ifndef RA2_MODE
-	if (MessageBox(0, "Tunnels may be damaged after changing the map size. Continue?", "Warning", MB_YESNO) == IDNO) return;
+	if (MessageBox(0, GetLanguageStringACP("TunnelsSizeWarning"), GetLanguageStringACP("Warning"), MB_YESNO) == IDNO) return;
 #endif
 
 	// MW: New object replacing code to fix crashes
@@ -6743,7 +6743,7 @@ void CMapData::ResizeMap(int iLeft, int iTop, DWORD dwNewWidth, DWORD dwNewHeigh
 	// MW 07/22/01: Added Progress dialog - it just was slow, and did not crash...
 	int allcount = GetInfantryCount() + GetAircraftCount() + GetUnitCount() + GetStructureCount() + GetTerrainCount() + GetWaypointCount() + GetCelltagCount();
 	int curcount = 0;
-	CProgressDlg* dlg = new(CProgressDlg)("Updating objects, please wait");
+	CProgressDlg* dlg = new(CProgressDlg)(GetLanguageStringACP("UpdatingObjects"));
 	dlg->SetRange(0, allcount - 1);
 	dlg->ShowWindow(SW_SHOW);
 
@@ -6949,7 +6949,7 @@ void CMapData::ResizeMap(int iLeft, int iTop, DWORD dwNewWidth, DWORD dwNewHeigh
 	errstream.flush();
 
 	dlg->DestroyWindow();
-	dlg = new(CProgressDlg)("Updating Minimap, please wait");
+	dlg = new(CProgressDlg)(GetLanguageStringACP("UpdatingMinimap"));
 	count = 0;
 	dlg->SetRange(0, m_IsoSize * m_IsoSize);
 	dlg->ShowWindow(SW_SHOW);

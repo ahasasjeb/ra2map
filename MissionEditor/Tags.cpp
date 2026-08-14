@@ -310,7 +310,7 @@ void CTags::OnDelete()
 	m_Tag.GetLBText(index, type);
 	if(type.Find(" ")>=0) type.SetAt(type.Find(" "),0);
 
-	int res=MessageBox("Are you sure to delete the selected tag? This may cause the attached trigger to don´t work anymore, if no other tag has the trigger attached.","Delete tag", MB_YESNO);
+	int res=MessageBox(GetLanguageStringACP("DeleteTag"),GetLanguageStringACP("DeleteTagCap"), MB_YESNO);
 	if(res==IDNO) return;
 	
 	ini.sections["Tags"].values.erase((LPCTSTR)type);
@@ -325,7 +325,7 @@ void CTags::OnAdd()
 
 	if(ini.sections["Triggers"].values.size()<1)
 	{
-		MessageBox("Before creating tags, you need at least one trigger.","Error");
+		MessageBox(GetLanguageStringACP("NeedTriggerForTag"),TranslateStringACP("Error"));
 		return;
 	};
 

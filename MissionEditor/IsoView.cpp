@@ -1742,7 +1742,7 @@ void CIsoView::OnMouseMove(UINT nFlags, CPoint point)
 			CString tmp;
 			if (Map->GetNodeAt(atoi(sod.x) + atoi(sod.y) * Map->GetIsoSize(), tmp) >= 0)
 			{
-				SetError("You cannot place a node on another node");
+				SetError(GetLanguageStringACP("CannotPlaceNode"));
 				{
 					isMoving = FALSE;
 					return;
@@ -1776,7 +1776,7 @@ void CIsoView::OnMouseMove(UINT nFlags, CPoint point)
 			CString tmp;
 			if (Map->GetNodeAt(atoi(sod.x) + atoi(sod.y) * Map->GetIsoSize(), tmp) >= 0)
 			{
-				SetError("You cannot place a node on another node");
+				SetError(GetLanguageStringACP("CannotPlaceNode"));
 				{
 					isMoving = FALSE;
 					return;
@@ -2528,7 +2528,7 @@ void CIsoView::OnLButtonDown(UINT nFlags, CPoint point)
 
 			if ((nFlags & MK_CONTROL) && !(*tiledata)[ground].bMorphable)
 			{
-				SetError("Applying non-morphable terrain height change, please wait...");
+				SetError(GetLanguageStringACP("TerrainHeightWait"));
 				stat.RedrawWindow();
 				stat.UpdateWindow();
 			}
@@ -2588,7 +2588,7 @@ void CIsoView::OnLButtonDown(UINT nFlags, CPoint point)
 				}
 				catch (...)
 				{
-					MessageBox("Stack is too small to complete operation!", "Error");
+					MessageBox(GetLanguageStringACP("StackTooSmall"), TranslateStringACP("Error"));
 				}
 			}
 
@@ -2636,7 +2636,7 @@ void CIsoView::OnLButtonDown(UINT nFlags, CPoint point)
 
 			if ((nFlags & MK_CONTROL) && !(*tiledata)[ground].bMorphable)
 			{
-				SetError("Applying non-morphable terrain height change, please wait...");
+				SetError(GetLanguageStringACP("TerrainHeightWait"));
 				stat.RedrawWindow();
 				stat.UpdateWindow();
 			}
@@ -2695,7 +2695,7 @@ void CIsoView::OnLButtonDown(UINT nFlags, CPoint point)
 				}
 				catch (...)
 				{
-					MessageBox("Stack is too small to complete operation!", "Error");
+					MessageBox(GetLanguageStringACP("StackTooSmall"), TranslateStringACP("Error"));
 				}
 			}
 
@@ -5261,7 +5261,7 @@ void CIsoView::FillArea(DWORD dwX, DWORD dwY, DWORD dwID, BYTE bSubTile)
 {
 	if ((*tiledata)[dwID].cx != 1 || (*tiledata)[dwID].cy != 1)
 	{
-		MessageBox("You can only use 1x1 tiles to fill areas.");
+		MessageBox(GetLanguageStringACP("Fill1x1Only"));
 		return;
 	}
 
@@ -5911,7 +5911,7 @@ void CIsoView::DrawMap()
 				{
 					if (!pic.bTried)
 					{
-						SetError("Loading graphics");
+						SetError(GetLanguageStringACP("LoadingGraphics"));
 						theApp.m_loading->LoadOverlayGraphic(*rules.sections["OverlayTypes"].GetValue(m.overlay), m.overlay);
 						UpdateOverlayPictures(m.overlay);
 						if (ovrlpics[m.overlay][m.overlaydata] != NULL)
@@ -6035,7 +6035,7 @@ void CIsoView::DrawMap()
 					{
 						if (!missingimages[objp.type])
 						{
-							SetError("Loading graphics");
+							SetError(GetLanguageStringACP("LoadingGraphics"));
 							theApp.m_loading->LoadUnitGraphic(objp.type);
 							::Map->UpdateBuildingInfo(objp.type);
 							int dir = (7 - objp.direction / 32) % 8;
@@ -6075,7 +6075,7 @@ void CIsoView::DrawMap()
 							pic = pics[GetUnitPictureFilename(upg, dir)];
 							if (!missingimages[upg] && pic.pic == NULL)
 							{
-								SetError("Loading graphics");
+								SetError(GetLanguageStringACP("LoadingGraphics"));
 								theApp.m_loading->LoadUnitGraphic(upg);
 								::Map->UpdateBuildingInfo(upg);
 								pic = pics[GetUnitPictureFilename(upg, dir)];
@@ -6149,7 +6149,7 @@ void CIsoView::DrawMap()
 					{
 						if (!missingimages[*rules.sections["BuildingTypes"].GetValue(m.node.type)])
 						{
-							SetError("Loading graphics");
+							SetError(GetLanguageStringACP("LoadingGraphics"));
 							theApp.m_loading->LoadUnitGraphic(*rules.sections["BuildingTypes"].GetValue(m.node.type));
 							::Map->UpdateBuildingInfo(*rules.sections["BuildingTypes"].GetValue(m.node.type));
 							pic = buildinginfo[id].pic[0];
@@ -6198,7 +6198,7 @@ void CIsoView::DrawMap()
 				{
 					if (!missingimages[obj.type])
 					{
-						SetError("Loading graphics");
+						SetError(GetLanguageStringACP("LoadingGraphics"));
 						theApp.m_loading->LoadUnitGraphic(obj.type);
 						lpPicFile = GetUnitPictureFilename(obj.type, atoi(obj.direction) / 32);
 						p = pics[lpPicFile];
@@ -6250,7 +6250,7 @@ void CIsoView::DrawMap()
 				{
 					if (!missingimages[obj.type])
 					{
-						SetError("Loading graphics");
+						SetError(GetLanguageStringACP("LoadingGraphics"));
 						theApp.m_loading->LoadUnitGraphic(obj.type);
 						p = pics[lpPicFile];
 					}
@@ -6314,7 +6314,7 @@ void CIsoView::DrawMap()
 					{
 						if (!missingimages[obj.type])
 						{
-							SetError("Loading graphics");
+							SetError(GetLanguageStringACP("LoadingGraphics"));
 							theApp.m_loading->LoadUnitGraphic(obj.type);
 							p = pics[lpPicFile];
 						}
@@ -6369,7 +6369,7 @@ void CIsoView::DrawMap()
 
 					if (missingimages.find(type) == missingimages.end())
 					{
-						SetError("Loading graphics");
+						SetError(GetLanguageStringACP("LoadingGraphics"));
 						theApp.m_loading->LoadUnitGraphic(type);
 						::Map->UpdateTreeInfo(type);
 						pic = treeinfo[id].pic;
@@ -6423,7 +6423,7 @@ void CIsoView::DrawMap()
 
 					if (missingimages.find(type) == missingimages.end())
 					{
-						SetError("Loading graphics");
+						SetError(GetLanguageStringACP("LoadingGraphics"));
 						theApp.m_loading->LoadUnitGraphic(type);
 						::Map->UpdateSmudgeInfo(type);
 						pic = smudgeinfo[id].pic;

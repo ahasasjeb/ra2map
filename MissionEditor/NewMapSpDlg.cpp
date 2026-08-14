@@ -81,6 +81,15 @@ void CNewMapSpDlg::OnPreparehouses()
 BOOL CNewMapSpDlg::OnInitDialog() 
 {
 	CDialog::OnInitDialog();
+
+	ApplyEditorUIFont(this);
+	SetWindowText(GetLanguageStringACP("NewMapStep4Cap"));
+	SetDlgItemText(IDC_DIALOG_DESC, GetLanguageStringACP("NewMapSpDesc"));
+	SetDlgItemText(IDC_PREPAREHOUSES, GetLanguageStringACP("NewMapPrepareStandardHouses"));
+	SetDlgItemText(IDC_LPLAYERHOUSE, GetLanguageStringACP("NewMapPlayerHouse"));
+	SetDlgItemText(IDC_AUTOPROD, GetLanguageStringACP("NewMapSetAutoProduction"));
+	SetDlgItemText(IDOK, GetLanguageStringACP("Next"));
+	SetDlgItemText(IDCANCEL, GetLanguageStringACP("Cancel"));
 	
 	CComboBox& house=*((CComboBox*)(GetDlgItem(IDC_HOUSE)));
 	int i;

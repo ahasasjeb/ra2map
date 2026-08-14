@@ -149,6 +149,7 @@ void CAircraft::OnOK()
 
 void CAircraft::UpdateStrings()
 {
+	ApplyEditorUIFont(this);
 	SetWindowText(GetLanguageStringACP("AirCap"));
 	GetDlgItem(IDC_LHOUSE)->SetWindowText(GetLanguageStringACP("AirHouse"));
 	GetDlgItem(IDC_LDESC)->SetWindowText(GetLanguageStringACP("AirDesc"));

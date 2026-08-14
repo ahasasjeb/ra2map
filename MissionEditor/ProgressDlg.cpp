@@ -24,6 +24,7 @@
 #include "stdafx.h"
 #include "finalsun.h"
 #include "ProgressDlg.h"
+#include "functions.h"
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -77,7 +78,7 @@ void CProgressDlg::SetPosition(int nPos)
 {
 	m_Progress.SetPos(nPos);
 	m_Progress.UpdateWindow();
-	m_ProgLabel="Progress: ";
+	m_ProgLabel=GetLanguageStringACP("ProgressPrefix");
 	
 	
 
@@ -101,6 +102,15 @@ void CProgressDlg::PostNcDestroy()
 	delete this;
 	
 	//CDialog::PostNcDestroy();
+}
+
+BOOL CProgressDlg::OnInitDialog()
+{
+	CDialog::OnInitDialog();
+	ApplyEditorUIFont(this);
+	SetWindowText(GetLanguageStringACP("ProgressCap"));
+	SetDlgItemText(IDCANCEL, GetLanguageStringACP("Cancel"));
+	return TRUE;
 }
 
 void CProgressDlg::OnCancel() 

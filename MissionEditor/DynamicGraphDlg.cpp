@@ -21,6 +21,7 @@
 #include "stdafx.h"
 #include "finalsun.h"
 #include "DynamicGraphDlg.h"
+#include "functions.h"
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -60,6 +61,15 @@ END_MESSAGE_MAP()
 
 /////////////////////////////////////////////////////////////////////////////
 // Behandlungsroutinen für Nachrichten CDynamicGraphDlg 
+
+BOOL CDynamicGraphDlg::OnInitDialog()
+{
+	CDialog::OnInitDialog();
+	ApplyEditorUIFont(this);
+	SetWindowText(GetLanguageStringACP("MapLoadCap"));
+	SetDlgItemText(IDC_DIALOG_DESC, GetLanguageStringACP("LoadGraphicsWait"));
+	return TRUE;
+}
 
 void CDynamicGraphDlg::PostNcDestroy() 
 {

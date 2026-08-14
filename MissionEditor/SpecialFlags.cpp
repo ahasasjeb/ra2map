@@ -121,20 +121,32 @@ void CSpecialFlags::UpdateDialog()
 	m_TiberiumSpreads.SetWindowText(sec->values["TiberiumSpreads"]);
 	m_Visceroids.SetWindowText(sec->values["Visceroids"]);
 
-#ifdef RA2_MODE
-	SetDlgItemText(IDC_LTIBERIUMGROWS,"Ore grows:");
-	SetDlgItemText(IDC_LTIBERIUMSPREADS,"Ore spreads:");
-	GetDlgItem(IDC_LTIBERIUMEXPLOSIVE)->ShowWindow(SW_HIDE);
-	GetDlgItem(IDC_TIBERIUMEXPLOSIVE)->ShowWindow(SW_HIDE);
-	GetDlgItem(IDC_HARVESTERIMMUNE)->ShowWindow(SW_HIDE);
-	GetDlgItem(IDC_LHARVESTERIMMUNE)->ShowWindow(SW_HIDE);
-	GetDlgItem(IDC_METEORITES)->ShowWindow(SW_HIDE);
-	GetDlgItem(IDC_LMETEORITES)->ShowWindow(SW_HIDE);
-	GetDlgItem(IDC_VISCEROIDS)->ShowWindow(SW_HIDE);
-	GetDlgItem(IDC_LVISCEROIDS)->ShowWindow(SW_HIDE);
+	ApplyEditorUIFont(this);
+	SetWindowText(TranslateStringACP("Special Flags"));
+	SetDlgItemText(IDC_DESC, GetLanguageStringACP("SpecDesc"));
+	SetDlgItemText(IDC_LTIBERIUMGROWS, GetLanguageStringACP("SpecTibGrows"));
+	SetDlgItemText(IDC_LTIBERIUMSPREADS, GetLanguageStringACP("SpecTibSpreads"));
+	SetDlgItemText(IDC_LTIBERIUMEXPLOSIVE, GetLanguageStringACP("SpecTibExplosive"));
+	SetDlgItemText(IDC_LDESTROYABLEBRIDGES, GetLanguageStringACP("SpecDestroyableBridges"));
+	SetDlgItemText(IDC_LMCVDEPLOY, GetLanguageStringACP("SpecMCVDeploy"));
+	SetDlgItemText(IDC_LINITIALVETERAN, GetLanguageStringACP("SpecInitialVeteran"));
+	SetDlgItemText(IDC_LFIXEDALLIANCE, GetLanguageStringACP("SpecFixedAlliance"));
+	SetDlgItemText(IDC_LHARVESTERIMMUNE, GetLanguageStringACP("SpecHarvesterImmune"));
+	SetDlgItemText(IDC_LFOGOFWAR, GetLanguageStringACP("SpecFogOfWar"));
+	SetDlgItemText(IDC_LINERT, GetLanguageStringACP("SpecInert"));
+	SetDlgItemText(IDC_LIONSTORMS, GetLanguageStringACP("SpecIonStorms"));
+	SetDlgItemText(IDC_LMETEORITES, GetLanguageStringACP("SpecMeteorites"));
+	SetDlgItemText(IDC_LVISCEROIDS, GetLanguageStringACP("SpecVisceroids"));
 
-	SetDlgItemText(IDC_LFOGOFWAR, "Shroud:");
-	SetDlgItemText(IDC_LIONSTORMS, "Weather Storms:");
+#ifdef RA2_MODE
+	if (CWnd* p = GetDlgItem(IDC_LTIBERIUMEXPLOSIVE)) p->ShowWindow(SW_HIDE);
+	if (CWnd* p = GetDlgItem(IDC_TIBERIUMEXPLOSIVE)) p->ShowWindow(SW_HIDE);
+	if (CWnd* p = GetDlgItem(IDC_HARVESTERIMMUNE)) p->ShowWindow(SW_HIDE);
+	if (CWnd* p = GetDlgItem(IDC_LHARVESTERIMMUNE)) p->ShowWindow(SW_HIDE);
+	if (CWnd* p = GetDlgItem(IDC_METEORITES)) p->ShowWindow(SW_HIDE);
+	if (CWnd* p = GetDlgItem(IDC_LMETEORITES)) p->ShowWindow(SW_HIDE);
+	if (CWnd* p = GetDlgItem(IDC_VISCEROIDS)) p->ShowWindow(SW_HIDE);
+	if (CWnd* p = GetDlgItem(IDC_LVISCEROIDS)) p->ShowWindow(SW_HIDE);
 #endif
 
 };

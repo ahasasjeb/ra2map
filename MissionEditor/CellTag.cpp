@@ -76,7 +76,7 @@ BOOL CCellTag::OnInitDialog()
 
 	if(ini.sections.find("Tags")==ini.sections.end())
 	{
-		MessageBox("No tags are specified.");
+		MessageBox(GetLanguageStringACP("NoTagsSpecified"));
 		OnCancel();
 	}
 	else
@@ -101,6 +101,8 @@ void CCellTag::OnOK()
 
 void CCellTag::UpdateStrings()
 {
+	ApplyEditorUIFont(this);
+
 	SetWindowText(GetLanguageStringACP("CellTagCap"));
 	GetDlgItem(IDC_LTAG)->SetWindowText(GetLanguageStringACP("CellTagTag"));
 	GetDlgItem(IDC_LDESC)->SetWindowText(GetLanguageStringACP("CellTagDesc"));

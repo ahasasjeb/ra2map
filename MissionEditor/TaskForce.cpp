@@ -499,7 +499,7 @@ void CTaskForce::OnDeletetaskforce()
 	CIniFileSection & sec=ini.sections[(char*)(LPCTSTR)tf];
 	
 	int res;
-	res=MessageBox("Are you sure to delete the selected task force? If you delete it, make sure to eliminate ANY references to this task force in team-types.","Delete task force",MB_YESNO);
+	res=MessageBox(GetLanguageStringACP("DeleteTaskForce"),GetLanguageStringACP("DeleteTaskForceCap"),MB_YESNO);
 	if(res==IDNO) return;
 
 	int v=ini.sections["TaskForces"].FindValue((char*)(LPCTSTR)tf);

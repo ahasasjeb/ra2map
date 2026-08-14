@@ -26,6 +26,7 @@
 #include "Lighting.h"
 #include "mapdata.h"
 #include "variables.h"
+#include "functions.h"
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -105,9 +106,11 @@ void CLighting::UpdateDialog()
 BOOL CLighting::OnInitDialog() 
 {
 	CDialog::OnInitDialog();
+	ApplyEditorUIFont(this);
+	SetWindowText(TranslateStringACP("Lighting Settings"));
 	
 #ifdef RA2_MODE
-	SetDlgItemText(IDC_LIONSTORM, "Weather Storm Settings");
+	SetDlgItemText(IDC_LIONSTORM, TranslateStringACP("Weather Storm Settings"));
 #endif
 	
 	return TRUE;  // return TRUE unless you set the focus to a control
