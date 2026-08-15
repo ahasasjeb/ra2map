@@ -6,6 +6,10 @@
   <PropertyGroup>
 	<XccVcpkgDirTriplet>$(XccDir)\vcpkg_installed\x86-windows\x86-windows</XccVcpkgDirTriplet>
     <XccVcpkgDir>$(XccVcpkgDirTriplet)</XccVcpkgDir>
+    <!-- Link-time code generation: cross-TU inlining and dead code
+         elimination across the whole program. Safe for release builds
+         and yields noticeably smaller/faster binaries. -->
+    <WholeProgramOptimization>true</WholeProgramOptimization>
   </PropertyGroup>
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup />
@@ -17,6 +21,7 @@
       <Optimization>MaxSpeed</Optimization>
       <SuppressStartupBanner>true</SuppressStartupBanner>
       <PreprocessorDefinitions>NDEBUG;_AFXDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalOptions>/GL /Gw /Gy %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Midl>
       <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
@@ -27,6 +32,9 @@
     <Link>
       <AdditionalDependencies>ddraw.lib;dxguid.lib;winmm.lib;gdiplus.lib;lzo2.lib;bz2.lib;zlib.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <IgnoreSpecificDefaultLibraries>libcmt.lib; libcmtd.lib; msvcrtd.lib</IgnoreSpecificDefaultLibraries>
+      <LinkTimeCodeGeneration>UseLinkTimeCodeGeneration</LinkTimeCodeGeneration>
+      <OptimizeReferences>true</OptimizeReferences>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup />
