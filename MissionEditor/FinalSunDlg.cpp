@@ -1,4 +1,4 @@
-﻿/*
+/*
     FinalSun/FinalAlert 2 Mission Editor
 
     Copyright (C) 1999-2024 Electronic Arts, Inc.
@@ -3201,6 +3201,21 @@ LONG __stdcall ExceptionHandler(
 	errstream << "Exception occured. Current data:" << endl;
 	errstream << "Last succeeded operation:" << last_succeeded_operation << endl;
 	errstream << "Last succeeded library operation:" << FSunPackLib::last_succeeded_operation << endl;
+	errstream << "Exception code: 0x" << hex << (unsigned int)ExceptionInfo->ExceptionRecord->ExceptionCode << dec << endl;
+	errstream << "Exception address: 0x" << hex << (unsigned long)(unsigned int)(size_t)ExceptionInfo->ExceptionRecord->ExceptionAddress << dec << endl;
+	errstream << "Module base: 0x" << hex << (unsigned long)(unsigned int)(size_t)GetModuleHandle(NULL) << dec << endl;
+	errstream << "Exception offset: 0x" << hex << (unsigned long)(unsigned int)((size_t)ExceptionInfo->ExceptionRecord->ExceptionAddress - (size_t)GetModuleHandle(NULL)) << dec << endl;
+	{
+		// capture a stack trace of this thread (resolved offline via the PDB)
+		void* frames[32];
+		USHORT count = CaptureStackBackTrace(0, 32, frames, NULL);
+		errstream << "Stack trace:" << endl;
+		for (USHORT n = 0; n < count; n++)
+		{
+			errstream << "  [" << n << "] 0x" << hex << (unsigned long)(unsigned int)(size_t)frames[n] << dec << endl;
+		}
+		errstream.flush();
+	}
 	errstream << "Trying to save current map" << endl;
 	errstream.flush();
 

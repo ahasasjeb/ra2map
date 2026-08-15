@@ -38,6 +38,17 @@ public:
         return iNormal < m_normals.size() ? m_normals[iNormal] : Vec3f(0, 1, 0);
     }
 
+    // Accessors for the Rust core (Vec3f is POD: 3 consecutive floats)
+    size_t size() const
+    {
+        return m_normals.size();
+    }
+
+    const Vec3f* data() const
+    {
+        return m_normals.data();
+    }
+
 private:
     void load(std::istream& f);
 

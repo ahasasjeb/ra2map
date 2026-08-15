@@ -93,8 +93,19 @@ void CTileSetBrowserView::OnDraw(CDC* pDC)
 
 
 
-	if (((CFinalSunDlg*)theApp.m_pMainWnd)->m_view.m_isoview->b_IsLoading || ((CFinalSunDlg*)theApp.m_pMainWnd)->m_view.m_isoview->lpds == NULL || ((CFinalSunDlg*)theApp.m_pMainWnd)->m_view.m_isoview->lpds->IsLost() != DD_OK)
+	if (((CFinalSunDlg*)theApp.m_pMainWnd)->m_view.m_isoview->b_IsLoading)
 		return;
+
+	if (((CFinalSunDlg*)theApp.m_pMainWnd)->m_view.m_isoview->lpds == NULL || ((CFinalSunDlg*)theApp.m_pMainWnd)->m_view.m_isoview->lpds->IsLost() != DD_OK)
+	{
+		// the primary surface was lost (typical after a window
+		// resize/maximize): recover the DirectDraw objects. The iso view's
+		// recovery also rebuilds this browser's cached tile surfaces, so
+		// just return - the invalidation triggered by the recovery will
+		// repaint us.
+		((CFinalSunDlg*)theApp.m_pMainWnd)->m_view.m_isoview->ReInitializeDDraw();
+		return;
+	}
 
 
 	RECT r;
@@ -519,6 +530,25 @@ void CTileSetBrowserView::SetTileSet(DWORD dwTileSet, BOOL bOnlyRedraw)
 	((CFinalSunDlg*)theApp.m_pMainWnd)->m_view.m_isoview->SetFocus();
 
 	//DrawIt();
+}
+
+void CTileSetBrowserView::ReInitializeTileSurfaces()
+{
+	// The DirectDraw objects were recreated (lost-surface recovery); all
+	// previously cached tile surfaces belong to the old/lost device and
+	// must be re-rendered before they are drawn again.
+	if (m_lpDDS && m_CurrentMode == 1)
+	{
+		DWORD dwStartID = GetTileID(m_currentTileSet, 0);
+		for (int i = 0;i < m_tilecount;i++)
+		{
+			if (m_lpDDS[i]) m_lpDDS[i]->Release();
+			m_lpDDS[i] = RenderTile(dwStartID + i);
+		}
+	}
+
+	if (m_hWnd != NULL)
+		Invalidate(FALSE);
 }
 
 

@@ -1,4 +1,4 @@
-﻿/*
+/*
     FinalSun/FinalAlert 2 Mission Editor
 
     Copyright (C) 1999-2024 Electronic Arts, Inc.

@@ -62,6 +62,10 @@ public:
 	void SetTileSet(DWORD dwTileSet, BOOL bOnlyRedraw=FALSE);
 	DWORD GetTileID(DWORD dwTileSet, DWORD dwType);
 	int m_currentTileSet;
+	// Rebuilds the cached tile surfaces after the DirectDraw objects were
+	// reinitialized (e.g. after a lost-surface recovery). The old surfaces
+	// belong to a lost device and must never be drawn from.
+	void ReInitializeTileSurfaces();
 	virtual ~CTileSetBrowserView();
 #ifdef _DEBUG
 	virtual void AssertValid() const;

@@ -1,4 +1,4 @@
-﻿/*
+/*
 	FinalSun/FinalAlert 2 Mission Editor
 
 	Copyright (C) 1999-2024 Electronic Arts, Inc.
@@ -1312,7 +1312,16 @@ void CIsoView::OnMouseMove(UINT nFlags, CPoint point)
 			ddsd.dwSize = sizeof(DDSURFACEDESC2);
 			ddsd.dwFlags = DDSD_WIDTH | DDSD_HEIGHT;
 
-			lpdsBack->GetSurfaceDesc(&ddsd);
+	lpdsBack->GetSurfaceDesc(&ddsd);
+
+	// Clamp the display rect to the backbuffer. When the window sticks out
+	// of the screen (maximized borders report negative coordinates, and a
+	// window at a screen edge can extend past it), drawing functions must
+	// never write past the backbuffer.
+	if (r.left < 0) r.left = 0;
+	if (r.top < 0) r.top = 0;
+	if (r.right > static_cast<int>(ddsd.dwWidth)) r.right = static_cast<int>(ddsd.dwWidth);
+	if (r.bottom > static_cast<int>(ddsd.dwHeight)) r.bottom = static_cast<int>(ddsd.dwHeight);
 
 
 			lpdsBack->Lock(NULL, &ddsd, DDLOCK_SURFACEMEMORYPTR | DDLOCK_WAIT | DDLOCK_NOSYSLOCK, NULL);
@@ -3790,6 +3799,15 @@ void CIsoView::ReInitializeDDraw()
 
 	// the last rendered frame does not match the new map content anymore
 	m_lastFrameValid = false;
+
+	// the tile set browser caches tile surfaces created from the old
+	// DirectDraw objects - rebuild them so it does not paint white
+	// after the recovery
+	{
+		CMyViewFrame& viewFrame = *(CMyViewFrame*)owner;
+		if (viewFrame.m_browser != NULL && viewFrame.m_browser->m_view.m_hWnd != NULL)
+			viewFrame.m_browser->m_view.ReInitializeTileSurfaces();
+	}
 
 	//Sleep(2500);
 
@@ -7265,32 +7283,74 @@ bool CIsoView::DrawMapPan(int left, int right, int top, int bottom, DWORD MM_hei
 
 	BYTE* const surface = static_cast<BYTE*>(desc->lpSurface);
 	const int pitch = desc->lPitch;
-	const int rowBytes = windowWidth * bpp;
+	const int surfWidth = static_cast<int>(desc->dwWidth);
+	const int surfHeight = static_cast<int>(desc->dwHeight);
+	if (pitch <= 0 || surfWidth <= 0 || surfHeight <= 0)
+		return false;
 
-	// shift the existing scene
+	// Clamp the window rect to the surface. The window can stick out of the
+	// screen (maximized windows report negative coordinates for their
+	// invisible borders, and a window dragged to a screen edge can extend
+	// past the screen) - every direct surface access below must stay inside
+	// the locked surface, otherwise the pan writes past the buffer and
+	// corrupts memory.
+	RECT rc;
+	rc.left = max(0L, r.left);
+	rc.top = max(0L, r.top);
+	rc.right = min(static_cast<LONG>(surfWidth), r.right);
+	rc.bottom = min(static_cast<LONG>(surfHeight), r.bottom);
+	if (rc.right <= rc.left || rc.bottom <= rc.top)
+		return false;
+	const int copyWidth = rc.right - rc.left;
+
+	// shift the existing scene (all accesses clamped to the surface bounds)
 	if (sy >= 0)
 	{
-		for (int y = r.bottom - 1; y >= r.top; --y)
+		for (int y = rc.bottom - 1; y >= rc.top; --y)
 		{
-			BYTE* dst = surface + (y + sy) * pitch + (r.left + sx) * bpp;
-			BYTE* src = surface + y * pitch + r.left * bpp;
-			memmove(dst, src, rowBytes);
+			const int dy = y + sy;
+			if (dy < 0 || dy >= surfHeight) continue;
+
+			int dx = rc.left + sx;
+			int sx0 = rc.left;
+			int len = copyWidth;
+			if (dx < 0) { sx0 -= dx; len += dx; dx = 0; }
+			if (dx + len > surfWidth) len = surfWidth - dx;
+			if (len <= 0) continue;
+
+			BYTE* dst = surface + dy * pitch + dx * bpp;
+			BYTE* src = surface + y * pitch + sx0 * bpp;
+			memmove(dst, src, static_cast<size_t>(len) * bpp);
 		}
 	}
 	else
 	{
-		for (int y = r.top; y < r.bottom; ++y)
+		for (int y = rc.top; y < rc.bottom; ++y)
 		{
-			BYTE* dst = surface + (y + sy) * pitch + (r.left + sx) * bpp;
-			BYTE* src = surface + y * pitch + r.left * bpp;
-			memmove(dst, src, rowBytes);
+			const int dy = y + sy;
+			if (dy < 0 || dy >= surfHeight) continue;
+
+			int dx = rc.left + sx;
+			int sx0 = rc.left;
+			int len = copyWidth;
+			if (dx < 0) { sx0 -= dx; len += dx; dx = 0; }
+			if (dx + len > surfWidth) len = surfWidth - dx;
+			if (len <= 0) continue;
+
+			BYTE* dst = surface + dy * pitch + dx * bpp;
+			BYTE* src = surface + y * pitch + sx0 * bpp;
+			memmove(dst, src, static_cast<size_t>(len) * bpp);
 		}
 	}
 
 	// clear the newly exposed L-shaped region with the background color
+	// (clamped to the surface)
 	auto fillRectWhite = [&](int x0, int y0, int x1, int y1)
 	{
-		if (x1 <= x0 || y1 <= y0) return;
+		x0 = max(0, x0);
+		y0 = max(0, y0);
+		x1 = min(surfWidth, x1);
+		y1 = min(surfHeight, y1);		if (x1 <= x0 || y1 <= y0) return;
 		if (bpp == 4)
 		{
 			for (int y = y0; y < y1; ++y)
@@ -7305,23 +7365,23 @@ bool CIsoView::DrawMapPan(int left, int right, int top, int bottom, DWORD MM_hei
 		}
 	};
 
-	if (sx > 0) fillRectWhite(r.left, r.top, r.left + sx, r.bottom);
-	else if (sx < 0) fillRectWhite(r.right + sx, r.top, r.right, r.bottom);
-	if (sy > 0) fillRectWhite(r.left, r.top, r.right, r.top + sy);
-	else if (sy < 0) fillRectWhite(r.left, r.bottom + sy, r.right, r.bottom);
+	if (sx > 0) fillRectWhite(rc.left, rc.top, rc.left + sx, rc.bottom);
+	else if (sx < 0) fillRectWhite(rc.right + sx, rc.top, rc.right, rc.bottom);
+	if (sy > 0) fillRectWhite(rc.left, rc.top, rc.right, rc.top + sy);
+	else if (sy < 0) fillRectWhite(rc.left, rc.bottom + sy, rc.right, rc.bottom);
 
-	// exposed strip bands (in surface coordinates)
+	// exposed strip bands (in surface coordinates, clamped to the surface)
 	RECT stripX;
-	stripX.top = r.top;
-	stripX.bottom = r.bottom;
-	if (sx > 0) { stripX.left = r.left; stripX.right = min(r.right, r.left + sx); }
-	else { stripX.left = max(r.left, r.right + sx); stripX.right = r.right; }
+	stripX.top = rc.top;
+	stripX.bottom = rc.bottom;
+	if (sx > 0) { stripX.left = rc.left; stripX.right = min(rc.right, static_cast<LONG>(rc.left + sx)); }
+	else { stripX.left = max(rc.left, static_cast<LONG>(rc.right + sx)); stripX.right = rc.right; }
 
 	RECT stripY;
-	stripY.left = r.left;
-	stripY.right = r.right;
-	if (sy > 0) { stripY.top = r.top; stripY.bottom = min(r.bottom, r.top + sy); }
-	else { stripY.top = max(r.top, r.bottom + sy); stripY.bottom = r.bottom; }
+	stripY.left = rc.left;
+	stripY.right = rc.right;
+	if (sy > 0) { stripY.top = rc.top; stripY.bottom = min(rc.bottom, static_cast<LONG>(rc.top + sy)); }
+	else { stripY.top = max(rc.top, static_cast<LONG>(rc.bottom + sy)); stripY.bottom = rc.bottom; }
 
 	// margin around the exposed region so that tall sprites crossing the border get redrawn too
 	const int marginX = 8 * f_x;
@@ -7329,31 +7389,31 @@ bool CIsoView::DrawMapPan(int left, int right, int top, int bottom, DWORD MM_hei
 	RECT stripXExp = stripX;
 	if (stripXExp.left < stripXExp.right)
 	{
-		stripXExp.left = max(r.left, stripXExp.left - marginX);
-		stripXExp.right = min(r.right, stripXExp.right + marginX);
+		stripXExp.left = max(rc.left, stripXExp.left - marginX);
+		stripXExp.right = min(rc.right, stripXExp.right + marginX);
 	}
 	RECT stripYExp = stripY;
 	if (stripYExp.top < stripYExp.bottom)
 	{
-		stripYExp.top = max(r.top, stripYExp.top - marginY);
-		stripYExp.bottom = min(r.bottom, stripYExp.bottom + marginY);
+		stripYExp.top = max(rc.top, stripYExp.top - marginY);
+		stripYExp.bottom = min(rc.bottom, stripYExp.bottom + marginY);
 	}
 
 	// the terrain pass uses a slightly inflated region, as tiles can stick out of their cell bounds
 	RECT stripXTerrain = stripX;
 	if (stripXTerrain.left < stripXTerrain.right)
 	{
-		stripXTerrain.left = max(r.left, stripXTerrain.left - f_x);
-		stripXTerrain.right = min(r.right, stripXTerrain.right + f_x);
+		stripXTerrain.left = max(rc.left, stripXTerrain.left - f_x);
+		stripXTerrain.right = min(rc.right, stripXTerrain.right + f_x);
 	}
 	RECT stripYTerrain = stripY;
 	if (stripYTerrain.top < stripYTerrain.bottom)
 	{
-		stripYTerrain.top = max(r.top, stripYTerrain.top - f_y);
-		stripYTerrain.bottom = min(r.bottom, stripYTerrain.bottom + f_y);
+		stripYTerrain.top = max(rc.top, stripYTerrain.top - f_y);
+		stripYTerrain.bottom = min(rc.bottom, stripYTerrain.bottom + f_y);
 	}
 
-	const DrawMapCellContext ctx = { *desc, r, MM_heightstart, bMarbleHeight, true };
+	const DrawMapCellContext ctx = { *desc, rc, MM_heightstart, bMarbleHeight, true };
 
 	const int mapwidth = Map->GetWidth();
 	const int mapheight = Map->GetHeight();

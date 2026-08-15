@@ -22,6 +22,7 @@
 struct IUnknown;
 
 #include "MissionEditorPackLib.h"
+#include "RustCore.h"
 
 #include <map>
 #include <vector>
@@ -1022,125 +1023,41 @@ namespace FSunPackLib
 
 	void tmp_ts_draw(Ctmp_ts_file& f, byte* d, int i)
 	{
-		int tile_cx, tile_cy;
-		int skip_x;
-		int skip_y;
-
-
-		tile_cx = f.get_cx();
-		tile_cy = f.get_cy();
-		int std_cx = tile_cx;
-		int std_cy = tile_cy;
-		int cy_extra = 0;
-		int y_extra = 0;
-		int cx_extra = 0;
-		int x_extra = 0;
-		int y_added = 0;
-		int x_added = 0;
-
-
-		if (f.has_extra_graphics(i))
+		// The tile drawing kernel lives in the memory-safe Rust core now.
+		// All reads are clamped to the containing file and all writes are
+		// bounds-checked against the destination buffer, so corrupt TMP
+		// data can no longer corrupt the heap.
+		rs_tmp_tile_info info;
+		info.std_cx = f.get_cx();
+		info.std_cy = f.get_cy();
+		info.has_extra = f.has_extra_graphics(i) ? 1 : 0;
+		info.cx_extra = 0;
+		info.cy_extra = 0;
+		info.x_extra = 0;
+		info.y_extra = 0;
+		if (info.has_extra)
 		{
-			cy_extra = f.get_cy_extra(i);
-			y_extra = f.get_y_extra(i) - f.get_y(i);
-			cx_extra = f.get_cx_extra(i);
-			x_extra = f.get_x_extra(i) - f.get_x(i);
-
-			if (y_extra < 0)
-			{
-				y_added = -y_extra;
-				tile_cy -= y_extra;
-				y_extra = 0;
-			}
-			if (x_extra < 0)
-			{
-				x_added = -x_extra;
-				tile_cx -= x_extra;
-				x_extra = 0;
-			}
-
-			if (cy_extra + y_extra > tile_cy) tile_cy = cy_extra + y_extra;
-			if (cx_extra + x_extra > tile_cx) tile_cx = cx_extra + x_extra;
+			info.cx_extra = f.get_cx_extra(i);
+			info.cy_extra = f.get_cy_extra(i);
+			info.x_extra = f.get_x_extra(i) - f.get_x(i);
+			info.y_extra = f.get_y_extra(i) - f.get_y(i);
 		}
 
-		memset(d, 0, tile_cx * tile_cy);
+		int tile_cx = 0, tile_cy = 0;
+		if (rs_tmp_ts_get_size(&info, &tile_cx, &tile_cy) != RS_OK)
+			return; // invalid dimensions, leave the buffer untouched
 
-		const byte* r = f.get_image(i);
+		const byte* img = f.get_image(i);
+		long long remaining = (f.data() + f.get_size()) - img;
+		if (remaining < 0) remaining = 0;
 
-
-
-		byte* w_line = d;
-		if (f.has_extra_graphics(i))
-			w_line = d + tile_cx * y_added + x_added;
-
-
-		int x = f.header().cx / 2;
-		int cx = 0;
-		int y;
-		for (y = 0; y < f.header().cy / 2; y++)
+		const int res = rs_tmp_ts_draw(d, static_cast<size_t>(tile_cx) * tile_cy, img, static_cast<size_t>(remaining), &info);
+		if (res != RS_OK)
 		{
-			cx += 4;
-			x -= 2;
-			if (w_line + x < d + tile_cx * tile_cy)
-				memcpy(w_line + x, r, cx);
-			r += cx;
-			w_line += tile_cx;
-		}
-		for (; y < f.header().cy - 1; y++)
-		{
-			cx -= 4;
-			x += 2;
-			if (w_line + x < d + tile_cx * tile_cy)
-				memcpy(w_line + x, r, cx);
-			r += cx;
-			w_line += tile_cx;
-		}
-
-
-		if (f.has_extra_graphics(i))
-		{
-			r += std_cx * std_cy / 2;
-
-			w_line = d;
-
-			skip_x = 0;
-			skip_y = 0;
-
-			int cx, cy;
-			if (x_extra < 0)
-			{
-				cx = cx_extra;
-			}
-			else
-			{
-				cx = cx_extra;
-				w_line += x_extra;
-			}
-			if (y_extra < 0)
-			{
-				cy = cy_extra;
-			}
-			else
-			{
-				cy = cy_extra;
-				w_line += y_extra * (tile_cx);
-			}
-
-			for (y = 0; y < cy - skip_y; y++)
-			{
-				byte* w = w_line;
-				for (int x = 0; x < cx - skip_x; x++)
-				{
-					int v = *r++;
-					if (v)
-						*w = v;
-
-
-					w++;
-				}
-				w_line += tile_cx;
-			}
-
+			// Never fatal: a corrupt tile is simply left blank.
+			char buf[256];
+			sprintf_s(buf, "tmp_ts_draw: Rust core rejected tile %d (status %d)\n", i, res);
+			OutputDebugStringA(buf);
 		}
 	}
 
@@ -1564,183 +1481,90 @@ namespace FSunPackLib
 
 	void GetVXLSectionBounds(int iSection, const Vec3f& rotation, const Vec3f& modelOffset, Vec3f& minVec, Vec3f& maxVec)
 	{
-		const t_vxl_section_tailer& section_tailer = *cur_vxl.get_section_tailer(iSection);
-		auto& header = *cur_vxl.get_section_header(iSection);
-		auto& tailer = *cur_vxl.get_section_tailer(iSection);
-		//const auto matrix = Matrix3_4f(tailer.transform).scaledColumn(3, tailer.scale);
-		const auto matrix = Matrix3_4f(cur_hva.get_transform_matrix(0, iSection)).scaledColumn(3, tailer.scale);
-		maxVec = minVec = Vec3f(section_tailer.x_min_scale, section_tailer.y_min_scale, section_tailer.z_min_scale);
+		// Bounds computation lives in the Rust core now (bounds-checked and
+		// panic-free). It replicates the previous algorithm exactly.
+		const t_vxl_section_tailer& tailer = *cur_vxl.get_section_tailer(iSection);
 
-		// get projected coordinates of all bounding box corners
-		for (int x = 0; x < 2; ++x)
+		rs_vxl_tailer rt;
+		rt.scale = tailer.scale;
+		rt.x_min_scale = tailer.x_min_scale;
+		rt.y_min_scale = tailer.y_min_scale;
+		rt.z_min_scale = tailer.z_min_scale;
+		rt.x_max_scale = tailer.x_max_scale;
+		rt.y_max_scale = tailer.y_max_scale;
+		rt.z_max_scale = tailer.z_max_scale;
+		rt.cx = tailer.cx;
+		rt.cy = tailer.cy;
+		rt.cz = tailer.cz;
+
+		unsigned char id[16] = { 0 };
+		memcpy(id, cur_vxl.get_section_header(iSection)->id, 16);
+
+		const float rot[3] = { rotation.x(), rotation.y(), rotation.z() };
+		const float off[3] = { modelOffset.x(), modelOffset.y(), modelOffset.z() };
+
+		float mn[3], mx[3];
+		int mainSection = 0;
+		if (rs_vxl_compute_bounds(1, id, &rt, cur_hva.get_transform_matrix(0, iSection), rot, off, &mainSection, mn, mx) != RS_OK)
 		{
-			for (int y = 0; y < 2; ++y)
-			{
-				for (int z = 0; z < 2; ++z)
-				{
-					Vec3f cur = matrix * (Vec3f(
-						x == 0 ? section_tailer.x_min_scale : section_tailer.x_max_scale,
-						y == 0 ? section_tailer.y_min_scale : section_tailer.y_max_scale,
-						z == 0 ? section_tailer.z_min_scale : section_tailer.z_max_scale
-					) + modelOffset);
-					rotate_zxy(cur, rotation);
-					minVec.minimum(cur);
-					maxVec.maximum(cur);
-				}
-			}
+			minVec = Vec3f();
+			maxVec = Vec3f();
+			return;
 		}
-		// for Debug, ensure center is visible
-#ifdef _DEBUG
-		Vec3f cur = matrix * Vec3f();
-		rotate_zxy(cur, rotation);
-		minVec.minimum(cur);
-		maxVec.maximum(cur);
-#endif
+
+		minVec = Vec3f(mn[0], mn[1], mn[2]);
+		maxVec = Vec3f(mx[0], mx[1], mx[2]);
 	}
 
 
 	void RenderVXLSection(const VoxelNormalTable& normalTable, Vec3f lightDirection, const int iSection, int rtWidth, int rtHeight, const Vec3f& modelOffset, const Vec3f& rotation, const Vec3f& postHVAOffset, BYTE* image, BYTE* lighting, char* image_z, int* i_center_x, int* i_center_y, int ZAdjust, int* i_center_x_zmax, int* i_center_y_zmax, int i3dCenterX, int i3dCenterY)
 	{
-		// normals:
-		// - positive x is facing screen right
-		// - positive y is facing screen bottom
-		// - positive z is facing viewer
-		const Vec3f inverseLightDirection = negate(normalize(lightDirection));
-
-		last_succeeded_operation = 10;
-
-		const auto& header = *cur_vxl.get_section_header(iSection);
-		const auto& tailer = *cur_vxl.get_section_tailer(iSection);
-		const int cx1 = tailer.cx;
-		const int cy1 = tailer.cy;
-		const int cz1 = tailer.cz;
-		//const Matrix3_4f matrix(tailer.transform);
-		const Matrix3_4f matrix(cur_hva.get_transform_matrix(0, iSection));
-		const Matrix3_4f normalMatrix = Matrix3_4f(matrix).setColumn(3, Vec3f());
-		const Matrix3_4f scaledMatrix = matrix.scaleColumn(3, tailer.scale);
-		const Vec3f minScale = Vec3f(tailer.x_min_scale, tailer.y_min_scale, tailer.z_min_scale) + postHVAOffset;
-		const Vec3f maxScale = Vec3f(tailer.x_max_scale, tailer.y_max_scale, tailer.z_max_scale) + postHVAOffset;
-		const Matrix3_4f translateToWorldMatrix = Matrix3_4f::translation(minScale);
-		const Matrix3_4f scaleToWorldMatrix = Matrix3_4f::scale((maxScale - minScale) / Vec3f(tailer.cx, tailer.cy, tailer.cz));
-
-
-		const float _center_x = 0.0f; //(tailer.x_max_scale + tailer.x_min_scale) / 2.f;
-		const float _center_y = 0.0f; //(tailer.y_max_scale + tailer.y_min_scale) / 2.f;
-		const float _center_z = 0.0f; //(tailer.z_max_scale + tailer.z_min_scale) / 2.f;
-
-		if (i3dCenterX < 0)
-			i3dCenterX = static_cast<int>(_center_x);
-		if (i3dCenterY < 0)
-			i3dCenterY = static_cast<int>(_center_y);
-
-		Vec3f center(_center_x, _center_y, _center_z);
-
-		last_succeeded_operation = 11;
-		// output center 2d coordinates
-		if (i_center_x || i_center_y)
-		{
-			Vec3f s_pixel = center + Vec3f(0.0f, 0.f, 0.0f);
-			Vec3f d_pixel = scaledMatrix * s_pixel;
-
-			rotate_zxy(d_pixel, rotation);
-
-			d_pixel += modelOffset;
-
-			if (i_center_x)
-				*i_center_x = static_cast<int>(d_pixel.x() + 0.5f);
-			if (i_center_y)
-				*i_center_y = static_cast<int>(d_pixel.y() + 0.5f);
-
-		}
-
-		last_succeeded_operation = 12;
-		if (i_center_x_zmax || i_center_y_zmax)
-		{
-			Vec3f s_pixel = center;
-			Vec3f d_pixel = scaledMatrix * s_pixel;
-
-			rotate_zxy(d_pixel, rotation);
-
-			d_pixel += modelOffset;
-
-			if (i_center_x_zmax) *i_center_x_zmax = static_cast<int>(d_pixel.x());
-			if (i_center_y_zmax) *i_center_y_zmax = static_cast<int>(d_pixel.y());
-
-		}
+		// The voxel span walker lives in the memory-safe Rust core now.
+		// Span reads are clamped to the section body and output writes are
+		// bounds-checked, so malformed VXL data (common with modded voxels)
+		// can no longer corrupt the heap.
 
 		last_succeeded_operation = 13;
 
-		// Vec3f minPixel(1000, 1000, 1000);
-		int j = 0;
-		for (int y = 0; y < cy1; y++)
-		{
-			for (int x = 0; x < cx1; x++)
-			{
-				const byte* r = cur_vxl.get_span_data(iSection, j);
-				if (r)
-				{
-					int z = 0;
-					int last_z_reported = -5000;
-					while (z < cz1)
-					{
-						z += *r++;
-						int count = *r++;
-						while (count--)
-						{
-							Vec3f s_pixel = Vec3f(static_cast<float>(x), static_cast<float>(y), static_cast<float>(z));
-							Vec3f m_pixel = (translateToWorldMatrix * (scaleToWorldMatrix * s_pixel));
-							assert(minimum(m_pixel, minScale).equals(minScale, 0.001f));
-							assert(maximum(m_pixel, maxScale).equals(maxScale, 0.001f));
-							Vec3f t_pixel = scaledMatrix * m_pixel;
-							Vec3f d_pixel = t_pixel;
+		if (rtWidth < 1 || rtHeight < 1 ||
+			rtWidth > RS_MAX_RENDER_TARGET_DIM || rtHeight > RS_MAX_RENDER_TARGET_DIM)
+			return;
 
-							rotate_zxy(d_pixel, rotation);
+		const auto& tailer = *cur_vxl.get_section_tailer(iSection);
 
-							d_pixel += modelOffset;
-							// minPixel.minimum(d_pixel);
+		rs_vxl_tailer rt;
+		rt.scale = tailer.scale;
+		rt.x_min_scale = tailer.x_min_scale;
+		rt.y_min_scale = tailer.y_min_scale;
+		rt.z_min_scale = tailer.z_min_scale;
+		rt.x_max_scale = tailer.x_max_scale;
+		rt.y_max_scale = tailer.y_max_scale;
+		rt.z_max_scale = tailer.z_max_scale;
+		rt.cx = tailer.cx;
+		rt.cy = tailer.cy;
+		rt.cz = tailer.cz;
 
-							if (x == i3dCenterX && y == i3dCenterY)
-							{
-								if (z >= last_z_reported)
-								{
-									last_z_reported = z;
-									if (i_center_x_zmax) *i_center_x_zmax = static_cast<int>(d_pixel.x());
-									if (i_center_y_zmax) *i_center_y_zmax = static_cast<int>(d_pixel.y());
-								}
-							}
+		const float rot[3] = { rotation.x(), rotation.y(), rotation.z() };
+		const float ld[3] = { lightDirection.x(), lightDirection.y(), lightDirection.z() };
+		const float mo[3] = { modelOffset.x(), modelOffset.y(), modelOffset.z() };
+		const float po[3] = { postHVAOffset.x(), postHVAOffset.y(), postHVAOffset.z() };
 
+		const byte* body = cur_vxl.get_section_body();
+		long long bodyLen = (cur_vxl.data() + cur_vxl.get_size()) - body;
+		if (bodyLen < 0) bodyLen = 0;
 
-							int px = static_cast<int>(d_pixel.x() + 0.5f);
-							int py = static_cast<int>(d_pixel.y() + 0.5f);
-							int ofs = px + rtWidth * py;
-
-							if (px >= 0 && py >= 0 && px < rtWidth && py < rtHeight && d_pixel.z() > image_z[ofs])
-							{
-								image[ofs] = *r++;
-								// lighting calc
-								auto normalIndex = *r++;
-								auto normal = (normalMatrix * normalTable[normalIndex]);
-								rotate_zxy(normal, rotation);
-								auto normalDotLightingVec = normal.dot(inverseLightDirection);
-								auto lightVal = normalDotLightingVec < 0.0f ? 0.0f : normalDotLightingVec;
-								// Debug assert relaxed: MO voxel data can produce normals with
-								// small floating-point drift after matrix transform. Clamp instead
-								// of asserting so Debug builds don't crash on modded voxels.
-								// assert(fabs(normal.squaredLength() - 1.0f) < 0.01f);
-								lighting[ofs] = max(0, static_cast<BYTE>(lightVal * 255.0f));
-								image_z[ofs] = static_cast<char>(d_pixel.z());
-							}
-							else
-								r += 2;;
-							z++;
-						}
-						r++;
-					}
-				}
-				j++;
-			}
-		}
-
+		rs_vxl_render_section(
+			image, lighting, image_z, static_cast<size_t>(rtWidth) * rtHeight,
+			rtWidth, rtHeight, &rt,
+			cur_hva.get_transform_matrix(0, iSection),
+			reinterpret_cast<const float*>(normalTable.data()), static_cast<unsigned int>(normalTable.size()),
+			ld, rot, mo, po,
+			body, static_cast<size_t>(bodyLen), tailer.span_data_ofs,
+			cur_vxl.get_span_start_list(iSection), cur_vxl.get_span_end_list(iSection),
+			i_center_x, i_center_y, i_center_x_zmax, i_center_y_zmax,
+			i3dCenterX, i3dCenterY,
+			&last_succeeded_operation
+		);
 	}
 
 	VoxelNormalTable emptyNormalTable;
@@ -1757,40 +1581,49 @@ namespace FSunPackLib
 		Vec3f minCoords(10000, 10000, 10000);
 		Vec3f maxCoords(-10000, -10000, -10000);
 
-		// Calculate projected bounding box for the virtual render target
-		int iBodySection = -1;
-		int iLargestSection = 0;
-		int iLargestVolume = 0;
-		for (i = 0; i < cur_vxl.get_c_section_tailers(); i++)
+	// Calculate projected bounding box for the virtual render target
+	int iBodySection = -1;
+	int iLargestSection = 0;
+	int iLargestVolume = 0;
+	for (i = 0; i < cur_vxl.get_c_section_tailers(); i++)
+	{
+		const auto& header = cur_vxl.get_section_header(i);
+		const auto& tailer = cur_vxl.get_section_tailer(i);
+		Vec3f secMinVec, secMaxVec;
+		GetVXLSectionBounds(i, rotation, postHVAOffset, secMinVec, secMaxVec);
+		auto extent = secMaxVec - secMinVec;
+		auto volume = extent.x() * extent.y() * extent.z();
+		if (volume >= iLargestVolume)
 		{
-			const auto& header = cur_vxl.get_section_header(i);
-			const auto& tailer = cur_vxl.get_section_tailer(i);
-			Vec3f secMinVec, secMaxVec;
-			GetVXLSectionBounds(i, rotation, postHVAOffset, secMinVec, secMaxVec);
-			auto extent = secMaxVec - secMinVec;
-			auto volume = extent.x() * extent.y() * extent.z();
-			if (volume >= iLargestVolume)
-			{
-				iLargestVolume = volume;
-				iLargestSection = i;
-			}
-			if (strstr(header->id, "BODY") == 0)
-				iBodySection = i;
-			minCoords.minimum(secMinVec);
-			maxCoords.maximum(secMaxVec);
+			iLargestVolume = volume;
+			iLargestSection = i;
 		}
+		// id is char[16] and may not be NUL-terminated - check the prefix
+		// safely instead of relying on strstr.
+		if (strncmp(header->id, "BODY", 4) == 0)
+			iBodySection = i;
+		minCoords.minimum(secMinVec);
+		maxCoords.maximum(secMaxVec);
+	}
 
-		const int iMainSection = iBodySection >= 0 ? iBodySection : iLargestSection;
+	const int iMainSection = iBodySection >= 0 ? iBodySection : iLargestSection;
 
-		const Vec3f renderOffset = negate(minCoords);
+	const Vec3f renderOffset = negate(minCoords);
 
-		last_succeeded_operation = 2;
+	last_succeeded_operation = 2;
 
 
-		const auto extents = (maxCoords - minCoords);
-		int rtWidth = ceil(extents.x());
-		int rtHeight = ceil(extents.y());
-		const int c_pixels = rtWidth * rtHeight;
+	const auto extents = (maxCoords - minCoords);
+	int rtWidth = ceil(extents.x());
+	int rtHeight = ceil(extents.y());
+	// guard the allocation against corrupt bounds data (the Rust core
+	// also rejects render targets beyond this size)
+	if (rtWidth < 1 || rtHeight < 1 || rtWidth > RS_MAX_RENDER_TARGET_DIM || rtHeight > RS_MAX_RENDER_TARGET_DIM)
+	{
+		OutputDebugStringA("LoadVXLImageInSurface: corrupt section bounds, skipping\n");
+		return NULL;
+	}
+	const int c_pixels = rtWidth * rtHeight;
 
 		// MYASSERT(c_pixels,1);
 
@@ -2009,26 +1842,30 @@ namespace FSunPackLib
 				iLargestVolume = volume;
 				iLargestSection = i;
 			}
-			if (strcmp(header->id, "BODY") == 0)
-				iBodySection = i;
-			minCoords.minimum(secMinVec);
-			maxCoords.maximum(secMaxVec);
-		}
+		if (strncmp(header->id, "BODY", 4) == 0)
+			iBodySection = i;
+		minCoords.minimum(secMinVec);
+		maxCoords.maximum(secMaxVec);
+	}
 
-		const int iMainSection = iBodySection >= 0 ? iBodySection : iLargestSection;
-
-
-		const Vec3f renderOffset = negate(minCoords);
-
-		last_succeeded_operation = 2;
+	const int iMainSection = iBodySection >= 0 ? iBodySection : iLargestSection;
 
 
-		const auto extents = (maxCoords - minCoords);
-		int rtWidth = ceil(extents.x()) + 1;
-		int rtHeight = ceil(extents.y()) + 1;
-		const int c_pixels = rtWidth * rtHeight;
+	const Vec3f renderOffset = negate(minCoords);
 
-		MYASSERT(c_pixels, 1);
+	last_succeeded_operation = 2;
+
+
+	const auto extents = (maxCoords - minCoords);
+	int rtWidth = ceil(extents.x()) + 1;
+	int rtHeight = ceil(extents.y()) + 1;
+	// guard the allocation against corrupt bounds data
+	if (rtWidth < 1 || rtHeight < 1 || rtWidth > RS_MAX_RENDER_TARGET_DIM || rtHeight > RS_MAX_RENDER_TARGET_DIM)
+	{
+		OutputDebugStringA("LoadVXLImage: corrupt section bounds, skipping\n");
+		return FALSE;
+	}
+	const int c_pixels = rtWidth * rtHeight;
 
 		image.clear();
 		lighting.clear();

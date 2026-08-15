@@ -82,6 +82,9 @@
     <Lib>
       <SuppressStartupBanner>true</SuppressStartupBanner>
     </Lib>
+    <PreBuildEvent>
+      <Command>where cargo &gt;nul 2&gt;nul &amp;&amp; (cargo build --release --target i686-pc-windows-msvc --manifest-path "$(SolutionDir)rust_core\Cargo.toml") || ("$(USERPROFILE)\.cargo\bin\cargo.exe" build --release --target i686-pc-windows-msvc --manifest-path "$(SolutionDir)rust_core\Cargo.toml")</Command>
+    </PreBuildEvent>
     <Link>
       <ModuleDefinitionFile>.\MissionEditorPackLib.def</ModuleDefinitionFile>
     </Link>
@@ -114,6 +117,9 @@
     <Lib>
       <SuppressStartupBanner>true</SuppressStartupBanner>
     </Lib>
+    <PreBuildEvent>
+      <Command>where cargo &gt;nul 2&gt;nul &amp;&amp; (cargo build --release --target i686-pc-windows-msvc --manifest-path "$(SolutionDir)rust_core\Cargo.toml") || ("$(USERPROFILE)\.cargo\bin\cargo.exe" build --release --target i686-pc-windows-msvc --manifest-path "$(SolutionDir)rust_core\Cargo.toml")</Command>
+    </PreBuildEvent>
     <Link>
       <ModuleDefinitionFile>.\MissionEditorPackLib.def</ModuleDefinitionFile>
     </Link>
@@ -126,6 +132,7 @@
     <ClInclude Include="Vec3.h" />
     <ClInclude Include="VoxelNormals.h" />
     <ClInclude Include="MissionEditorPackLib.h" />
+    <ClInclude Include="RustCore.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
