@@ -3715,6 +3715,15 @@ BOOL CLoading::InitMixFiles()
 	// load expansion mix files
 	for(i=0;i<101;i++)
 	{
+		// Mental Omega performance optimization: MO only ships expandmo10/11/94-99.
+		// Skip the empty range 00-09 and 12-93 to avoid ~90 pointless DoesFileExist
+		// calls (each hits the filesystem). The stock YR expandmd search is unaffected.
+		if(mental_omega_mode && i != 100)
+		{
+			if(i < 10) continue;
+			if(i >= 12 && i < 94) continue;
+		}
+
 		CString expand;		
 		char n[50];	
 		
@@ -3984,6 +3993,8 @@ BOOL CLoading::InitMixFiles()
 	}
 
 	// load expansion ecache mix files
+	// Mental Omega does not ship ecache*.mix files, skip the 100-iteration search
+	if(!mental_omega_mode)
 	for(i=0;i<100;i++)
 	{
 		CString expand;		

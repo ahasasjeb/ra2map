@@ -242,6 +242,14 @@ int Cmix_file::post_open()
 				read(&m_index[0], cb_index);
 				for (int i = 0; i < c_files; i++)
 				{
+					// Skip obfuscated / invalid entries (Mental Omega anti-tamper):
+					// some entries have offset and size set to 0xFFFFFFFF.
+					if (m_index[i].offset == 0xFFFFFFFF || m_index[i].size == 0xFFFFFFFF)
+					{
+						m_index[i].offset = 0;
+						m_index[i].size = 0;
+						continue;
+					}
 					if (m_index[i].offset & 0xf)
 						aligned = false;
 					m_index[i].offset += 4 + sizeof(t_mix_header) + cb_index;
@@ -344,6 +352,8 @@ int Cmix_file::post_open()
 			for (int j = 0; j < new_c_files; j++)
 			{
 				int id = f.get_id(j);
+				int fidx = f.get_index(id);
+				if (fidx == -1) continue; // skip invalid / obfuscated entries
 				m_index[c_files + j] = t_mix_index_entry(id, f.get_offset(id) + get_offset(m_index[i].id), f.get_size(id));
 				m_id_index[id] = c_files + j;
 			}

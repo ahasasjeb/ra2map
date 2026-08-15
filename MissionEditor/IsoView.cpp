@@ -5759,13 +5759,35 @@ void CIsoView::DrawMap()
 	}
 #endif
 #ifdef NOSURFACES				
-	lpdsBack->Lock(NULL, &ddsd, DDLOCK_SURFACEMEMORYPTR | DDLOCK_WAIT | DDLOCK_NOSYSLOCK, NULL);
+	{
+		HRESULT lockRes = lpdsBack->Lock(NULL, &ddsd, DDLOCK_SURFACEMEMORYPTR | DDLOCK_WAIT | DDLOCK_NOSYSLOCK, NULL);
+		if (lockRes != DD_OK || ddsd.lpSurface == NULL)
+		{
+			// Surface lock failed (lost surface / busy). Try to restore once.
+			if (lockRes == DDERR_SURFACELOST)
+			{
+				lpdsBack->Restore();
+				lockRes = lpdsBack->Lock(NULL, &ddsd, DDLOCK_SURFACEMEMORYPTR | DDLOCK_WAIT | DDLOCK_NOSYSLOCK, NULL);
+			}
+			if (lockRes != DD_OK || ddsd.lpSurface == NULL)
+			{
+				// Cannot lock the back buffer - skip this frame rather than crash.
+				return;
+			}
+		}
+	}
 #endif
 
 	// we render texts and waypoints last as they should be always visible anyway and because text rendering is currently done using GDI -> getting a DC for every text is too slow nowadays
 	m_texts_to_render.clear();
 	m_waypoints_to_render.clear();
 	m_celltags_to_render.clear();
+
+	errstream << "DrawMap: before terrain loop, lpSurface=" << ddsd.lpSurface << " lPitch=" << ddsd.lPitch << " w=" << ddsd.dwWidth << " h=" << ddsd.dwHeight << endl;
+	errstream.flush();
+
+	errstream << "DrawMap: terrain1 loop left=" << left << " right=" << right << " top=" << top << " bottom=" << bottom << " tiledata=" << (void*)(*tiledata) << " count=" << (*tiledata_count) << endl;
+	errstream.flush();
 
 	const DrawMapCellContext ctx = { ddsd, r, MM_heightstart, bMarbleHeight, false };
 
@@ -6206,7 +6228,15 @@ void CIsoView::DrawMapObjectsCell(const MapCoords& mapCoords, FIELDDATA& m, cons
 				
 		if (Map->GetNodeAt(mapCoords + MapVec(1, 0), tmp) != m.node.index && Map->GetNodeAt(mapCoords + MapVec(0, 1), tmp) != m.node.index)
 		{
-			const auto drawCoordsBld = GetRenderTargetCoordinates(mapCoords - MapVec(buildinginfo[m.node.type].h - 1, buildinginfo[m.node.type].w - 1));
+			// Bounds-check node type before indexing buildinginfo (MO has many building
+			// types and m.node.type can exceed the 0x0F00 array size, causing AV).
+			int nodeW = 1, nodeH = 1;
+			if (m.node.type < 0x0F00)
+			{
+				nodeW = buildinginfo[m.node.type].w;
+				nodeH = buildinginfo[m.node.type].h;
+			}
+			const auto drawCoordsBld = GetRenderTargetCoordinates(mapCoords - MapVec(nodeH - 1, nodeW - 1));
 
 			COLORREF c;
 			c = GetColor(house);

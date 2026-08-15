@@ -65,7 +65,7 @@ public:
 
 	t_file_type get_type(int id)
 	{
-		assert(get_index(id) != -1);
+		if (get_index(id) == -1) return ft_unknown;
 		return m_index_ft[get_index(id)];
 	}
 
@@ -76,13 +76,13 @@ public:
 
 	int get_offset(unsigned int id) const
 	{
-		assert(get_index(id) != -1);
+		if (get_index(id) == -1) return 0;
 		return m_index[get_index(id)].offset;
 	}
 
 	int get_size(unsigned int id) const
 	{
-		assert(get_index(id) != -1);
+		if (get_index(id) == -1) return 0;
 		return m_index[get_index(id)].size;
 	}
 
