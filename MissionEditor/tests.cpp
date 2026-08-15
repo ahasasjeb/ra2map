@@ -25,6 +25,8 @@
 #include <functional>
 #include <iostream>
 #include "Tube.h"
+#include "MissionEditorPackLib.h"
+#include "RustCore.h"
 
 class TestError : public std::runtime_error
 {
@@ -88,6 +90,8 @@ int Tests::run()
 		[this]() { test_tube_delimiter(); },
 		[this]() { test_hsv(); },
 		[this]() { test_iso(); },
+		[this]() { test_codecs(); },
+		[this]() { test_csf(); },
 	});
 	for (const auto f : test_functions)
 	{
@@ -117,6 +121,31 @@ void Tests::test_inlines()
 	REPORT_TEST(SetParam("SOME,,Value,0,", 1, "NOTSOME") == "SOME,NOTSOME,Value,0,");
 	REPORT_TEST(SetParam("SOME,,Value,0,", 3, "1") == "SOME,,Value,1,");
 	REPORT_TEST(SetParam("SOME,,Value,0,", 10, "A") == "SOME,,Value,0,,,,,,,A");
+
+	// rewritten helpers (previously fixed-buffer strcpy/strcat)
+	REPORT_TEST(TranslateStringVariables(9, "Hello %9", "FinalAlert") == CString("Hello FinalAlert"));
+	REPORT_TEST(TranslateStringVariables(9, "no variable", "FinalAlert") == CString("no variable"));
+	{
+		int x = -1, y = -1;
+		PosToXY("123,456", &x, &y);
+		REPORT_TEST(x == 123 && y == 456);
+	}
+	{
+		int x = -1, y = -1;
+		PosToXY("12", &x, &y); // shorter than 3 chars: used to read before the buffer
+		REPORT_TEST(x == 0 && y == 0);
+	}
+	{
+		CString name;
+		GetNodeName(name, 0);
+		REPORT_TEST(name == CString("000"));
+		GetNodeName(name, 12);
+		REPORT_TEST(name == CString("012"));
+		GetNodeName(name, 123);
+		REPORT_TEST(name == CString("123"));
+		GetNodeName(name, 1234); // used to overflow char[5]
+		REPORT_TEST(name == CString("1234"));
+	}
 }
 
 namespace TubeDirections
@@ -244,4 +273,132 @@ void Tests::test_iso()
 
 	REPORT_TEST(d.ToMapCoords3d(ProjectedCoords((26 - 2) * f_x / 2, 0), 0) == MapCoords(0, 0));
 	
+}
+
+void Tests::test_codecs()
+{
+	// base64 roundtrip through the Rust-backed FSunPackLib API
+	{
+		std::vector<BYTE> data(300);
+		for (size_t i = 0; i < data.size(); i++) data[i] = (BYTE)(i * 7 + 3);
+		BYTE* b64 = FSunPackLib::EncodeBase64(data.data(), (UINT)data.size());
+		TEST(b64 != nullptr);
+		std::vector<BYTE> decoded;
+		int len = FSunPackLib::DecodeBase64((const char*)b64, decoded);
+		delete[] b64;
+		REPORT_TEST(len == (int)data.size());
+		REPORT_TEST(decoded == data);
+	}
+
+	// sectioned Format80 (overlay pack) roundtrip
+	{
+		std::vector<BYTE> overlay(262144, 0xFF);
+		for (size_t i = 0; i < overlay.size(); i++) overlay[i] = (BYTE)(i % 251);
+		BYTE* packed = nullptr;
+		int packedLen = FSunPackLib::EncodeF80(overlay.data(), 262144, 32, &packed);
+		TEST(packed != nullptr && packedLen > 0);
+		std::vector<BYTE> unpacked(262144, 0);
+		bool ok = FSunPackLib::DecodeF80(packed, packedLen, unpacked, 262144);
+		delete[] packed;
+		REPORT_TEST(ok);
+		REPORT_TEST(unpacked == overlay);
+	}
+
+	// IsoMapPack5 (LZO sections) roundtrip
+	{
+		const size_t mapCells = 200 * 200;
+		std::vector<BYTE> mfd(mapCells * MAPFIELDDATA_SIZE);
+		for (size_t i = 0; i < mfd.size(); i++) mfd[i] = (BYTE)(i % 47);
+		BYTE* packed5 = nullptr;
+		UINT packed5Len = FSunPackLib::EncodeIsoMapPack5(mfd.data(), (UINT)mfd.size(), &packed5);
+		TEST(packed5 != nullptr && packed5Len > 0);
+		UINT needed = FSunPackLib::DecodeIsoMapPack5(packed5, packed5Len, NULL, 0, NULL, TRUE);
+		REPORT_TEST(needed == mfd.size());
+		std::vector<BYTE> unpacked5(needed);
+		UINT got = FSunPackLib::DecodeIsoMapPack5(packed5, packed5Len, unpacked5.data(), unpacked5.size(), NULL, TRUE);
+		delete[] packed5;
+		REPORT_TEST(got == needed);
+		REPORT_TEST(unpacked5 == mfd);
+	}
+
+	// corrupt data is rejected instead of corrupting the heap
+	{
+		BYTE junk[] = { 0x10, 0x00, 0x00, 0x08 };
+		std::vector<BYTE> unpacked(262144, 0);
+		REPORT_TEST(FSunPackLib::DecodeIsoMapPack5(junk, sizeof(junk), NULL, 0, NULL, TRUE) == 0);
+		REPORT_TEST(FSunPackLib::DecodeF80(junk, sizeof(junk), unpacked, 262144) == false);
+	}
+}
+
+void Tests::test_csf()
+{
+	auto push_u32 = [](std::vector<BYTE>& v, unsigned int x) {
+		v.push_back((BYTE)(x & 0xFF));
+		v.push_back((BYTE)((x >> 8) & 0xFF));
+		v.push_back((BYTE)((x >> 16) & 0xFF));
+		v.push_back((BYTE)((x >> 24) & 0xFF));
+	};
+
+	// build a minimal CSF file: " FSC" + 20-byte header + one entry
+	std::vector<BYTE> csf;
+	const char* id = "Name:ABC";
+	const wchar_t* value = L"hello";
+	const size_t vlen = wcslen(value);
+	csf.insert(csf.end(), (const BYTE*)" FSC", (const BYTE*)" FSC" + 4);
+	push_u32(csf, 1); push_u32(csf, 1); push_u32(csf, 0); push_u32(csf, 0); push_u32(csf, 0);
+	push_u32(csf, 0); // dwFlag
+	push_u32(csf, (unsigned int)strlen(id));
+	csf.insert(csf.end(), (const BYTE*)id, (const BYTE*)id + strlen(id));
+	csf.insert(csf.end(), (const BYTE*)" RTS", (const BYTE*)" RTS" + 4);
+	push_u32(csf, (unsigned int)vlen);
+	for (size_t i = 0; i < vlen; i++)
+	{
+		unsigned short w = (unsigned short)~value[i];
+		csf.push_back((BYTE)(w & 0xFF));
+		csf.push_back((BYTE)((w >> 8) & 0xFF));
+	}
+
+	size_t entry_count = 0, ids_len = 0, values_len = 0, values_asc_len = 0;
+	int truncated = 0;
+	int res = rs_csf_parse(csf.data(), csf.size(),
+		NULL, 0, &entry_count,
+		NULL, 0, &ids_len,
+		NULL, 0, &values_len,
+		NULL, 0, &values_asc_len, &truncated);
+	REPORT_TEST(res == RS_ERR_SMALL_BUFFER);
+	REPORT_TEST(entry_count == 1);
+	REPORT_TEST(ids_len == strlen(id));
+	REPORT_TEST(values_len == vlen * 2);
+
+	std::vector<rs_csf_entry> entries(entry_count);
+	std::vector<BYTE> ids(ids_len), values(values_len);
+	res = rs_csf_parse(csf.data(), csf.size(),
+		entries.data(), entries.size(), &entry_count,
+		ids.data(), ids.size(), &ids_len,
+		values.data(), values.size(), &values_len,
+		NULL, 0, &values_asc_len, &truncated);
+	REPORT_TEST(res == RS_OK);
+	REPORT_TEST(truncated == 0);
+	REPORT_TEST(memcmp(ids.data(), id, strlen(id)) == 0);
+	bool valuesMatch = true;
+	for (size_t i = 0; i < vlen; i++)
+		valuesMatch = valuesMatch && ((const WCHAR*)values.data())[i] == value[i];
+	REPORT_TEST(valuesMatch);
+
+	// a truncated file stops cleanly with the partial result reported
+	std::vector<BYTE> cut(csf.begin(), csf.end() - 3);
+	size_t c_entry_count = 0, c_ids_len = 0, c_values_len = 0, c_values_asc_len = 0;
+	res = rs_csf_parse(cut.data(), cut.size(),
+		NULL, 0, &c_entry_count,
+		NULL, 0, &c_ids_len,
+		NULL, 0, &c_values_len,
+		NULL, 0, &c_values_asc_len, &truncated);
+	REPORT_TEST(c_entry_count == 0);
+	REPORT_TEST(truncated == 1);
+
+	// a file without the " FSC" marker is rejected
+	BYTE junk[16] = { 0 };
+	size_t j = 0;
+	res = rs_csf_parse(junk, sizeof(junk), NULL, 0, &j, NULL, 0, &j, NULL, 0, &j, NULL, 0, &j, &truncated);
+	REPORT_TEST(res == RS_ERR_BAD_ARG);
 }

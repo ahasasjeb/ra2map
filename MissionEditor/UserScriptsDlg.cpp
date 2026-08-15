@@ -140,7 +140,9 @@ int CUserScript::LoadFile(const char *setupfile)
     //MessageBox(0,(char*)data,"DEBUG: SETUPSCRIPT:/",0);
 
 	BYTE jumplinename[512];
-	memset(jumplinename, 512, 0);
+	// (the original memset had value/size swapped and was a no-op,
+	// leaving the buffer uninitialized for the first strcat)
+	memset(jumplinename, 0, sizeof(jumplinename));
 
 	//// MAIN STUFF HERE ////
 	for(parsepos=0;parsepos<filesize;parsepos++)
@@ -261,10 +263,15 @@ int CUserScript::LoadFile(const char *setupfile)
 		{
 			if(data[parsepos]!=':')
 			{
-				char d[2];
-				d[0]=data[parsepos];
-				d[1]=0;
-				strcat((char*)jumplinename, d);
+				// guard the fixed 512-byte label buffer against
+				// overlong jump line labels in user scripts
+				if (strlen((char*)jumplinename) + 1 < sizeof(jumplinename))
+				{
+					char d[2];
+					d[0]=data[parsepos];
+					d[1]=0;
+					strcat((char*)jumplinename, d);
+				}
 			}
 			else
 			{

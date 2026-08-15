@@ -35,6 +35,7 @@
 #include "functions.h"
 #include "inlines.h"
 #include "MissionEditorPackLib.h"
+#include "RustCore.h"
 #include <chrono>
 #include <thread>
 #include "VoxelNormals.h"
@@ -6279,15 +6280,6 @@ void CLoading::PrepareHouses()
 }
 
 
-BYTE* Search(BYTE** lpData, BYTE* lpSearched)
-{
-	BYTE* lpDat=*lpData;
-	
-	lpDat=(BYTE*)strstr((LPCSTR)lpDat, (LPCSTR)lpSearched)+strlen((LPCSTR)lpSearched);
-
-	return lpDat;
-}
-
 class SortDummy2{
 public:
 	bool operator() (const CString& x, const CString& y) const
@@ -6383,108 +6375,51 @@ void CLoading::LoadStrings()
 	}
 
 	BYTE* orig=static_cast<BYTE*>(lpData);
+	(void)orig;
 
-	if(!(lpData=Search(&lpData, (BYTE*)" FSC"))) return;
-
-	RA2STRFILEHEAD head;
-	memcpy(&head, lpData, RA2STRFILEHEADSIZE);
-	
-
-	lpData+=RA2STRFILEHEADSIZE;
-	
-	map<CString, XCString, SortDummy2> strings;
-
-	int i;
-	//try{
-	for(i=0;i<head.dwCount1;i++)
+	// The CSF string table parsing lives in the memory-safe Rust core now.
+	// The old code walked the file with a raw pointer, trusted every
+	// length field and allocated `new BYTE[dwCharCount+1]` before copying
+	// that many bytes - a corrupt file could read far past the end of the
+	// buffer and corrupt the heap. The Rust parser clamps every read to
+	// the buffer and reports truncation instead.
 	{
-		ASSERT(orig+dwSize>lpData);
+		size_t entry_count = 0, ids_len = 0, values_len = 0, values_asc_len = 0;
+		int truncated = 0;
+		int res = rs_csf_parse(lpData, dwSize,
+			NULL, 0, &entry_count,
+			NULL, 0, &ids_len,
+			NULL, 0, &values_len,
+			NULL, 0, &values_asc_len,
+			&truncated);
+		if (res != RS_ERR_SMALL_BUFFER)
+			return; // " FSC" missing or file too short - same as before
 
-		if(!(lpData=lpData+4))//Search(&lpData, (BYTE*)" LBL"))) 
-		{
-			
+		std::vector<rs_csf_entry> entries(entry_count);
+		std::vector<BYTE> ids(ids_len), values(values_len), values_asc(values_asc_len);
+		res = rs_csf_parse(lpData, dwSize,
+			entries.data(), entries.size(), &entry_count,
+			ids.data(), ids.size(), &ids_len,
+			values.data(), values.size(), &values_len,
+			values_asc.data(), values_asc.size(), &values_asc_len,
+			&truncated);
+		if (res != RS_OK)
 			return;
-		}
 
-		RA2STRINGENTRY entry;		
-		memcpy(&entry.dwFlag, lpData, 4);
-		lpData+=4;
-		
-		DWORD dwCharCount;
-		memcpy(&dwCharCount, lpData, 4);
-		lpData+=4;
-
-		BYTE* lpID=new(BYTE[dwCharCount+1]);
-		memcpy(lpID, lpData, dwCharCount);
-		lpData+=dwCharCount;
-		lpID[dwCharCount]=0;
-		entry.id=(CHAR*)new(BYTE[dwCharCount+1]);
-		strcpy(entry.id, (LPCSTR)lpID);
-		entry.id[dwCharCount]=0;
-		entry.id_size=dwCharCount;
-		// enable this to show the string ID
-		delete[](lpID);
-
-		
-		BOOL b2Strings=FALSE;
-
-		if(lpData[0]=='W')
-			 b2Strings=TRUE;
-		
-		if(!(lpData=lpData+4))//Search(&lpData, (BYTE*)" RTS")))
-		{			
-			return;
-		}
-
-		memcpy(&dwCharCount, lpData, 4);
-		lpData+=4;
-
-		WCHAR* lpwID=new(WCHAR[dwCharCount+1]);
-		int e;
-		for(e=0;e<dwCharCount;e++)
+		map<CString, XCString, SortDummy2> strings;
+		const BYTE* idp = ids.data();
+		const BYTE* vp = values.data();
+		for (size_t i = 0; i < entry_count; i++)
 		{
-			WCHAR w;
-			memcpy(&w, lpData, 2);
-			lpData+=2;
-			lpwID[e]=~w;
-		}
-		lpwID[dwCharCount]=0;
-		entry.value=lpwID;
-		entry.value_size=dwCharCount;
-
-		if(b2Strings)
-		{
-			
-			memcpy(&dwCharCount, lpData, 4);
-			lpData+=4;
-			
-			
-
-			CHAR* lpwID2=new(CHAR[dwCharCount+1]);
-			int e;
-			for(e=0;e<dwCharCount;e++)
-			{
-				WCHAR w;
-				memcpy(&w, lpData, 1);
-				lpData+=1;
-				lpwID2[e]=w;
-			}
-			lpwID2[dwCharCount]=0;
-			entry.value_asc=lpwID2;
-			entry.value_asc_size=dwCharCount;
+			CString id((const char*)idp, (int)entries[i].id_len);
+			const WCHAR* wval = (const WCHAR*)vp;
+			strings[id].SetString(wval, (int)entries[i].value_len);
+			AllStrings[id].SetString(wval, (int)entries[i].value_len);
+			idp += entries[i].id_len;
+			vp += (size_t)entries[i].value_len * 2;
 		}
 
-		/*BYTE* bByte=new(BYTE[entry.value_size+1]);
-		wcstombs((LPSTR)bByte, entry.value, entry.value_size+1);
-		bByte[entry.value_size]=0;*/
-		strings[entry.id].SetString(entry.value, entry.value_size);
-		AllStrings[entry.id].SetString(entry.value, entry.value_size);
-
-
-		//delete[] bByte;
-	}
-
-	
+		int i;
 
 	for(i=0;i<rules.sections.size();i++)
 	{
@@ -6515,7 +6450,9 @@ void CLoading::LoadStrings()
 		else CCStrings[*rules.GetSectionName(i)].SetString((LPSTR)(LPCSTR)rules.GetSection(i)->GetValueByName("Name"));
 
 	}
-	
+
+	}
+
 	
 #else
 	int i;

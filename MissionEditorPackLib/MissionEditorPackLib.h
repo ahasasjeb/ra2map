@@ -148,9 +148,15 @@ Returns size of packed data
 Unpack IsoMapPack5.
 sp - source poINTer 
 SourceLength - length of source
-dp - destination buffer
+dp - destination buffer (pass NULL to only measure the validated decoded
+     size, which is then returned); the decoded size is bounded by
+     RS_MAX_PACK_DECODE_SIZE and every write is bounds-checked against
+     dp_cap, so corrupt map files are rejected instead of corrupting the
+     heap (the previous implementation overflowed on malformed headers).
+dp_cap - capacity of dp in bytes (ignored when dp is NULL)
+Returns the number of decoded bytes, or 0 on malformed data.
 */
-	UINT DecodeIsoMapPack5(BYTE* sp, UINT SourceLength, BYTE* dp, HWND hProgressBar, BOOL bDebugMode);
+	UINT DecodeIsoMapPack5(BYTE* sp, UINT SourceLength, BYTE* dp, size_t dp_cap, HWND hProgressBar, BOOL bDebugMode);
 
 	BOOL XCC_Initialize(BOOL bUseCache);
 

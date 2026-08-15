@@ -53,8 +53,10 @@ extern CIniFile* tiles;
 // first time options are shown (at startup)
 extern BOOL bOptionsStartup;
 
-// the current file beeing edited.
-extern char currentMapFile[MAX_PATH + 1];
+// the current file beeing edited. (CString instead of a fixed char
+// buffer: file paths from dialogs / command line can exceed MAX_PATH
+// and the old strcpy overflowed the array)
+extern CString currentMapFile;
 
 // all the pictures shown in the mapview
 extern map<CString, PICDATA> pics;

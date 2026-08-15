@@ -83,7 +83,9 @@ void CInputBox::OnOK()
 	if(text.GetLength()==0){EndDialog(NULL);};
 
 	char* str;
-	str=new(char[text.GetLength()]);
+	// +1 for the NUL terminator (the original allocated GetLength()
+	// bytes and strcpy overflowed by one byte on every use)
+	str=new(char[text.GetLength()+1]);
 	strcpy(str, (LPCTSTR)text);
 	EndDialog((int)str);
 }

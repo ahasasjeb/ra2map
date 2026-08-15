@@ -520,14 +520,9 @@ void ApplyEditorUIFont(CWnd* root)
 // change all %n (where n is an int) in an string, to another specified string
 CString TranslateStringVariables(int n, const char* originaltext, const char* inserttext)
 {
-	char c[50];
-	itoa(n,c,10);
+	CString seekedstring;
+	seekedstring.Format("%%%d", n);
 
-	char seekedstring[50];
-	seekedstring[0]='%';
-	seekedstring[1]=0;
-	strcat(seekedstring, c);
-	
 	CString orig=originaltext;
 	if(orig.Find(seekedstring)<0) return orig;
 
@@ -814,19 +809,20 @@ void StructureInfo(const char* data, string& house, string& type, int& strength,
 
 void PosToXY(const char* pos, int* X, int* Y)
 {
-  int Posleng;
-  //int XX, YY;
-  char Pos[100];
-  strcpy(Pos, pos);
-  char XS[10], YS[10];
-  Posleng = strlen(Pos);
-  strcpy(YS, Pos+Posleng-3);
-  Pos[Posleng-3]=0;
-  strcpy(XS, Pos);
+	// the original code split the string at len-3 with strcpy into
+	// fixed arrays, which overflowed for long input and read before
+	// the buffer when the string was shorter than 3 characters
+	CString s = pos;
+	const int Posleng = s.GetLength();
+	if (Posleng < 3)
+	{
+		*X = 0;
+		*Y = 0;
+		return;
+	}
 
-  *X = atoi(XS);
-  *Y = atoi(YS);
-
+	*X = atoi(s.Left(Posleng - 3));
+	*Y = atoi(s.Right(3));
 }
 
 bool HSVToRGB(const float h, const float s, const float v, float& r, float& g, float& b)
@@ -1667,28 +1663,18 @@ CString GetFreeID()
 
 void GetNodeName(CString & name, int n)
 {
-	char c[5];
-	char p[6];
-	memset(p,0,6);
-	itoa(n,c,10);
-	strcpy(p,c);
-	
-	if(strlen(c)==1)
-	{
-		memcpy(c,"00", 2);
-		strcpy(c+2, p);	
-	}
-	else if(strlen(c)==2)
-	{
-		memcpy(c,"0", 1);
-		strcpy(c+1, p);						
-	}
-	else if(strlen(c)==3)
-	{
-		strcpy(c, p);						
-	}
+	// pads the node index to 3 digits ("001" style). The original code
+	// used itoa into char[5] + strcpy into char[6], which overflowed
+	// for n >= 1000; CString handles any length safely.
+	CString c;
+	c.Format("%d", n);
 
-	name=c;
+	if (c.GetLength() == 1)
+		name = "00" + c;
+	else if (c.GetLength() == 2)
+		name = "0" + c;
+	else
+		name = c;
 }
 
 int GetNodeAt(CString& owner, CString& type, int x, int y)
@@ -1731,16 +1717,15 @@ int GetNodeAt(CString& owner, CString& type, int x, int y)
 					arttype=rules.sections[type].values["Image"];
 				}
 
-				int w,h;
-				char d[6];
-				memcpy(d, (LPCTSTR)art.sections[arttype].values["Foundation"],1);
-				d[1]=0;
-				w=atoi(d);
-				if(w==0) w=1;
-				memcpy(d, (LPCTSTR)art.sections[arttype].values["Foundation"]+2,1);
-				d[1]=0;
-				h=atoi(d);
-				if(h==0) h=1;
+			int w,h;
+			// Foundation is "w,h"; the original read single bytes with
+			// memcpy into a fixed buffer, which read past the string end
+			// when it was shorter than 3 characters
+			const CString foundation = art.sections[arttype].values["Foundation"];
+			w=atoi(foundation.Left(1));
+			if(w==0) w=1;
+			h=atoi(foundation.Mid(2, 1));
+			if(h==0) h=1;
 
 				int j,k;
 				for(j=0;j<h;j++)

@@ -182,150 +182,124 @@ namespace FSunPackLib
 
 	BYTE* EncodeBase64(BYTE* sp, UINT len)
 	{
-		auto encoded = encode64(data_ref(sp, std::size_t(len)));
-		// for now make a copy, we might refactor this
-		auto copy = new BYTE[encoded.size() + 1];
-		copy[encoded.size()] = 0; // null terminate
-		memcpy(copy, encoded.data(), encoded.size());
+		// Base64 encoding lives in the memory-safe Rust core now.
+		const size_t need = (static_cast<size_t>(len) + 2) / 3 * 4;
+		auto* copy = new BYTE[need + 1];
+		size_t out_len = 0;
+		if (rs_base64_encode(sp, len, copy, need, &out_len) != RS_OK)
+		{
+			delete[] copy;
+			copy = new BYTE[1];
+			copy[0] = 0;
+			return copy;
+		}
+		copy[out_len] = 0; // null terminate
 		return copy;
 	}
 
 	// dest should be at least as large as sp
 	INT ConvertToF80(BYTE* sp, UINT len, BYTE* dest)
 	{
-		return encode80(sp, dest, len);
+		// Raw Format80 encoding lives in the memory-safe Rust core now.
+		size_t out_len = 0;
+		if (rs_f80_encode(sp, len, dest, static_cast<size_t>(len) * 2, &out_len) != RS_OK)
+			return 0;
+		return static_cast<INT>(out_len);
 	}
 
 
 
 	INT EncodeF80(BYTE* sp, UINT len, UINT nSections, BYTE** dest)
 	{
-		*dest = new(BYTE[len * 4]); // as large as sp, to make sure it works
-
-		BYTE* data = *dest;
-
-		int length = len / nSections;
-		// each section has this length
-
-#ifdef DBG2
-		int sections = 0;
-		AllocConsole();
-		HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
-		HANDLE hIn = GetStdHandle(STD_INPUT_HANDLE);
-		char tmp[50];
-		string out;
-		out = "PackData() called\n------------\n\n";
-		DWORD dw;
-		WriteFile(hOut, out.data(), out.size(), &dw, NULL);
-#endif
-
-		UINT i;
-		UINT DP = 0;
-		UINT SP = 0;
-		for (i = 0;i < nSections;i++)
+		// Sectioned Format80 encoding lives in the memory-safe Rust core
+		// now (same on-disk layout as before, bounds-checked throughout).
+		if (nSections == 0)
 		{
-			UINT packLen = encode80(&sp[SP], &data[DP + 4], length); //ConvertToF80(&sp[SP], length, &data[DP+4]);
-
-			memcpy(&data[DP], &packLen, 3);
-			DP += 3;
-			data[DP] = 0x20;
-			DP++;
-			SP += length;
-			DP += packLen;
-
-#ifdef DBG2
-			itoa(i, tmp, 10);
-			out = "\nHandled section ";
-			out += tmp;
-			out += ", packed length: ";
-			itoa(packLen, tmp, 10);
-			out += tmp;
-			out += " bytes, DP=";
-			itoa(DP, tmp, 10);
-			out += tmp;
-			out += "\n";
-			WriteFile(hOut, out.data(), out.size(), &dw, NULL);
-
-			ReadFile(hIn, tmp, 2, &dw, NULL);
-#endif
-
+			*dest = nullptr;
+			return 0;
 		}
 
+		*dest = new(BYTE[len * 4]); // as large as sp, to make sure it works
 
-
-		return DP;
+		size_t out_len = 0;
+		if (rs_f80_pack_encode(sp, len, nSections, *dest, static_cast<size_t>(len) * 4, &out_len) != RS_OK)
+		{
+			delete[] *dest;
+			*dest = nullptr;
+			return 0;
+		}
+		return static_cast<INT>(out_len);
 	}
 
 	UINT EncodeIsoMapPack5(BYTE* sp, UINT SourceLength, BYTE** dp)
 	{
+		// Format5/LZO encoding lives in the memory-safe Rust core now.
 		*dp = new(BYTE[SourceLength * 2]); // as big as source, makes sure it works!
 
-		UINT DP = encode5(sp, *dp, SourceLength, 5);
+		size_t out_len = 0;
+		if (rs_pack5_encode(sp, SourceLength, *dp, static_cast<size_t>(SourceLength) * 2, &out_len) != RS_OK)
+		{
+			delete[] *dp;
+			*dp = nullptr;
+			return 0;
+		}
 
-		return DP;
+		return static_cast<UINT>(out_len);
 	}
 
 	bool DecodeF80(const BYTE* const sp, const UINT SourceLength, std::vector<BYTE>& dp, const std::size_t max_size)
 	{
-		static_assert(4 == sizeof(t_pack_section_header));
-
-		const auto spEnd = sp + SourceLength;
-		const t_pack_section_header* secHeader = nullptr;
-		size_t totalSize = 0;
-		for (auto curSP = sp; curSP < sp + SourceLength;)
-		{
-			secHeader = (reinterpret_cast<const t_pack_section_header*>(curSP));
-			curSP += secHeader->size_in + sizeof(t_pack_section_header);
-			totalSize += secHeader->size_out;
-		}
-		if (totalSize > max_size)
-		{
+		// Sectioned Format80 decoding lives in the memory-safe Rust core
+		// now: the header walk (which previously dereferenced unvalidated
+		// offsets) and the decode are both bounds-checked. The output
+		// vector is only filled when every declared section validates.
+		size_t out_len = 0;
+		const int res = rs_f80_pack_decode(sp, SourceLength, nullptr, 0, max_size, &out_len);
+		if (res != RS_ERR_SMALL_BUFFER)
 			return false;
-		}
-
-		dp.resize(totalSize);
-		decode5(sp, dp.data(), SourceLength, 80);
-		return true;
+		dp.resize(out_len);
+		return rs_f80_pack_decode(sp, SourceLength, dp.data(), dp.size(), max_size, &out_len) == RS_OK;
 	}
 
 	int DecodeBase64(const char* sp, std::vector<BYTE>& dest)
 	{
-		auto len = strlen(reinterpret_cast<const char*>(sp));
-		auto res = decode64(data_ref(sp, len));
-		dest.assign(res.data(), res.data() + res.size());
-		return res.size();
+		// Base64 decoding lives in the memory-safe Rust core now.
+		const size_t len = strlen(reinterpret_cast<const char*>(sp));
+		size_t out_len = 0;
+		const int res = rs_base64_decode(sp, len, nullptr, 0, &out_len);
+		if (res != RS_ERR_SMALL_BUFFER && res != RS_OK)
+		{
+			dest.clear();
+			return 0;
+		}
+		dest.resize(out_len);
+		if (rs_base64_decode(sp, len, dest.data(), dest.size(), &out_len) != RS_OK)
+		{
+			dest.clear();
+			return 0;
+		}
+		return static_cast<int>(out_len);
 	}
 
-	UINT DecodeIsoMapPack5(BYTE* sp, UINT SourceLength, BYTE* dp, HWND hProgressBar, BOOL bDebugMode)
+	UINT DecodeIsoMapPack5(BYTE* sp, UINT SourceLength, BYTE* dp, size_t dp_cap, HWND hProgressBar, BOOL bDebugMode)
 	{
+		// Format5/LZO decoding lives in the memory-safe Rust core now:
+		// the section headers are validated before any write and every
+		// section is decompressed with a bounds-checked LZO decoder, so a
+		// corrupt map file can no longer overflow the caller's buffer
+		// (the C++ code here used to run off the end on malformed data).
+		(void)hProgressBar;
+		(void)bDebugMode;
 
-		//if(bDebugMode) k.open("c:\\decode.txt", ios_base::out | ios_base::trunc);
-
-		//if(hProgressBar) SendMessage(hProgressBar, PBM_SETRANGE, 0, MAKELPARAM(0, SourceLength));
-		//if(hProgressBar) UpdateWindow(hProgressBar);
-
-		UINT SP = 0;
-		UINT DP = 0;
-
-		while (SP < SourceLength)
+		size_t out_len = 0;
+		if (dp == nullptr)
 		{
-			WORD wSrcSize;
-			WORD wExtrSize;
-			memcpy(&wSrcSize, sp + SP, 2);
-			SP += 2;
-			memcpy(&wExtrSize, sp + SP, 2);
-			SP += 2;
-
-			decode5s(sp + SP, dp + DP, wSrcSize);
-
-			SP += wSrcSize;
-			DP += wExtrSize;
-
-			//if(hProgressBar) SendMessage(hProgressBar, PBM_SETPOS, (WPARAM) SP, 0);
-			//if(hProgressBar) UpdateWindow(hProgressBar);
+			// measuring call: returns the validated decoded size, 0 on error
+			return rs_pack5_decode(sp, SourceLength, nullptr, 0, RS_MAX_PACK_DECODE_SIZE, &out_len) == RS_ERR_SMALL_BUFFER
+				? static_cast<UINT>(out_len) : 0;
 		}
-
-		return DP;
+		return rs_pack5_decode(sp, SourceLength, dp, dp_cap, RS_MAX_PACK_DECODE_SIZE, &out_len) == RS_OK
+			? static_cast<UINT>(out_len) : 0;
 	}
 
 	std::int32_t GetFirstPixelColor(IDirectDrawSurface4* pDDS)

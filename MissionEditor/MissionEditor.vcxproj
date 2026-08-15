@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" ToolsVersion="12.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="FinalSunDebug|Win32">
@@ -278,6 +278,8 @@
     <ClCompile Include="Loading.cpp" />
     <ClCompile Include="MapD.cpp" />
     <ClCompile Include="MapData.cpp" />
+    <ClCompile Include="MapSnapshots.cpp" />
+    <ClCompile Include="MapMinimap.cpp" />
     <ClCompile Include="MapLoadingDlg.cpp" />
     <ClCompile Include="MapModifier.cpp" />
     <ClCompile Include="MapOpenDialog.cpp" />
@@ -388,6 +390,9 @@
     <ClInclude Include="macros.h" />
     <ClInclude Include="MapD.h" />
     <ClInclude Include="MapData.h" />
+    <ClInclude Include="FieldData.h" />
+    <ClInclude Include="MapSnapshots.h" />
+    <ClInclude Include="MapMinimap.h" />
     <ClInclude Include="MapLoadingDlg.h" />
     <ClInclude Include="MapModifier.h" />
     <ClInclude Include="MapOpenDialog.h" />

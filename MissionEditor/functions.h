@@ -47,6 +47,9 @@ void RepairTrigger(CString& triggerdata);
 // coordinate functions
 void PosToXY(const char* pos, int* X, int* Y);
 
+// builds the 3-digit padded node name ("001", "012", "123", ...)
+void GetNodeName(CString & name, int n);
+
 // HSV -> RGB
 void HSVToRGB(const unsigned char hsv[3], unsigned char rgb[3]);
 std::array<unsigned char, 3> HSVToRGB(float h, float s, float v);

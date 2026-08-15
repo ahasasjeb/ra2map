@@ -44,6 +44,11 @@
 // rejected by the C++ allocation code (guards against corrupt data)
 #define RS_MAX_RENDER_TARGET_DIM 4096
 
+// sanity cap for the decoded size of a map pack (IsoMapPack5 / Format80
+// pack). Real packs are a few MiB; a corrupt file can no longer drive a
+// multi-GB allocation.
+#define RS_MAX_PACK_DECODE_SIZE (256 * 1024 * 1024)
+
 #ifdef __cplusplus
 extern "C"
 {
@@ -145,6 +150,88 @@ int rs_tmp_ts_draw(
     const unsigned char* src,
     size_t src_len,
     const rs_tmp_tile_info* info
+);
+
+// ---------------------------------------------------------------------------
+// Pack codecs (base64 / Format80 / Format5-LZO). The C++ originals walked
+// raw pointers with file-provided lengths; these Rust ports are fully
+// bounds-checked and cannot corrupt the heap on malformed input.
+//
+// Buffer convention: pass dst = NULL / dst_cap = 0 to only measure; the
+// required size is reported through out_len and RS_ERR_SMALL_BUFFER is
+// returned. Otherwise RS_OK on success and RS_ERR_BAD_ARG on malformed
+// input.
+// ---------------------------------------------------------------------------
+
+// Standard base64; output is NOT NUL-terminated.
+int rs_base64_encode(
+    const unsigned char* src, size_t src_len,
+    unsigned char* dst, size_t dst_cap, size_t* out_len);
+
+// Decodes a NUL-terminated base64 string (stops at the first NUL byte,
+// mirroring xcc decode64).
+int rs_base64_decode(
+    const char* src, size_t src_len,
+    unsigned char* dst, size_t dst_cap, size_t* out_len);
+
+// Raw Format80 encode (mirrors xcc encode80).
+int rs_f80_encode(
+    const unsigned char* src, size_t src_len,
+    unsigned char* dst, size_t dst_cap, size_t* out_len);
+
+// Sectioned Format80 (FSunPackLib::EncodeF80 layout): n_sections
+// sections of src_len / n_sections bytes.
+int rs_f80_pack_encode(
+    const unsigned char* src, size_t src_len, unsigned int n_sections,
+    unsigned char* dst, size_t dst_cap, size_t* out_len);
+
+// Sectioned Format80 decode (FSunPackLib::DecodeF80). max_size caps the
+// declared output size (mirrors the original totalSize check).
+int rs_f80_pack_decode(
+    const unsigned char* src, size_t src_len,
+    unsigned char* dst, size_t dst_cap, size_t max_size, size_t* out_len);
+
+// Format5/LZO with 8192-byte sections (FSunPackLib::EncodeIsoMapPack5).
+int rs_pack5_encode(
+    const unsigned char* src, size_t src_len,
+    unsigned char* dst, size_t dst_cap, size_t* out_len);
+
+// Format5/LZO decode (FSunPackLib::DecodeIsoMapPack5). max_size caps the
+// declared output size; sections that would overflow are rejected
+// instead of corrupting the heap.
+int rs_pack5_decode(
+    const unsigned char* src, size_t src_len,
+    unsigned char* dst, size_t dst_cap, size_t max_size, size_t* out_len);
+
+// ---------------------------------------------------------------------------
+// RA2/YR CSF string table parsing (CLoading::LoadStrings). The C++
+// original trusted every file-provided length field; this parser clamps
+// all reads to the buffer and reports truncation instead.
+// ---------------------------------------------------------------------------
+
+// One parsed string table entry. ids / values / values_asc hold the
+// concatenated byte blobs in entry order (values are decoded UTF-16LE
+// code units, 2 bytes per value_len).
+typedef struct rs_csf_entry
+{
+    unsigned int id_len;         // bytes (ASCII)
+    unsigned int value_len;      // UTF-16 code units
+    unsigned int value_asc_len;  // bytes (ASCII), 0 when absent
+} rs_csf_entry;
+
+// Parses a whole CSF file into flat caller-provided buffers. Call once
+// with NULL buffers to obtain the sizes (returns RS_ERR_SMALL_BUFFER),
+// then again with suitably sized buffers. Returns RS_ERR_BAD_ARG when
+// the file does not contain the " FSC" marker or a complete header.
+// out_truncated (optional) is set to 1 when the file ended before all
+// declared entries could be parsed.
+int rs_csf_parse(
+    const unsigned char* data, size_t data_len,
+    rs_csf_entry* entries, size_t entry_cap, size_t* out_entry_count,
+    unsigned char* ids, size_t ids_cap, size_t* out_ids_len,
+    unsigned char* values, size_t values_cap, size_t* out_values_len,
+    unsigned char* values_asc, size_t values_asc_cap, size_t* out_values_asc_len,
+    int* out_truncated
 );
 
 #ifdef __cplusplus

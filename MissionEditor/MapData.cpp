@@ -142,34 +142,6 @@ inline int GetSmudgeNumber(LPCTSTR name)
 }
 #endif
 
-SNAPSHOTDATA::SNAPSHOTDATA()
-{
-	memset(this, 0, sizeof(SNAPSHOTDATA));
-}
-
-void SNAPSHOTDATA::Free()
-{
-	delete[] bHeight;
-	bHeight = NULL;
-	delete[] bMapData;
-	bMapData = NULL;
-	delete[] bSubTile;
-	bSubTile = NULL;
-	delete[] bMapData2;
-	bMapData2 = NULL;
-	delete[] wGround;
-	wGround = NULL;
-	delete[] bRedrawTerrain;
-	bRedrawTerrain = NULL;
-	delete[] overlay;
-	overlay = NULL;
-	delete[] overlaydata;
-	overlaydata = NULL;
-	delete[] bRNDData;
-	bRNDData = NULL;
-}
-
-
 NODEDATA::NODEDATA()
 {
 	type = -1;
@@ -231,7 +203,6 @@ CMapData::CMapData()
 {
 	m_noAutoObjectUpdate = FALSE;
 	m_money = 0;
-	m_cursnapshot = -1;
 	fielddata = NULL;
 	fielddata_size = 0;
 	m_IsoSize = 0;
@@ -239,18 +210,8 @@ CMapData::CMapData()
 	tiledata = NULL;
 	m_mfd = NULL;
 	dwIsoMapSize = 0;
-	m_snapshots = NULL;
-	dwSnapShotCount = 0;
 
-	memset(&m_mini_biinfo, 0, sizeof(BITMAPINFO));
-	m_mini_biinfo.bmiHeader.biBitCount = 24;
-	m_mini_biinfo.bmiHeader.biWidth = 0;
-	m_mini_biinfo.bmiHeader.biHeight = 0;
-	m_mini_biinfo.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-	m_mini_biinfo.bmiHeader.biClrUsed = 0;
-	m_mini_biinfo.bmiHeader.biPlanes = 1;
-	m_mini_biinfo.bmiHeader.biCompression = BI_RGB;
-	m_mini_biinfo.bmiHeader.biClrImportant = 0;
+	// the minimap DIB initializes itself (CMapMinimap)
 }
 
 CMapData::~CMapData()
@@ -267,15 +228,7 @@ CMapData::~CMapData()
 	fielddata = NULL;
 	fielddata_size = 0;
 
-	int i;
-
-	for (i = 0;i < dwSnapShotCount;i++)
-	{
-		m_snapshots[i].Free();
-	}
-	if (m_snapshots) delete[] m_snapshots;
-	m_snapshots = NULL;
-	dwSnapShotCount = 0;
+	m_snapshots.Clear();
 }
 
 void CMapData::CalcMapRect()
@@ -581,20 +534,10 @@ void CMapData::LoadMap(const std::string& file)
 	errstream.flush();
 
 	if (fielddata != NULL) delete[] fielddata;
-	int i;
-	for (i = 0;i < dwSnapShotCount;i++)
-	{
-		m_snapshots[i].Free();
-	}
-	if (m_snapshots != NULL) delete[] m_snapshots;
-
-
+	m_snapshots.Clear();
 
 	fielddata = NULL;
 	fielddata_size = 0;
-	m_snapshots = NULL;
-	dwSnapShotCount = 0;
-	m_cursnapshot = -1;
 
 	m_tubes.clear();
 	m_tubes.reserve(32);
@@ -629,6 +572,7 @@ void CMapData::LoadMap(const std::string& file)
 	errstream.flush();
 
 	// repair taskforces (bug in earlier 0.95 versions)
+	int i;
 	for (i = 0;i < m_mapfile.sections["TaskForces"].values.size();i++)
 	{
 		vector<CString> toDelete;
@@ -1057,35 +1001,31 @@ void CMapData::Unpack()
 
 		hexlen = FSunPackLib::DecodeBase64(IsoMapPck, hexC);
 
-		// first let´s find out the size of the mappack data
-		const auto hex = hexC.data();
-		int SP = 0;
-		int MapSizeBytes = 0;
-		int sec = 0;
-		while (SP < hexlen)
+		// The section headers are walked inside the memory-safe Rust core
+		// now: the old pre-scan memcpy'd u16s from unvalidated offsets,
+		// which let a corrupt file read past the end of the buffer.
+		const size_t MapSizeBytes = hexlen > 0
+			? FSunPackLib::DecodeIsoMapPack5(hexC.data(), hexlen, NULL, 0, d.m_Progress.m_hWnd, TRUE)
+			: 0;
+
+		if (MapSizeBytes > 0)
 		{
-			WORD wSrcSize;
-			WORD wDestSize;
-			memcpy(&wSrcSize, hex + SP, 2);
-			SP += 2;
-			memcpy(&wDestSize, hex + SP, 2);
-			SP += 2;
+			m_mfd = new(BYTE[MapSizeBytes]);
+			dwIsoMapSize = MapSizeBytes / MAPFIELDDATA_SIZE;
 
-			MapSizeBytes += wDestSize;
-			SP += wSrcSize;
-
-			sec++;
+			if (FSunPackLib::DecodeIsoMapPack5(hexC.data(), hexlen, (BYTE*)m_mfd, MapSizeBytes, d.m_Progress.m_hWnd, TRUE) != MapSizeBytes)
+			{
+				// malformed pack: leave the field buffer empty instead of
+				// corrupting the heap (the old code overflowed here)
+				delete[] m_mfd;
+				m_mfd = NULL;
+				dwIsoMapSize = 0;
+			}
 		}
 
-		m_mfd = new(BYTE[MapSizeBytes]);
-		dwIsoMapSize = MapSizeBytes / MAPFIELDDATA_SIZE;
-
-		FSunPackLib::DecodeIsoMapPack5(hex, hexlen, (BYTE*)m_mfd, d.m_Progress.m_hWnd, TRUE);
-
-		int k;
 		/*fstream f;
 		f.open("C:\\isomappack5.txt",ios_base::in | ios_base::out | ios_base::trunc);
-		for(k=0;k<150;k++)
+		for(int k=0;k<150;k++)
 		{
 			f << "Byte " << k << ":	" << (int)m_mfd[k] << endl;
 		}
@@ -4048,11 +3988,7 @@ void CMapData::CreateMap(DWORD dwWidth, DWORD dwHeight, LPCTSTR lpTerrainType, D
 {
 	if (fielddata != NULL) delete[] fielddata;
 	int i;
-	for (i = 0;i < dwSnapShotCount;i++)
-	{
-		m_snapshots[i].Free();
-	}
-	if (m_snapshots != NULL) delete[] m_snapshots;
+	m_snapshots.Clear();
 
 
 
@@ -4060,9 +3996,6 @@ void CMapData::CreateMap(DWORD dwWidth, DWORD dwHeight, LPCTSTR lpTerrainType, D
 
 	fielddata = NULL;
 	fielddata_size = 0;
-	m_snapshots = NULL;
-	dwSnapShotCount = 0;
-	m_cursnapshot = -1;
 
 
 	m_tubes.clear();
@@ -4815,110 +4748,13 @@ BOOL CMapData::CheckMapPackData()
 }
 
 /*
-Takes a snapshot of the map at a certain location.
-Be aware that this won´t make a copy of any units etc.
-
-This is used for undo and similar things (like displaying and immediatly removing tiles when moving
-the mouse on the map before placing a tile).
-This method is very fast, as long as you don´t copy the whole map all the time.
+Copies a part of the map into a snapshot used to reverse the changes when
+the user hits undo. The history ring itself lives in CMapSnapshots now
+(see MapSnapshots.h); this keeps the buffer bookkeeping out of CMapData.
 */
 void CMapData::TakeSnapshot(BOOL bEraseFollowing, int left, int top, int right, int bottom)
 {
-	DWORD dwOldSnapShotCount = dwSnapShotCount;
-
-	if (left < 0) left = 0;
-	if (top < 0) top = 0;
-	if (right > m_IsoSize) right = m_IsoSize;
-	if (bottom > m_IsoSize) bottom = m_IsoSize;
-
-	if (right == 0) right = m_IsoSize;
-	if (bottom == 0) bottom = m_IsoSize;
-
-	int e;
-	if (bEraseFollowing)
-	{
-		for (e = dwSnapShotCount - 1;e > m_cursnapshot;e--)
-		{
-			m_snapshots[e].Free();
-		}
-		dwSnapShotCount = m_cursnapshot + 1;
-	}
-
-
-	dwSnapShotCount += 1;
-	m_cursnapshot++;
-
-	if (dwSnapShotCount > 64)
-	{
-		dwSnapShotCount = 64;
-		m_cursnapshot = 63;
-		int i;
-		m_snapshots[0].Free();
-		for (i = 1;i < dwSnapShotCount;i++)
-		{
-			m_snapshots[i - 1] = m_snapshots[i];
-		}
-
-	}
-	else
-	{
-		SNAPSHOTDATA* b = new(SNAPSHOTDATA[dwSnapShotCount]);
-
-		if (m_snapshots)
-		{
-			memcpy(b, m_snapshots, sizeof(SNAPSHOTDATA) * (dwSnapShotCount - 1));
-			delete[] m_snapshots;
-		}
-
-		m_snapshots = b;
-	}
-
-
-	m_cursnapshot = dwSnapShotCount - 1;
-
-
-	SNAPSHOTDATA ss = m_snapshots[dwSnapShotCount - 1];
-	// ss.mapfile=m_mapfile;
-	int width, height;
-	width = right - left;
-	height = bottom - top;
-
-	int size = width * height;
-	ss.left = left;
-	ss.top = top;
-	ss.right = right;
-	ss.bottom = bottom;
-	ss.bHeight = new(BYTE[size]);
-	ss.bMapData = new(WORD[size]);
-	ss.bSubTile = new(BYTE[size]);
-	ss.bMapData2 = new(BYTE[size]);
-	ss.wGround = new(WORD[size]);
-	ss.overlay = new(BYTE[size]);
-	ss.overlaydata = new(BYTE[size]);
-	ss.bRedrawTerrain = new(BOOL[size]);
-	ss.bRNDData = new(BYTE[size]);
-	int i;
-	for (i = 0;i < width;i++)
-	{
-		for (e = 0;e < height;e++)
-		{
-			int pos_w, pos_r;
-			pos_w = i + e * width;
-			pos_r = left + i + (top + e) * m_IsoSize;
-			ss.bHeight[pos_w] = fielddata[pos_r].bHeight;
-			ss.bMapData[pos_w] = fielddata[pos_r].bMapData;
-			ss.bSubTile[pos_w] = fielddata[pos_r].bSubTile;
-			ss.bMapData2[pos_w] = fielddata[pos_r].bMapData2;
-			ss.wGround[pos_w] = fielddata[pos_r].wGround;
-			ss.overlay[pos_w] = fielddata[pos_r].overlay;
-			ss.overlaydata[pos_w] = fielddata[pos_r].overlaydata;
-			ss.bRedrawTerrain[pos_w] = fielddata[pos_r].bRedrawTerrain;
-			ss.bRNDData[pos_w] = fielddata[pos_r].bRNDImage;
-		}
-	}
-
-	m_snapshots[dwSnapShotCount - 1] = ss;
-
+	m_snapshots.TakeSnapshot(fielddata, m_IsoSize, bEraseFollowing, left, top, right, bottom);
 }
 
 /*
@@ -4927,54 +4763,17 @@ Very fast
 */
 void CMapData::Undo()
 {
-	if (dwSnapShotCount == 0) return;
-	if (m_cursnapshot < 0) return;
-
-
-	//dwSnapShotCount--;
-	m_cursnapshot -= 1;
-
-	int left, top, width, height;
-	left = m_snapshots[m_cursnapshot + 1].left;
-	top = m_snapshots[m_cursnapshot + 1].top;
-	width = m_snapshots[m_cursnapshot + 1].right - left;
-	height = m_snapshots[m_cursnapshot + 1].bottom - top;
-
 	const bool mp = IsMultiplayer();
-	int i, e;
-	for (i = 0;i < width;i++)
-	{
-		for (e = 0;e < height;e++)
-		{
-			int pos_w, pos_r;
-			pos_r = i + e * width;
-			pos_w = left + i + (top + e) * m_IsoSize;
-			fielddata[pos_w].bHeight = m_snapshots[m_cursnapshot + 1].bHeight[pos_r];
-			fielddata[pos_w].bMapData = m_snapshots[m_cursnapshot + 1].bMapData[pos_r];
-			fielddata[pos_w].bSubTile = m_snapshots[m_cursnapshot + 1].bSubTile[pos_r];
-			fielddata[pos_w].bMapData2 = m_snapshots[m_cursnapshot + 1].bMapData2[pos_r];
-			fielddata[pos_w].wGround = m_snapshots[m_cursnapshot + 1].wGround[pos_r];
-
-			RemoveOvrlMoney(fielddata[pos_w].overlay, fielddata[pos_w].overlaydata);
-			fielddata[pos_w].overlay = m_snapshots[m_cursnapshot + 1].overlay[pos_r];
-			fielddata[pos_w].overlaydata = m_snapshots[m_cursnapshot + 1].overlaydata[pos_r];
-			AddOvrlMoney(fielddata[pos_w].overlay, fielddata[pos_w].overlaydata);
-
-
-
-			fielddata[pos_w].bRedrawTerrain = m_snapshots[m_cursnapshot + 1].bRedrawTerrain[pos_r];
-			fielddata[pos_w].bRNDImage = m_snapshots[m_cursnapshot + 1].bRNDData[pos_r];
-
-
-			Mini_UpdatePos(left + i, top + e, mp);
-		}
-	}
-
-	// no need for SmoothTiberium: handled externally, because we undo more than just the very needed area
-	// when changing overlay!
-
-
-
+	m_snapshots.Undo(fielddata, m_IsoSize,
+		[this](int x, int y) {
+			FIELDDATA& fd = fielddata[x + y * (int)m_IsoSize];
+			RemoveOvrlMoney(fd.overlay, fd.overlaydata);
+		},
+		[this, mp](int x, int y) {
+			FIELDDATA& fd = fielddata[x + y * (int)m_IsoSize];
+			AddOvrlMoney(fd.overlay, fd.overlaydata);
+			Mini_UpdatePos(x, y, mp);
+		});
 }
 
 BOOL CMapData::GetLocalSize(RECT* rect) const
@@ -4994,60 +4793,18 @@ Very fast.
 */
 void CMapData::Redo()
 {
-	if (dwSnapShotCount <= m_cursnapshot + 1 || !dwSnapShotCount) return;
-
-	m_cursnapshot += 1; // dwSnapShotCount-1;
-
-	if (m_cursnapshot + 1 >= dwSnapShotCount) m_cursnapshot = dwSnapShotCount - 2;
-
-	int left, top, width, height;
-	left = m_snapshots[m_cursnapshot + 1].left;
-	top = m_snapshots[m_cursnapshot + 1].top;
-	width = m_snapshots[m_cursnapshot + 1].right - left;
-	height = m_snapshots[m_cursnapshot + 1].bottom - top;
-
-	int i, e;
 	const bool mp = IsMultiplayer();
-	for (i = 0;i < width;i++)
-	{
-		for (e = 0;e < height;e++)
-		{
-			int pos_w, pos_r;
-			pos_r = i + e * width;
-			pos_w = left + i + (top + e) * m_IsoSize;
-			fielddata[pos_w].bHeight = m_snapshots[m_cursnapshot + 1].bHeight[pos_r];
-			fielddata[pos_w].bMapData = m_snapshots[m_cursnapshot + 1].bMapData[pos_r];
-			fielddata[pos_w].bSubTile = m_snapshots[m_cursnapshot + 1].bSubTile[pos_r];
-			fielddata[pos_w].bMapData2 = m_snapshots[m_cursnapshot + 1].bMapData2[pos_r];
-			fielddata[pos_w].wGround = m_snapshots[m_cursnapshot + 1].wGround[pos_r];
-			RemoveOvrlMoney(fielddata[pos_w].overlay, fielddata[pos_w].overlaydata);
-			fielddata[pos_w].overlay = m_snapshots[m_cursnapshot + 1].overlay[pos_r];
-			fielddata[pos_w].overlaydata = m_snapshots[m_cursnapshot + 1].overlaydata[pos_r];
-			AddOvrlMoney(fielddata[pos_w].overlay, fielddata[pos_w].overlaydata);
-			fielddata[pos_w].bRedrawTerrain = m_snapshots[m_cursnapshot + 1].bRedrawTerrain[pos_r];
-			fielddata[pos_w].bRNDImage = m_snapshots[m_cursnapshot + 1].bRNDData[pos_r];
-
-			Mini_UpdatePos(left + i, top + e, mp);
-		}
-	}
-
-	/*
-	int i;
-	for(i=0;i<fielddata_size;i++)
-	{
-		fielddata[i].bHeight=m_snapshots[m_cursnapshot+1].bHeight[i];
-		fielddata[i].bMapData=m_snapshots[m_cursnapshot+1].bMapData[i];
-		fielddata[i].bSubTile=m_snapshots[m_cursnapshot+1].bSubTile[i];
-		fielddata[i].bMapData2=m_snapshots[m_cursnapshot+1].bMapData2[i];
-		fielddata[i].wGround=m_snapshots[m_cursnapshot+1].wGround[i];
-		fielddata[i].overlay=m_snapshots[m_cursnapshot+1].overlay[i];
-		fielddata[i].overlaydata=m_snapshots[m_cursnapshot+1].overlaydata[i];
-		fielddata[i].bRedrawTerrain=m_snapshots[m_cursnapshot+1].bRedrawTerrain[i];
-	}
-	*/
-
+	m_snapshots.Redo(fielddata, m_IsoSize,
+		[this](int x, int y) {
+			FIELDDATA& fd = fielddata[x + y * (int)m_IsoSize];
+			RemoveOvrlMoney(fd.overlay, fd.overlaydata);
+		},
+		[this, mp](int x, int y) {
+			FIELDDATA& fd = fielddata[x + y * (int)m_IsoSize];
+			AddOvrlMoney(fd.overlay, fd.overlaydata);
+			Mini_UpdatePos(x, y, mp);
+		});
 }
-
 static const int tile_to_lat_count = 7;
 static const CString tile_to_lat[tile_to_lat_count][3] = {
 	{"SandTile", "ClearToSandLat", "ClearTile"},
@@ -6336,60 +6093,178 @@ void CMapData::GetStructurePaint(int index, STRUCTUREPAINT* lpStructurePaint) co
 
 void CMapData::InitMinimap()
 {
-
-	int pwidth = GetWidth() * 2;
-	int pheight = GetHeight();
-
-	memset(&m_mini_biinfo, 0, sizeof(BITMAPINFO));
-	m_mini_biinfo.bmiHeader.biBitCount = 24;
-	m_mini_biinfo.bmiHeader.biWidth = pwidth;
-	m_mini_biinfo.bmiHeader.biHeight = pheight;
-	m_mini_biinfo.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-	m_mini_biinfo.bmiHeader.biClrUsed = 0;
-	m_mini_biinfo.bmiHeader.biPlanes = 1;
-	m_mini_biinfo.bmiHeader.biCompression = BI_RGB;
-	m_mini_biinfo.bmiHeader.biClrImportant = 0;
-
-	int pitch = pwidth * 3;
-	if (pitch == 0) return;
-
-	if (pitch % sizeof(DWORD))
-	{
-		pitch += sizeof(DWORD) - (pwidth * 3) % sizeof(DWORD);
-	}
-
-	m_mini_pitch = pitch;
-
-	//m_mini_colors=new(BYTE[pitch*pheight]);
-	m_mini_colors.resize(pitch * pheight);
-
-
-	memset(m_mini_colors.data(), 255, pitch * (pheight));
-
-
-	/*DWORD dwIsoSize=GetIsoSize();
-
-	int mapwidth=GetWidth();
-	int mapheight=GetHeight();
-	int i,e;
-
-	int size=pitch*pheight;
-
-	for(i=0;i<dwIsoSize;i++)
-	{
-		for(e=0;e<dwIsoSize;e++)
-		{
-			Mini_UpdatePos(i,e);
-		}
-	}*/
-
+	// the DIB (size, pitch, buffer) lives in CMapMinimap
+	m_minimap.Init(GetWidth(), GetHeight(), m_IsoSize);
 }
 
 void CMapData::GetMinimap(BYTE** lpData, BITMAPINFO* lpBI, int* pitch)
 {
-	*lpData = m_mini_colors.data();
-	*pitch = m_mini_pitch;
-	memcpy(lpBI, &m_mini_biinfo, sizeof(BITMAPINFO));
+	m_minimap.GetDib(lpData, lpBI, pitch);
+}
+
+void CMapData::GetMiniMapPos(int i, int e, int& x, int& y)
+{
+	m_minimap.GetCellPixelPos(i, e, x, y);
+}
+
+void CMapData::Mini_UpdatePos(const int i, const int e, bool isMultiplayer)
+{
+	if (!m_minimap.IsInitialized() || !tiledata)
+		return;
+
+	const DWORD dwIsoSize = m_IsoSize;
+
+	int xiso = i;
+	int yiso = e;
+
+	if (xiso >= (int)m_IsoSize)
+		xiso = m_IsoSize - 1;
+	if (yiso >= (int)m_IsoSize)
+		yiso = m_IsoSize - 1;
+	if (xiso < 0)
+		xiso = 0;
+	if (yiso < 0)
+		yiso = 0;
+
+	DWORD dwPos = xiso + yiso * dwIsoSize;
+
+	if (dwPos >= m_IsoSize * m_IsoSize) return;
+
+	FIELDDATA td;
+	td = *GetFielddataAt(dwPos);
+
+
+
+	STDOBJECTDATA sod;
+	sod.house = "";
+	int ic;
+	for (ic = 0;ic < SUBPOS_COUNT;ic++)
+	{
+		if (td.infantry[ic] >= 0)
+		{
+			GetStdInfantryData(td.infantry[ic], &sod);
+		}
+	}
+	if (td.structure >= 0)
+	{
+		GetStdStructureData(td.structure, &sod);
+	}
+	if (td.aircraft >= 0)
+	{
+		GetStdAircraftData(td.aircraft, &sod);
+	}
+	if (td.unit >= 0)
+	{
+		GetStdUnitData(td.unit, &sod);
+	}
+
+
+	int ground = (td.wGround >= (*tiledata_count)) ? 0 : td.wGround;
+	int subt = td.bSubTile;
+
+
+	// mw added check:
+	if (subt >= (*tiledata)[ground].wTileCount) return;
+
+	RGBTRIPLE& l = (*tiledata)[ground].tiles[subt].rgbLeft;
+	RGBTRIPLE& r = (*tiledata)[ground].tiles[subt].rgbRight;
+
+	RGBTRIPLE col;
+	RGBTRIPLE col_r;
+	col.rgbtBlue = l.rgbtBlue;
+	col.rgbtGreen = l.rgbtGreen;
+	col.rgbtRed = l.rgbtRed;
+	col_r.rgbtBlue = r.rgbtBlue;
+	col_r.rgbtGreen = r.rgbtGreen;
+	col_r.rgbtRed = r.rgbtRed;
+
+	if (isGreenTiberium(td.overlay))
+	{
+#ifndef RA2_MODE
+		col.rgbtBlue = 0;
+		col.rgbtGreen = 200;
+		col.rgbtRed = 0;
+		col_r = col;
+#else
+		col.rgbtBlue = 0;
+		col.rgbtGreen = 250;
+		col.rgbtRed = 250;
+		col_r = col;
+#endif
+	}
+	else if (td.overlay == OVRL_VEINS)
+	{
+		col.rgbtBlue = 120;
+		col.rgbtGreen = 180;
+		col.rgbtRed = 190;
+		col_r = col;
+	}
+	else if (td.overlay == OVRL_VEINHOLE || td.overlay == OVRL_VEINHOLEBORDER)
+	{
+		col.rgbtBlue = 120;
+		col.rgbtGreen = 160;
+		col.rgbtRed = 165;
+		col_r = col;
+	}
+	else if (td.overlay != 0xFF)
+	{
+		col.rgbtBlue = 20;
+		col.rgbtGreen = 20;
+		col.rgbtRed = 20;
+		col_r = col;
+	}
+
+
+	if (sod.house.GetLength() > 0)
+	{
+		COLORREF c = ((CFinalSunDlg*)theApp.m_pMainWnd)->m_view.m_isoview->GetColor(sod.house);
+
+		col.rgbtRed = GetRValue(c);
+		col.rgbtBlue = GetBValue(c);
+		col.rgbtGreen = GetGValue(c);
+		col_r = col;
+	}
+
+	// MW: ADD: make red start pos dots
+	if (isMultiplayer)
+	{
+		CString id;
+		DWORD p;
+		BOOL startpos = FALSE;
+		int ii, ee;
+		for (ii = -1;ii < 2;ii++)
+		{
+			for (ee = -1;ee < 2;ee++)
+			{
+				if (dwPos + ii + ee * m_IsoSize < fielddata_size)
+				{
+					int w = GetWaypointAt(dwPos + ii + ee * m_IsoSize);
+					if (w >= 0)
+					{
+						GetWaypointData(w, &id, &p);
+						if (atoi(id) < 8)
+						{
+							startpos = TRUE;
+							break;
+						}
+					}
+
+
+				}
+			}
+			if (startpos) break;
+		}
+		if (startpos)
+		{
+			col.rgbtBlue = 0;
+			col.rgbtGreen = 0;
+			col.rgbtRed = 255;
+			col_r = col;
+
+		}
+	}
+
+	m_minimap.WriteCell(i, e, col, col_r);
 }
 
 int CMapData::CalcMoneyOnMap()
@@ -6620,18 +6495,11 @@ void CMapData::ResizeMap(int iLeft, int iTop, DWORD dwNewWidth, DWORD dwNewHeigh
 
 	// hmm, erase any snapshots... we probably can remove this and do coordinate conversion instead
 	// but for now we just delete them...
-	for (i = 0;i < dwSnapShotCount;i++)
-	{
-		m_snapshots[i].Free();
-	}
-	if (m_snapshots != NULL) delete[] m_snapshots;
+	m_snapshots.Clear();
 
 
 	fielddata = NULL;
 	fielddata_size = 0;
-	m_snapshots = NULL;
-	dwSnapShotCount = 0;
-	m_cursnapshot = -1;
 
 
 	char c[50];

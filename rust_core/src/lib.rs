@@ -22,6 +22,10 @@
 #![allow(clippy::missing_safety_doc)]
 #![allow(clippy::needless_range_loop)]
 
+mod codec;
+mod csf;
+mod minilzo;
+
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
 // ---------------------------------------------------------------------------

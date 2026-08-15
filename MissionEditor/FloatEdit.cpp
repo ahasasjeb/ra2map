@@ -77,20 +77,16 @@ void CFloatEdit::OnKillfocus()
 	int c,d;
 	char* j=_fcvt(res, 6, &c, &d);
 	
-	int i, slen=strlen(j);
-	char j2[50];
-
-	for(i=0;i<6-slen;i++)
+	// left-pad to 6 digits. The original loop strcat'ed into _fcvt's
+	// static buffer with fixed local arrays; CString does it safely.
+	CString num = j;
+	while (num.GetLength() < 6)
 	{
-		strcpy(j2, j+i);
-		j[i]=0;
-		strcat(j, "0");
-		strcat(j,j2);
+		num.Insert(0, "0");
 	}
 
-	if(j==NULL) return;
 	//MessageBox(j,text);
-	text=j;
+	text=num;
 	text.Insert(c, ".");
 	
 	//MessageBox(text);

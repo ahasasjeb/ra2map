@@ -378,7 +378,7 @@ BOOL CFinalSunDlg::OnInitDialog()
 	ShowWindow(SW_SHOWMAXIMIZED);
 	CDialog::BringWindowToTop();
 	
-	if(strlen(currentMapFile)==0) // no map file specified
+	if (currentMapFile.IsEmpty()) // no map file specified
 	{
 		// ok, let the user choose a map!
 		// hmm... no, don´t let him. we already have our tips dialog.
@@ -396,7 +396,7 @@ BOOL CFinalSunDlg::OnInitDialog()
 		this->SetWindowText(str);
 		SetCursor(LoadCursor(NULL, IDC_WAIT));
  
-		Map->LoadMap(currentMapFile);
+		Map->LoadMap((LPCSTR)currentMapFile);
  
 		SetCursor(m_hArrowCursor);
 
@@ -625,10 +625,10 @@ void CFinalSunDlg::OnFileOpenmap()
 		if(bLoadedFromMMX)
 		{
 			//currentMapFile[0]=0;
-			strcpy(currentMapFile, dlg.GetPathName());
+			currentMapFile = dlg.GetPathName();
 		}
 		else
-		strcpy(currentMapFile, fileToOpen);
+		currentMapFile = fileToOpen;
 	}
 
 	Sleep(200);
@@ -744,7 +744,7 @@ void CFinalSunDlg::OnFileSaveas()
 	
 	if(dlg.DoModal()!=IDCANCEL)
 	{
-		strcpy(currentMapFile, dlg.GetPathName());
+		currentMapFile = dlg.GetPathName();
 
 		CString str=GetLanguageStringACP("MainDialogCaption");
 		str+=" (";
@@ -835,7 +835,7 @@ void CFinalSunDlg::OnFileSave()
 		return;
 	}
 
-	if(strlen(currentMapFile)==0) { OnFileSaveas(); return; }
+	if (currentMapFile.IsEmpty()) { OnFileSaveas(); return; }
 	
 	CMapValidator validator;
 	int iCancel=validator.DoModal();
@@ -1735,7 +1735,7 @@ void CFinalSunDlg::OnFileNew()
 	m_TerrainDlg.DestroyWindow();
 
 	// set currentMapFile to nothing and update window caption
-	strcpy(currentMapFile,"");
+	currentMapFile.Empty();
 	CString cap;
 	cap=GetLanguageStringACP("MainDialogCaption");
 	cap+=" (";
@@ -2699,13 +2699,14 @@ BOOL CFinalSunDlg::OnNotify(WPARAM wParam, LPARAM lParam, LRESULT* pResult)
 		if(nID)
 		{
 			CString s;
-			char c[50];
-			itoa(nID, c, 10);			
-			
+
 			s.LoadString(nID);
 			s=TranslateStringACP(s);
 			//pTTT->lpszText = s;
-			if(s.GetLength()>80) s.SetAt(80, 0);
+			// szText is char[80]: keep at most 79 chars so the NUL
+			// terminator fits (the old code truncated to 80 and the
+			// strcpy overflowed by one byte)
+			if(s.GetLength()>79) s.SetAt(79, 0);
 			strcpy(pTTT->szText, s);
 			pTTT->hinst = NULL;
 			return(TRUE);
@@ -4029,10 +4030,10 @@ void CFinalSunDlg::OpenMap(LPCSTR lpFilename)
 		if(bLoadedFromMMX)
 		{
 			//currentMapFile[0]=0;
-			strcpy(currentMapFile, lpFilename);
+			currentMapFile = lpFilename;
 		}
 		else
-		strcpy(currentMapFile, fileToOpen);
+		currentMapFile = fileToOpen;
 	}
 
 	Sleep(200);

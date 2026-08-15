@@ -32,4 +32,6 @@ private:
     void test_tube_delimiter();
     void test_hsv();
     void test_iso();
+    void test_codecs();
+    void test_csf();
 };

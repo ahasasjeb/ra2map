@@ -338,17 +338,19 @@ void CTriggerActionsDlg::OnSelchangeParameter()
 	}
 	else if(curparam==-1)
 	{
-		char wayp[50];
+		// CString instead of char[50]: waypoint strings from the action
+		// data can exceed the old fixed buffer
+		CString wayp;
 		if(!bNoWP)
 		{
 			ListWaypoints(m_ParamValue);
 			int iWayp=GetWaypoint(GetParam(ActionData,startpos+1+6));
 			
-			itoa(iWayp, wayp, 10);
+			wayp.Format("%d", iWayp);
 		}
 		else
 		{
-			strcpy(wayp, GetParam(ActionData, startpos+1+6));
+			wayp = GetParam(ActionData, startpos+1+6);
 			HandleParamList(m_ParamValue, 0);
 		}
 			
@@ -472,6 +474,7 @@ void CTriggerActionsDlg::OnDeleteaction()
 	for(i=0;i<posc;i++)
 	{
 		cupos=strchr(cupos+1, ',');
+		if(cupos==NULL) break; // malformed action data: stop instead of crashing
 		if(i==posc-1)
 		{
 			cupos[0]=0;

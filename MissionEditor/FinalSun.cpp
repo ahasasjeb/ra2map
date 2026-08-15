@@ -359,7 +359,9 @@ BOOL CFinalSunApp::InitInstance()
 	auto lastSlash = cTSPath.ReverseFind('\\');
 	if (lastSlash >= 0)
 		cTSPath.SetAt(lastSlash + 1, 0);
-	strcpy(TSPath, cTSPath);
+	// strcpy_s truncates instead of overflowing the fixed array (the
+	// configured game path can exceed MAX_PATH)
+	strcpy_s(TSPath, cTSPath);
 
 	// MW 01/23/2013: changed the global CMapData Map to a global CMapData* to get rid of static initialization/shutdown problems
 	{
@@ -388,11 +390,11 @@ void CFinalSunApp::ParseCommandLine()
 	strcpy(data, theApp.m_lpCmdLine);
 	if (strlen(data) == 0)
 	{
-		strcpy(currentMapFile, "");
+		currentMapFile.Empty();
 		return;
 	}
 
-	strcpy(currentMapFile, data);
+	currentMapFile = data;
 #endif
 }
 
