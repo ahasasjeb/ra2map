@@ -6246,7 +6246,7 @@ void CIsoView::RestorePreviewRegion()
 		memcpy(dstBase + (size_t)i * ddsd.lPitch, src + (size_t)i * rowBytes, rowBytes);
 }
 
-void CIsoView::OnTimer(UINT nIDEvent)
+void CIsoView::OnTimer(UINT_PTR nIDEvent)
 {
 	// theApp.m_loading->FreeAll();
 	// theApp.m_loading->InitPics();

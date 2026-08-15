@@ -233,34 +233,44 @@ BOOL CFinalSunApp::InitInstance()
 
 	auto& opts = m_Options;
 
-	HKEY hKey = 0;
-	int res;
-	res = RegOpenKeyExW(HKEY_LOCAL_MACHINE, key.c_str(), 0, KEY_EXECUTE/*KEY_ALL_ACCESS*/, &hKey);
-	if (res != ERROR_SUCCESS)
+	// Older game installers commonly write InstallPath to the 32-bit registry
+	// view. A 64-bit editor must check both views, otherwise a valid manual
+	// path is used but an irrelevant registry error is shown at every launch.
+	const HKEY registryHives[] = { HKEY_LOCAL_MACHINE, HKEY_CURRENT_USER };
+	const REGSAM registryViews[] = { KEY_READ | KEY_WOW64_64KEY, KEY_READ | KEY_WOW64_32KEY };
+	bool foundInstallPath = false;
+
+	for (const HKEY hive : registryHives)
 	{
-		std::wstring s = L"Failed to access registry. Using manual setting. Error was:\n";
-		wchar_t c[1024] = { 0 };
-		FormatMessageW(FORMAT_MESSAGE_FROM_SYSTEM, 0, res, 0, c, 1023, NULL);
-		MessageBoxW(0, (s + c).c_str(), L"Error", 0);
-		opts.TSExe = optini.sections[game].values["Exe"];
-	}
-	else
-	{
-		// key opened
-		wchar_t path[MAX_PATH + 1] = { 0 };
-		DWORD pathsize = MAX_PATH;
-		DWORD type = REG_SZ;
-		if ((res = RegQueryValueExW(hKey, L"InstallPath", 0, &type, (unsigned char*)path, &pathsize)) != ERROR_SUCCESS)
+		for (const REGSAM view : registryViews)
 		{
-			std::wstring s = L"Failed to access registry. Using manual setting. Error was:\n";
-			wchar_t c[1024] = { 0 };
-			FormatMessageW(FORMAT_MESSAGE_FROM_SYSTEM, 0, res, 0, c, 1023, NULL);
-			MessageBoxW(0, (s + c).c_str(), L"Error", 0);
-			opts.TSExe = optini.sections[game].values["Exe"];
+			HKEY hKey = 0;
+			if (RegOpenKeyExW(hive, key.c_str(), 0, view, &hKey) != ERROR_SUCCESS)
+				continue;
+
+			wchar_t path[MAX_PATH + 1] = { 0 };
+			DWORD pathsize = sizeof(path);
+			DWORD type = 0;
+			const LONG queryResult = RegQueryValueExW(
+				hKey, L"InstallPath", 0, &type, reinterpret_cast<BYTE*>(path), &pathsize);
+			RegCloseKey(hKey);
+
+			if (queryResult == ERROR_SUCCESS &&
+				(type == REG_SZ || type == REG_EXPAND_SZ) &&
+				path[0] != L'\0')
+			{
+				opts.TSExe = path;
+				foundInstallPath = true;
+				break;
+			}
 		}
-		else
-			opts.TSExe = path;
+
+		if (foundInstallPath)
+			break;
 	}
+
+	if (!foundInstallPath)
+		opts.TSExe = optini.sections[game].values["Exe"];
 
 
 	if (copiedDefaultFile ||

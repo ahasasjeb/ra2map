@@ -1,13 +1,13 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" ToolsVersion="12.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
-    <ProjectConfiguration Include="Debug|Win32">
+    <ProjectConfiguration Include="Debug|x64">
       <Configuration>Debug</Configuration>
-      <Platform>Win32</Platform>
+      <Platform>x64</Platform>
     </ProjectConfiguration>
-    <ProjectConfiguration Include="Release|Win32">
+    <ProjectConfiguration Include="Release|x64">
       <Configuration>Release</Configuration>
-      <Platform>Win32</Platform>
+      <Platform>x64</Platform>
     </ProjectConfiguration>
   </ItemGroup>
   <PropertyGroup Label="Globals">
@@ -19,13 +19,13 @@
     <ProjectName>MissionEditorPackLib</ProjectName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
     <PlatformToolset>$(DefaultPlatformToolset)</PlatformToolset>
     <UseOfMfc>false</UseOfMfc>
     <CharacterSet>MultiByte</CharacterSet>
   </PropertyGroup>
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
     <PlatformToolset>$(DefaultPlatformToolset)</PlatformToolset>
     <UseOfMfc>false</UseOfMfc>
@@ -34,27 +34,27 @@
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ImportGroup Label="ExtensionSettings">
   </ImportGroup>
-  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="PropertySheets">
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="PropertySheets">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
     <Import Project="$(VCTargetsPath)Microsoft.Cpp.UpgradeFromVC60.props" />
   </ImportGroup>
-  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="PropertySheets">
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="PropertySheets">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
     <Import Project="$(VCTargetsPath)Microsoft.Cpp.UpgradeFromVC60.props" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <OutDir>$(SolutionDir)\build\output\$(Configuration)-$(Platform)\lib\</OutDir>
     <IntDir>$(SolutionDir)\build\intermediate\$(Configuration)-$(Platform)\$(ProjectName)\</IntDir>
     <LinkIncremental>false</LinkIncremental>
   </PropertyGroup>
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <OutDir>$(SolutionDir)\build\output\$(Configuration)-$(Platform)\lib\</OutDir>
     <IntDir>$(SolutionDir)\build\intermediate\$(Configuration)-$(Platform)\$(ProjectName)\</IntDir>
     <LinkIncremental>true</LinkIncremental>
     <TargetName>$(ProjectName)d</TargetName>
   </PropertyGroup>
-  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <InlineFunctionExpansion>Default</InlineFunctionExpansion>
@@ -83,13 +83,13 @@
       <SuppressStartupBanner>true</SuppressStartupBanner>
     </Lib>
     <PreBuildEvent>
-      <Command>where cargo &gt;nul 2&gt;nul &amp;&amp; (cargo build --release --target i686-pc-windows-msvc --manifest-path "$(SolutionDir)rust_core\Cargo.toml") || ("$(USERPROFILE)\.cargo\bin\cargo.exe" build --release --target i686-pc-windows-msvc --manifest-path "$(SolutionDir)rust_core\Cargo.toml")</Command>
+      <Command>where cargo &gt;nul 2&gt;nul &amp;&amp; (cargo build --release --target x86_64-pc-windows-msvc --manifest-path "$(SolutionDir)rust_core\Cargo.toml") || ("$(USERPROFILE)\.cargo\bin\cargo.exe" build --release --target x86_64-pc-windows-msvc --manifest-path "$(SolutionDir)rust_core\Cargo.toml")</Command>
     </PreBuildEvent>
     <Link>
       <ModuleDefinitionFile>.\MissionEditorPackLib.def</ModuleDefinitionFile>
     </Link>
   </ItemDefinitionGroup>
-  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
       <InlineFunctionExpansion>Default</InlineFunctionExpansion>
@@ -118,7 +118,7 @@
       <SuppressStartupBanner>true</SuppressStartupBanner>
     </Lib>
     <PreBuildEvent>
-      <Command>where cargo &gt;nul 2&gt;nul &amp;&amp; (cargo build --release --target i686-pc-windows-msvc --manifest-path "$(SolutionDir)rust_core\Cargo.toml") || ("$(USERPROFILE)\.cargo\bin\cargo.exe" build --release --target i686-pc-windows-msvc --manifest-path "$(SolutionDir)rust_core\Cargo.toml")</Command>
+      <Command>where cargo &gt;nul 2&gt;nul &amp;&amp; (cargo build --release --target x86_64-pc-windows-msvc --manifest-path "$(SolutionDir)rust_core\Cargo.toml") || ("$(USERPROFILE)\.cargo\bin\cargo.exe" build --release --target x86_64-pc-windows-msvc --manifest-path "$(SolutionDir)rust_core\Cargo.toml")</Command>
     </PreBuildEvent>
     <Link>
       <ModuleDefinitionFile>.\MissionEditorPackLib.def</ModuleDefinitionFile>

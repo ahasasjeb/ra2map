@@ -30,7 +30,7 @@
 
 // Link directive: the actual .lib is produced by cargo (see the
 // MissionEditorPackLib pre-build step) at
-//   $(SolutionDir)rust_core\target\i686-pc-windows-msvc\release\mission_editor_rust_core.lib
+//   $(SolutionDir)rust_core\target\x86_64-pc-windows-msvc\release\mission_editor_rust_core.lib
 #pragma comment(lib, "mission_editor_rust_core.lib")
 
 // status codes

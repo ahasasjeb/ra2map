@@ -44,8 +44,9 @@ CString InputBox(const char* Sentence, const char* Caption)
 	CInputBox inp;
 	inp.SetCaption(Caption);
 	inp.SetSentence(Sentence);
-	char* res=(char*) inp.DoModal();
-	CString cstr=res;
+	char* res = reinterpret_cast<char*>(inp.DoModal());
+	CString cstr = res != NULL ? res : "";
+	delete[] res;
 	
 	return cstr;
 }
@@ -80,14 +81,18 @@ void CInputBox::OnOK()
 	CString text;
 	GetDlgItem(IDC_VAL)->GetWindowText(text);
 
-	if(text.GetLength()==0){EndDialog(NULL);};
+	if (text.GetLength() == 0)
+	{
+		EndDialog(0);
+		return;
+	}
 
 	char* str;
 	// +1 for the NUL terminator (the original allocated GetLength()
 	// bytes and strcpy overflowed by one byte on every use)
 	str=new(char[text.GetLength()+1]);
 	strcpy(str, (LPCTSTR)text);
-	EndDialog((int)str);
+	EndDialog(reinterpret_cast<INT_PTR>(str));
 }
 
 void CInputBox::OnCancel() 

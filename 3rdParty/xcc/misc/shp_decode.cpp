@@ -379,42 +379,19 @@ static void write_v80(byte v, int count, byte*& d)
 
 void get_same(const byte* s, const byte* r, const byte* s_end, byte*& p, int& cb_p)
 {
-	_asm
+	p = nullptr;
+	cb_p = 0;
+	for (const byte* candidate = s; candidate < r; ++candidate)
 	{
-		push	esi
-		push	edi
-		mov		eax, s_end
-		mov		ebx, s
-		xor		ecx, ecx
-		mov		edi, p
-		mov		[edi], ecx
-		dec		ebx
-next_s:
-		inc		ebx
-		xor		edx, edx
-		mov		esi, r
-		mov		edi, ebx
-		cmp		edi, esi
-		jnb		end0
-next0:
-		inc		edx
-		cmp		esi, eax
-		jnb		end_line
-		cmpsb
-		je		next0
-end_line:
-		dec		edx
-		cmp		edx, ecx
-		jl		next_s
-		mov		ecx, edx
-		mov		edi, p
-		mov		[edi], ebx
-		jmp		next_s
-end0:
-		mov		edi, cb_p
-		mov		[edi], ecx
-		pop		edi
-		pop		esi
+		int match_length = 0;
+		while (r + match_length < s_end && candidate[match_length] == r[match_length])
+			++match_length;
+
+		if (match_length >= cb_p)
+		{
+			p = const_cast<byte*>(candidate);
+			cb_p = match_length;
+		}
 	}
 }
 
@@ -619,7 +596,6 @@ int decode80c(const byte image_in[], byte image_out[], int cb_in)
 
 int decode80(const byte image_in[], byte image_out[])
 {
-	int cb_out;
 	/*
 	0 copy 0cccpppp p
 	1 copy 10cccccc
@@ -627,78 +603,60 @@ int decode80(const byte image_in[], byte image_out[])
 	3 fill 11111110 c c v
 	4 copy 11111111 c c p p
 	*/
-	
-	_asm
+	const byte* r = image_in;
+	byte* w = image_out;
+	while (true)
 	{
-		push	esi
-		push	edi
-		mov		ax, ds
-		mov		es, ax
-		mov		esi, image_in
-		mov		edi, image_out
-next0:
-		xor		eax, eax
-		lodsb
-		mov		ecx, eax
-		test	eax, 0x80
-		jnz		c1c
-		shr		ecx, 4
-		add		ecx, 3
-		and		eax, 0xf
-		shl		eax, 8
-		lodsb
-		mov		edx, esi
-		mov		esi, edi
-		sub		esi, eax
-		jmp		copy_from_destination
-c1c:
-		and		ecx, 0x3f
-		test	eax, 0x40
-		jnz		c2c
-		or		ecx, ecx
-		jz		end0
-		jmp		copy_from_source
-c2c:
-		xor		eax, eax
-		lodsw
-		cmp		ecx, 0x3e
-		je		c3
-		ja		c4
-		mov		edx, esi
-		mov		esi, image_out
-		add		esi, eax
-		add		ecx, 3
-		jmp		copy_from_destination
-c3:
-		mov		ecx, eax
-		lodsb
-		rep		stosb
-		jmp		next0
-c4:
-		mov		ecx, eax
-		lodsw
-		mov		edx, esi
-		mov		esi, image_out
-		add		esi, eax
-copy_from_destination:
-		rep		movsb
-		mov		esi, edx
-		jmp		next0
-copy_from_source:
-		rep		movsb
-		jmp		next0
-end0:
-		sub		edi, image_out
-		mov		cb_out, edi
-		pop		edi
-		pop		esi
+		const int command = *r++;
+		if (!(command & 0x80))
+		{
+			const int count = (command >> 4) + 3;
+			const int offset = ((command & 0x0f) << 8) | *r++;
+			const byte* source = w - offset;
+			for (int remaining = count; remaining-- > 0;)
+				*w++ = *source++;
+		}
+		else
+		{
+			const int subtype = command & 0x3f;
+			if (!(command & 0x40))
+			{
+				if (!subtype)
+					break;
+				for (int remaining = subtype; remaining-- > 0;)
+					*w++ = *r++;
+				continue;
+			}
+
+			const int value = r[0] | (r[1] << 8);
+			r += 2;
+			if (subtype == 0x3e)
+			{
+				const byte fill = *r++;
+				for (int remaining = value; remaining-- > 0;)
+					*w++ = fill;
+			}
+			else if (subtype == 0x3f)
+			{
+				const int position = r[0] | (r[1] << 8);
+				r += 2;
+				const byte* source = image_out + position;
+				for (int remaining = value; remaining-- > 0;)
+					*w++ = *source++;
+			}
+			else
+			{
+				const byte* source = image_out + value;
+				for (int remaining = subtype + 3; remaining-- > 0;)
+					*w++ = *source++;
+			}
+		}
 	}
-	return cb_out;
+	return static_cast<int>(w - image_out);
 }
 
 int decode80r(const byte image_in[], byte image_out[])
 {
-	int cb_out;
 	/*
 	0 copy 0cccpppp p
 	1 copy 10cccccc
@@ -706,73 +664,56 @@ int decode80r(const byte image_in[], byte image_out[])
 	3 fill 11111110 c c v
 	4 copy 11111111 c c p p
 	*/
-	
-	_asm
+	const byte* r = image_in;
+	byte* w = image_out;
+	while (true)
 	{
-		push	esi
-		push	edi
-		mov		ax, ds
-		mov		es, ax
-		mov		esi, image_in
-		mov		edi, image_out
-next0:
-		xor		eax, eax
-		lodsb
-		mov		ecx, eax
-		test	eax, 0x80
-		jnz		c1c
-		shr		ecx, 4
-		add		ecx, 3
-		and		eax, 0xf
-		shl		eax, 8
-		lodsb
-		mov		edx, esi
-		mov		esi, edi
-		sub		esi, eax
-		jmp		copy_from_destination
-c1c:
-		and		ecx, 0x3f
-		test	eax, 0x40
-		jnz		c2c
-		or		ecx, ecx
-		jz		end0
-		jmp		copy_from_source
-c2c:
-		xor		eax, eax
-		lodsw
-		cmp		ecx, 0x3e
-		je		c3
-		ja		c4
-		mov		edx, esi
-		mov		esi, edi
-		sub		esi, eax
-		add		ecx, 3
-		jmp		copy_from_destination
-c3:
-		mov		ecx, eax
-		lodsb
-		rep		stosb
-		jmp		next0
-c4:
-		mov		ecx, eax
-		lodsw
-		mov		edx, esi
-		mov		esi, edi
-		sub		esi, eax
-copy_from_destination:
-		rep		movsb
-		mov		esi, edx
-		jmp		next0
-copy_from_source:
-		rep		movsb
-		jmp		next0
-end0:
-		sub		edi, image_out
-		mov		cb_out, edi
-		pop		edi
-		pop		esi
+		const int command = *r++;
+		if (!(command & 0x80))
+		{
+			const int count = (command >> 4) + 3;
+			const int offset = ((command & 0x0f) << 8) | *r++;
+			const byte* source = w - offset;
+			for (int remaining = count; remaining-- > 0;)
+				*w++ = *source++;
+		}
+		else
+		{
+			const int subtype = command & 0x3f;
+			if (!(command & 0x40))
+			{
+				if (!subtype)
+					break;
+				for (int remaining = subtype; remaining-- > 0;)
+					*w++ = *r++;
+				continue;
+			}
+
+			const int value = r[0] | (r[1] << 8);
+			r += 2;
+			if (subtype == 0x3e)
+			{
+				const byte fill = *r++;
+				for (int remaining = value; remaining-- > 0;)
+					*w++ = fill;
+			}
+			else if (subtype == 0x3f)
+			{
+				const int offset = r[0] | (r[1] << 8);
+				r += 2;
+				const byte* source = w - offset;
+				for (int remaining = value; remaining-- > 0;)
+					*w++ = *source++;
+			}
+			else
+			{
+				const byte* source = w - value;
+				for (int remaining = subtype + 3; remaining-- > 0;)
+					*w++ = *source++;
+			}
+		}
 	}
-	return cb_out;
+	return static_cast<int>(w - image_out);
 }
 
 int decode2(const byte* s, byte* d, int cb_s, const byte* reference_palet)
@@ -1167,7 +1108,7 @@ int encode5(const byte* s, byte* d, int cb_s, int format)
 	byte* w = d;
 	while (r < r_end)
 	{
-		int cb_section = min(r_end - r, 8192);
+		const int cb_section = std::min(static_cast<int>(r_end - r), 8192);
 		t_pack_section_header& header = *reinterpret_cast<t_pack_section_header*>(w);
 		w += sizeof(t_pack_section_header);
 		w += header.size_in = format == 80 ? encode80(r, w, cb_section) : encode5s(r, w, cb_section);

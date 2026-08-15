@@ -385,15 +385,10 @@ void Cblowfish::decipher(uint32_t& xl, uint32_t& xr) const
 
 static uint32_t reverse(uint32_t v)
 {
-	_asm
-	{
-		mov		eax, v
-		xchg	al, ah
-		rol		eax, 16
-		xchg	al, ah
-		mov		v, eax
-	}
-	return v;
+	return ((v & 0x000000ffu) << 24)
+		| ((v & 0x0000ff00u) << 8)
+		| ((v & 0x00ff0000u) >> 8)
+		| ((v & 0xff000000u) >> 24);
 }
 
 void Cblowfish::encipher(const void* s, void* d, int size) const

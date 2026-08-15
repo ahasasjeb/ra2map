@@ -4,7 +4,7 @@
     <Import Project="$(MSBuildThisFileDirectory)/Common.props" />
   </ImportGroup>
   <PropertyGroup>
-	<XccVcpkgDirTriplet>$(XccDir)\vcpkg_installed\x86-windows\x86-windows</XccVcpkgDirTriplet>
+	<XccVcpkgDirTriplet>$(XccDir)\vcpkg_installed\x64-windows\x64-windows</XccVcpkgDirTriplet>
     <XccVcpkgDir>$(XccVcpkgDirTriplet)</XccVcpkgDir>
     <!-- Link-time code generation: cross-TU inlining and dead code
          elimination across the whole program. Safe for release builds

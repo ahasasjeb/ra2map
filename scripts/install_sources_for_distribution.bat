@@ -12,12 +12,12 @@ if "%VCINSTALLDIR%" == "" (
     echo Could not locate a Visual Studio installation with the C++ workload. Please install Visual Studio 2022 or newer or activate a developer command prompt.
     exit /b 1
   )
-  call "%VS_PATH%\Common7\Tools\VsDevCmd.bat" -arch=x86 -host_arch=x86
+  call "%VS_PATH%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64
   if exist "%VS_PATH%\VC\vcpkg\vcpkg.exe" set "PATH=%VS_PATH%\VC\vcpkg;%PATH%"
 )
 
 @echo on
 pushd "%~dp0..\3rdParty\xcc"
 rmdir /Q /S "%~dp0..\3rdParty\xcc\vcpkg_installed"
-vcpkg install --binarysource clear "--downloads-root=%~dp0..\3rdParty\xcc\vcpkg_downloads" "--x-install-root=%~dp0..\3rdParty\xcc\vcpkg_installed\x86-windows" "--x-buildtrees-root=%~dp0..\3rdParty\xcc\vcpkg_installed\x86-windows\_buildtrees" --triplet x86-windows
+vcpkg install --binarysource clear "--downloads-root=%~dp0..\3rdParty\xcc\vcpkg_downloads" "--x-install-root=%~dp0..\3rdParty\xcc\vcpkg_installed\x64-windows" "--x-buildtrees-root=%~dp0..\3rdParty\xcc\vcpkg_installed\x64-windows\_buildtrees" --triplet x64-windows
 popd

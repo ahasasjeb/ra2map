@@ -2689,11 +2689,11 @@ BOOL CFinalSunDlg::OnNotify(WPARAM wParam, LPARAM lParam, LRESULT* pResult)
 	if(pHead->code==TTN_NEEDTEXT)
 	{
 		TOOLTIPTEXT *pTTT = (TOOLTIPTEXT *)pHead;
-		UINT nID =pHead->idFrom;
+		UINT nID = static_cast<UINT>(pHead->idFrom);
 		if (pTTT->uFlags & TTF_IDISHWND)
 		{
 			// idFrom ist der HWND des Tools
-			nID = ::GetDlgCtrlID((HWND)nID);
+			nID = static_cast<UINT>(::GetDlgCtrlID(reinterpret_cast<HWND>(pHead->idFrom)));
 		}
 		
 		if(nID)
@@ -3073,9 +3073,10 @@ LONG __stdcall ExceptionHandler(
 	CString s;
 	CString s2;
 	CString s_add;	
-	char adress[50];
+	CString accessAddress;
 	char c[50];
-	itoa((int)ExceptionInfo->ExceptionRecord->ExceptionAddress, adress, 16);
+	CString exceptionAddress;
+	exceptionAddress.Format("%p", ExceptionInfo->ExceptionRecord->ExceptionAddress);
 	s="Unknown exception";
 	switch(ExceptionInfo->ExceptionRecord->ExceptionCode)
 	{
@@ -3089,9 +3090,8 @@ LONG __stdcall ExceptionHandler(
 		else
 			s_add="\nAdditional information: Read access from 0x";
 		
-		itoa(ExceptionInfo->ExceptionRecord->ExceptionInformation[1], c, 16);
-
-		s_add+=c;
+		accessAddress.Format("%p", reinterpret_cast<void*>(ExceptionInfo->ExceptionRecord->ExceptionInformation[1]));
+		s_add+=accessAddress;
 
 		break;
 	case EXCEPTION_ARRAY_BOUNDS_EXCEEDED:
@@ -3195,7 +3195,7 @@ LONG __stdcall ExceptionHandler(
 	s3+="\n";
 	s3+=s2;
 	s3+="\nAt address: ";
-	s3+=adress;
+	s3+=exceptionAddress;
 	s3+=s_add;
 
 
@@ -3203,9 +3203,11 @@ LONG __stdcall ExceptionHandler(
 	errstream << "Last succeeded operation:" << last_succeeded_operation << endl;
 	errstream << "Last succeeded library operation:" << FSunPackLib::last_succeeded_operation << endl;
 	errstream << "Exception code: 0x" << hex << (unsigned int)ExceptionInfo->ExceptionRecord->ExceptionCode << dec << endl;
-	errstream << "Exception address: 0x" << hex << (unsigned long)(unsigned int)(size_t)ExceptionInfo->ExceptionRecord->ExceptionAddress << dec << endl;
-	errstream << "Module base: 0x" << hex << (unsigned long)(unsigned int)(size_t)GetModuleHandle(NULL) << dec << endl;
-	errstream << "Exception offset: 0x" << hex << (unsigned long)(unsigned int)((size_t)ExceptionInfo->ExceptionRecord->ExceptionAddress - (size_t)GetModuleHandle(NULL)) << dec << endl;
+	errstream << "Exception address: " << ExceptionInfo->ExceptionRecord->ExceptionAddress << endl;
+	errstream << "Module base: " << GetModuleHandle(NULL) << endl;
+	errstream << "Exception offset: 0x" << hex
+		<< (reinterpret_cast<ULONG_PTR>(ExceptionInfo->ExceptionRecord->ExceptionAddress)
+			- reinterpret_cast<ULONG_PTR>(GetModuleHandle(NULL))) << dec << endl;
 	{
 		// capture a stack trace of this thread (resolved offline via the PDB)
 		void* frames[32];
@@ -3213,7 +3215,7 @@ LONG __stdcall ExceptionHandler(
 		errstream << "Stack trace:" << endl;
 		for (USHORT n = 0; n < count; n++)
 		{
-			errstream << "  [" << n << "] 0x" << hex << (unsigned long)(unsigned int)(size_t)frames[n] << dec << endl;
+			errstream << "  [" << n << "] " << frames[n] << endl;
 		}
 		errstream.flush();
 	}
@@ -3252,9 +3254,9 @@ LONG __stdcall ExceptionHandler(
 	return EXCEPTION_EXECUTE_HANDLER;//EXCEPTION_CONTINUE_SEARCH;//EXCEPTION_EXECUTE_HANDLER;
 }
 
-int CFinalSunDlg::DoModal() 
+INT_PTR CFinalSunDlg::DoModal()
 {
-	int res=0;
+	INT_PTR res=0;
 	SetUnhandledExceptionFilter(ExceptionHandler);
 
 	res=CDialog::DoModal();

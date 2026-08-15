@@ -16,7 +16,7 @@ applyTo: '**'
 - `rust_core/src/minilzo.rs` + `rust_core/vendor/minilzo/`：minilzo 2.10 重命名符号 vendor（minilzo_rs.c 用 #define 前缀 rs_core_），避开与 lzo2.lib 的 LNK2005 冲突。ABI 注意：`lzo_uint == size_t`，长度用 usize。GPL v2+ 与项目 GPLv3 兼容。
 - `rust_core/build.rs`：cc crate 编译 vendor 的 C。
 - C++ 接入：FSunPackLib（含 `DecodeIsoMapPack5` 新增 `size_t dp_cap` 参数）、`CLoading::LoadStrings`、`MapData::Unpack` 全部改走 Rust；RustCore.h 声明齐全。
-- 测试：cargo test x64+i686 各 18 通过；C++ tests.cpp 9 组（含 test_codecs/test_csf）全过。
+- 测试：`cargo test --target x86_64-pc-windows-msvc` 22 项通过；C++ tests.cpp 9 组（含 test_codecs/test_csf）全过。
 
 ### 2. 上帝类拆分
 - `MissionEditor/MapSnapshots.h/.cpp`：`CMapSnapshots`（快照环/Undo/Redo，before/after 回调处理钱与 minimap）。
@@ -39,16 +39,16 @@ applyTo: '**'
 
 ## 验证命令
 - 构建（必须走 sln，prebuild 用 $(SolutionDir) 找 rust_core）：
-  `& "D:\Program Files\Microsoft Visual Studio\18\Insiders\MSBuild\Current\Bin\MSBuild.exe" MissionEditor.sln /p:Configuration="FinalAlertDebug YR" /p:Platform=Win32 /m`
+  `& "D:\Program Files\Microsoft Visual Studio\18\Insiders\MSBuild\Current\Bin\MSBuild.exe" MissionEditor.sln /p:Configuration="FinalAlertDebug YR" /p:Platform=x64 /m`
 - 测试：`/p:Configuration="Tests FinalAlertDebug YR"`，产物 `dist\FinalAlert2YR\FinalAlert2YRTestsd.exe`（直接跑，看 Failed/Succeeded，当前 0/9）。
-- Rust：`cargo test` + `cargo test --target i686-pc-windows-msvc`（rust_core 目录）。
+- Rust：`cargo test` + `cargo test --target x86_64-pc-windows-msvc`（rust_core 目录）。
 
 ## 环境陷阱
 - clangd/LSP 报错全是噪音（没有 MFC 包含路径），以 MSBuild 为准。
 - LNK4098（MSVCRT 冲突）是既有 warning，无害。
 - 编辑 CRLF 文件时用精确文本替换；空白行数必须完全一致。
 - xcc encode5/decode5 分节 8192 字节；EncodeF80 分节头 [size_in u16][packLen byte2][0x20]。
-- minilzo-rs crate 的 u64 长度在 i686 是 ABI 巧合；自写 minilzo.rs 已用 usize，勿改回。
+- minilzo 的长度 ABI 必须与 C 的 `size_t` 对齐；自写 minilzo.rs 使用 `usize`，勿改回固定宽度整数。
 
 ## 可继续（未做，可选）
 - CFinalSunDlg 文件操作（OpenMap/SaveMap/currentMapFile 相关）抽 CMapFileIO。
