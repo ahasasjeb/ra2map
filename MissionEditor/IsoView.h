@@ -294,6 +294,7 @@ public:
 	int GetOverlayDirection(int x, int y);
 	void SetError(const char* text);
 	CWnd* owner;
+	bool HasLostDirectDrawSurface() const;
 	void ReInitializeDDraw();
 	COLORREF GetColor(const char* house, const char* color=NULL);
 	COLORREF GetColorImpl(const char* house, const char* color);

@@ -123,6 +123,8 @@ public:
 	{
 		if (m_locked)
 			return &m_ddsd;
+		if (m_pDDS == nullptr)
+			return nullptr;
 
 		if (m_pDDS->GetSurfaceDesc(&m_ddsd) != DD_OK)
 			return nullptr;
@@ -1022,6 +1024,15 @@ BOOL CIsoView::PreCreateWindow(CREATESTRUCT& cs)
 void CIsoView::OnMouseMove(UINT nFlags, CPoint point)
 {
 	if (b_IsLoading) return;
+	if (lpds == nullptr || HasLostDirectDrawSurface())
+	{
+		// Mouse previews bypass DrawMap(), which is normally responsible for
+		// recovering surfaces lost while the screen saver/display mode is active.
+		// Recover before any preview code locks or writes to those surfaces.
+		if (lpds != nullptr && dd != nullptr)
+			ReInitializeDDraw();
+		return;
+	}
 
 	static BOOL isMoving = FALSE;
 
@@ -3766,6 +3777,18 @@ inline PICDATA* GetOverlayPic(BYTE ovrl, BYTE ovrldata)
 void CIsoView::OnDraw(CDC* pDC)
 {
 	DrawMap();
+}
+
+
+bool CIsoView::HasLostDirectDrawSurface() const
+{
+	if (lpds == nullptr || lpdsBack == nullptr || lpdsTemp == nullptr)
+		return true;
+
+	if (lpds->IsLost() != DD_OK || lpdsBack->IsLost() != DD_OK || lpdsTemp->IsLost() != DD_OK)
+		return true;
+
+	return lpdsBackHighRes != nullptr && lpdsBackHighRes->IsLost() != DD_OK;
 }
 
 
@@ -6669,7 +6692,7 @@ void CIsoView::DrawMap()
 
 	if (lpds == NULL || b_IsLoading || tiledata == NULL || (*tiledata) == NULL || (*tiledata_count == 0)) return; // just to make sure...
 
-	if (lpds->IsLost() != DD_OK)
+	if (HasLostDirectDrawSurface())
 	{
 		// we lost our surfaces, we need to reinitialize directdraw and all associated objects
 		ReInitializeDDraw();
@@ -7983,15 +8006,19 @@ void CIsoView::RenderUIOverlay()
 		useHighRes = true;
 	}
 
-	DDSURFACEDESC2 ddsd;
-	ZeroMemory(&ddsd, sizeof(ddsd));
-	ddsd.dwSize = sizeof(DDSURFACEDESC2);
-	ddsd.dwFlags = DDSD_WIDTH | DDSD_HEIGHT;
+	SurfaceLocker locker(dds);
+	DDSURFACEDESC2* ddsd = locker.ensure_locked();
+	if (ddsd == nullptr || ddsd->lpSurface == nullptr)
+	{
+		// A screen saver or display-mode transition can invalidate DirectDraw
+		// surfaces between the mouse handler's readiness check and this lock.
+		// Never hand a null pixel pointer to LineDrawer; the invalidation makes
+		// DrawMap run the established full lost-surface recovery path.
+		InvalidateRect(NULL, FALSE);
+		return;
+	}
 
-	dds->GetSurfaceDesc(&ddsd);
-
-	dds->Lock(NULL, &ddsd, DDLOCK_SURFACEMEMORYPTR | DDLOCK_WAIT | DDLOCK_NOSYSLOCK, NULL);
-	LineDrawer d(ddsd.lpSurface, bpp, ddsd.dwWidth, ddsd.dwHeight, ddsd.lPitch);
+	LineDrawer d(ddsd->lpSurface, bpp, ddsd->dwWidth, ddsd->dwHeight, ddsd->lPitch);
 
 	int lr, lt, ll, lb;
 
@@ -8036,7 +8063,7 @@ void CIsoView::RenderUIOverlay()
 	d.Rectangle(ls_lt.x, ls_lt.y, ls_br.x, ls_br.y, blue);
 	d.Rectangle(ls_lt.x+1, ls_lt.y+1, ls_br.x-1, ls_br.y-1, blue);
 
-	dds->Unlock(NULL);
+	locker.ensure_unlocked();
 	
 	RECT r;
 	GetWindowRect(&r);

@@ -77,7 +77,8 @@ void LineDrawer::Rectangle(int from_x, int from_y, int to_x, int to_y, int color
 
 void LineDrawer::SetPixel(char* const dest, const int cur_x, const int cur_y, const int color)
 {
-	if (cur_x >= 0 && cur_y >= 0 && cur_x < m_width && cur_y < m_height)
+	if (dest != nullptr && m_bytes_per_pixel > 0 && m_pitch != 0 &&
+		cur_x >= 0 && cur_y >= 0 && cur_x < m_width && cur_y < m_height)
 		memcpy(&dest[cur_x * m_bytes_per_pixel + cur_y * m_pitch], &color, m_bytes_per_pixel);
 }
 
