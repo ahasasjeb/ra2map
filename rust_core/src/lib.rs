@@ -25,6 +25,12 @@
 mod codec;
 mod csf;
 mod minilzo;
+mod vulkan;
+
+pub use vulkan::{
+    rs_vulkan_create, rs_vulkan_destroy, rs_vulkan_last_error, rs_vulkan_prepare,
+    rs_vulkan_present, RsVulkanRenderer,
+};
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
 

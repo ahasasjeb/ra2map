@@ -10,6 +10,7 @@ crate-type = ["staticlib"]
 cc = "1"
 
 [dependencies]
+ash = { version = "0.38", default-features = false, features = ["loaded", "std"] }
 
 [profile.release]
 opt-level = 3

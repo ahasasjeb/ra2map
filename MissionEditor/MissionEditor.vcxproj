@@ -501,6 +501,7 @@
   <ItemDefinitionGroup>
     <Link>
       <AdditionalDependencies>$(SolutionDir)rust_core\target\i686-pc-windows-msvc\release\mission_editor_rust_core.lib;ntdll.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <LargeAddressAware>true</LargeAddressAware>
     </Link>
   </ItemDefinitionGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

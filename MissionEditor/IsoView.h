@@ -40,6 +40,8 @@
 #include "MissionEditorPackLib.h"
 #include "Structs.h"
 
+struct rs_vulkan_renderer;
+
 
 
 struct TextToRender
@@ -194,6 +196,7 @@ public:
 	void FlipHighResBuffer();
 	void BlitBackbufferToHighRes();
 	void RenderUIOverlay();
+	bool InitializeVulkanRenderer();
 	int m_BrushSize_x;
 	int m_BrushSize_y;
 	BOOL ReachableFrom(DWORD dwStart, DWORD dwEnd);
@@ -384,6 +387,11 @@ public:
 	std::unique_ptr<FSunPackLib::ColorConverter> m_color_converter;
 	LPDIRECTDRAW4 dd;
 	LPDIRECTDRAW dd_1;
+	// Opaque Rust-owned Vulkan renderer. DirectDraw remains only as a CPU
+	// raster-surface compatibility layer for the legacy drawing algorithms.
+	rs_vulkan_renderer* m_vulkanRenderer;
+	int m_vulkanPresentFailures;
+	bool m_vulkanDisabled;
 	HGLRC m_hglrc;
 	void HandleProperties(int n, int type);
 	void UpdateDialog(BOOL bRepos=TRUE);

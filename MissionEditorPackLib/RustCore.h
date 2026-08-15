@@ -39,6 +39,8 @@
 #define RS_ERR_SMALL_BUFFER (-2)
 #define RS_ERR_PANIC (-3)
 #define RS_ERR_TOO_MANY_SECTIONS (-4)
+#define RS_ERR_VULKAN_UNAVAILABLE (-10)
+#define RS_ERR_VULKAN_RUNTIME (-11)
 
 // maximum sane render target dimension; bounds exceeding this are
 // rejected by the C++ allocation code (guards against corrupt data)
@@ -233,6 +235,54 @@ int rs_csf_parse(
     unsigned char* values_asc, size_t values_asc_cap, size_t* out_values_asc_len,
     int* out_truncated
 );
+
+// ---------------------------------------------------------------------------
+// Vulkan presentation backend. Rust owns the Vulkan instance/device,
+// swapchain, synchronization primitives and persistently mapped upload memory.
+// The legacy CPU rasterizer supplies a read-only final pixel view.
+// ---------------------------------------------------------------------------
+
+typedef struct rs_vulkan_renderer rs_vulkan_renderer;
+
+int rs_vulkan_create(void* hwnd, rs_vulkan_renderer** out_renderer);
+
+void rs_vulkan_destroy(rs_vulkan_renderer* renderer);
+
+// Reserves the swapchain and mapped upload storage before the legacy editor
+// loads its large graphics cache. Delaying this allocation until the first
+// frame can exhaust address space in the 32-bit process on large modded maps.
+int rs_vulkan_prepare(
+    rs_vulkan_renderer* renderer,
+    int target_width,
+    int target_height,
+    int vsync
+);
+
+// Presents src_width/src_height pixels from the source rectangle, scaling to
+// the Vulkan swapchain extent. Pixel masks describe the little-endian source
+// format used by the DirectDraw-compatible CPU raster surface.
+int rs_vulkan_present(
+    rs_vulkan_renderer* renderer,
+    const unsigned char* pixels,
+    int surface_width,
+    int surface_height,
+    int pitch,
+    unsigned int bytes_per_pixel,
+    unsigned int red_mask,
+    unsigned int green_mask,
+    unsigned int blue_mask,
+    int src_left,
+    int src_top,
+    int src_width,
+    int src_height,
+    int target_width,
+    int target_height,
+    int vsync
+);
+
+// Copies the most recent Vulkan diagnostic to dst and always NUL-terminates
+// when dst_cap is non-zero. Returns the full diagnostic byte count.
+size_t rs_vulkan_last_error(char* dst, size_t dst_cap);
 
 #ifdef __cplusplus
 }

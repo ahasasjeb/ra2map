@@ -56,6 +56,7 @@ static char THIS_FILE[] = __FILE__;
 #include <chrono>
 #include <algorithm>
 #include "TextDrawer.h"
+#include "RustCore.h"
 
 /* -------- */
 
@@ -86,6 +87,12 @@ IMPLEMENT_DYNCREATE(CIsoView, CScrollView)
 BOOL bNoThreadDraw = FALSE;
 BOOL bDrawStats = TRUE;
 BOOL bIncrementalPan = TRUE;
+
+namespace
+{
+	constexpr UINT VULKAN_RESIZE_TIMER_ID = 12;
+	constexpr UINT VULKAN_RESIZE_DEBOUNCE_MS = 75;
+}
 
 /*UINT PaintThreadProc( LPVOID pParam )
 {
@@ -170,6 +177,9 @@ CIsoView::CIsoView()
 	m_lastViewOffset = ProjectedVec(0, 0);
 	dd = NULL;
 	dd_1 = NULL;
+	m_vulkanRenderer = nullptr;
+	m_vulkanPresentFailures = 0;
+	m_vulkanDisabled = false;
 	lpds = NULL;
 	lpdsBack = NULL;
 	lpdsBackHighRes = nullptr;
@@ -198,6 +208,8 @@ CIsoView::CIsoView()
 
 CIsoView::~CIsoView()
 {
+	rs_vulkan_destroy(m_vulkanRenderer);
+	m_vulkanRenderer = nullptr;
 	// if(_map!=NULL) delete[] _map;
 	// _map=NULL;
 	//delete m_paintthread;
@@ -3506,31 +3518,6 @@ void CIsoView::OnSize(UINT nType, int cx, int cy)
 	ddc->SetHWnd(0, m_hWnd);
 	updateFontScaled();
 
-	// Rebuild offscreen surfaces to match the new primary surface dimensions.
-	// Without this, resizing the window leaves the back buffer at the old size
-	// and the newly exposed area stays white.
-	if (dd && lpds)
-	{
-		DDSURFACEDESC2 ddsd;
-		memset(&ddsd, 0, sizeof(DDSURFACEDESC2));
-		ddsd.dwSize = sizeof(DDSURFACEDESC2);
-		ddsd.dwFlags = DDSD_WIDTH | DDSD_HEIGHT;
-		lpds->GetSurfaceDesc(&ddsd);
-		ddsd.ddsCaps.dwCaps = DDSCAPS_OFFSCREENPLAIN;
-		ddsd.dwFlags = DDSD_CAPS | DDSD_HEIGHT | DDSD_WIDTH;
-
-		auto rebuild = [](IDirectDraw4* dd, DDSURFACEDESC2& ddsd, LPDIRECTDRAWSURFACE4& surf) {
-			if (surf) { surf->Release(); surf = NULL; }
-			dd->CreateSurface(&ddsd, &surf, NULL);
-		};
-		rebuild(dd, ddsd, lpdsBack);
-		rebuild(dd, ddsd, lpdsTemp);
-		if (theApp.m_Options.bHighResUI)
-			rebuild(dd, ddsd, lpdsBackHighRes);
-		else if (lpdsBackHighRes)
-			{ lpdsBackHighRes->Release(); lpdsBackHighRes = NULL; }
-	}
-
 	CMyViewFrame& dlg = *(CMyViewFrame*)owner;
 	dlg.m_minimap.RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW);
 
@@ -3538,7 +3525,13 @@ void CIsoView::OnSize(UINT nType, int cx, int cy)
 
 	GetWindowRect(&m_myRect);
 
-	RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW);
+	// The legacy CPU surfaces cover the complete primary display; destroying
+	// them on every WM_SIZE discarded the last frame and produced an all-white
+	// window while a map was loading. Keep those pixels and coalesce the costly
+	// Vulkan swapchain rebuild until resizing pauses.
+	KillTimer(VULKAN_RESIZE_TIMER_ID);
+	SetTimer(VULKAN_RESIZE_TIMER_ID, VULKAN_RESIZE_DEBOUNCE_MS, NULL);
+	InvalidateRect(NULL, FALSE);
 }
 
 COLORREF CIsoView::GetColor(const char* house, const char* vcolor)
@@ -4866,6 +4859,62 @@ void CIsoView::BlitBackbufferToHighRes()
 
 void CIsoView::FlipHighResBuffer()
 {
+	LPDIRECTDRAWSURFACE4 presentSurface = lpdsBack;
+	RECT sourceRect = GetScaledDisplayRect();
+	if (m_viewScale != Vec2<CSProjected, float>(1.0f, 1.0f) && lpdsBackHighRes)
+	{
+		presentSurface = lpdsBackHighRes;
+		GetWindowRect(&sourceRect);
+	}
+
+	InitializeVulkanRenderer();
+
+	if (m_vulkanRenderer != nullptr && presentSurface != nullptr)
+	{
+		SurfaceLocker locker(presentSurface);
+		DDSURFACEDESC2* desc = locker.ensure_locked();
+		RECT clientRect = {};
+		GetClientRect(&clientRect);
+		if (desc != nullptr && desc->lpSurface != nullptr)
+		{
+			const int result = rs_vulkan_present(
+				m_vulkanRenderer,
+				static_cast<const unsigned char*>(desc->lpSurface),
+				static_cast<int>(desc->dwWidth),
+				static_cast<int>(desc->dwHeight),
+				static_cast<int>(desc->lPitch),
+				static_cast<unsigned int>(bpp),
+				pf.dwRBitMask,
+				pf.dwGBitMask,
+				pf.dwBBitMask,
+				sourceRect.left,
+				sourceRect.top,
+				sourceRect.right - sourceRect.left,
+				sourceRect.bottom - sourceRect.top,
+				clientRect.right - clientRect.left,
+				clientRect.bottom - clientRect.top,
+				theApp.m_Options.bVSync ? 1 : 0);
+
+			if (result == RS_OK)
+			{
+				m_vulkanPresentFailures = 0;
+				return;
+			}
+
+			++m_vulkanPresentFailures;
+			if (m_vulkanPresentFailures >= 3)
+			{
+				char diagnostic[1024] = {};
+				rs_vulkan_last_error(diagnostic, sizeof(diagnostic));
+				errstream << "Vulkan presentation disabled after repeated failures; using DirectDraw fallback: " << diagnostic << endl;
+				errstream.flush();
+				rs_vulkan_destroy(m_vulkanRenderer);
+				m_vulkanRenderer = nullptr;
+				m_vulkanDisabled = true;
+			}
+		}
+	}
+
 	if (m_viewScale != Vec2<CSProjected, float>(1.0f, 1.0f) && lpdsBackHighRes)
 	{
 		// This flip copies the high-res backbuffer to the front buffer
@@ -4881,6 +4930,38 @@ void CIsoView::FlipHighResBuffer()
 		auto cr = GetScaledDisplayRect();
 		lpds->Blt(&dr, lpdsBack, &cr, DDBLT_WAIT, 0);
 	}
+}
+
+bool CIsoView::InitializeVulkanRenderer()
+{
+	if (m_vulkanRenderer != nullptr)
+		return true;
+	if (m_vulkanDisabled || m_hWnd == nullptr)
+		return false;
+
+	if (rs_vulkan_create(m_hWnd, &m_vulkanRenderer) == RS_OK)
+	{
+		RECT clientRect = {};
+		GetClientRect(&clientRect);
+		const int width = clientRect.right - clientRect.left;
+		const int height = clientRect.bottom - clientRect.top;
+		if (width <= 0 || height <= 0 ||
+			rs_vulkan_prepare(m_vulkanRenderer, width, height, theApp.m_Options.bVSync ? 1 : 0) == RS_OK)
+		{
+			errstream << "Vulkan presentation initialized; swapchain memory is owned by Rust" << endl;
+			errstream.flush();
+			return true;
+		}
+	}
+
+	char diagnostic[1024] = {};
+	rs_vulkan_last_error(diagnostic, sizeof(diagnostic));
+	errstream << "Vulkan renderer unavailable; using DirectDraw presentation fallback: " << diagnostic << endl;
+	errstream.flush();
+	rs_vulkan_destroy(m_vulkanRenderer);
+	m_vulkanRenderer = nullptr;
+	m_vulkanDisabled = true;
+	return false;
 }
 
 void CIsoView::ShowAllTileSets()
@@ -5886,7 +5967,27 @@ void CIsoView::OnTimer(UINT nIDEvent)
 	last_succeeded_operation = 1000000;
 
 
-	if (nIDEvent == 11)
+	if (nIDEvent == VULKAN_RESIZE_TIMER_ID)
+	{
+		KillTimer(VULKAN_RESIZE_TIMER_ID);
+		if (lpdsBack == NULL)
+			return;
+
+		if (b_IsLoading)
+		{
+			// Preserve and scale the most recent complete frame while the loader
+			// intentionally suppresses DrawMap().
+			BlitBackbufferToHighRes();
+			RenderUIOverlay();
+			FlipHighResBuffer();
+		}
+		else
+		{
+			RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW);
+		}
+		return;
+	}
+	else if (nIDEvent == 11)
 	{
 		// BUGSEARCH
 		//if(b_IsLoading) return;	

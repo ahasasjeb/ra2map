@@ -6009,6 +6009,7 @@ BOOL CLoading::InitDirectDraw()
 	v.lpds->SetClipper(ddc);
 	
 	ddc->SetHWnd(0, v.m_hWnd);
+	v.InitializeVulkanRenderer();
 
 	return TRUE;
 }
