@@ -188,6 +188,7 @@ public:
 	BOOL m_NoMove;
 	void PlaceCurrentObjectAt(int x, int y);
 	void DrawObjectPreviewAt(int x, int y);
+	bool RefreshObjectScene(const MapCoords& oldPos, const MapCoords& newPos, bool eraseOldObject);
 	void SavePreviewRegion(const RECT& rect);
 	void RestorePreviewRegion();
 	void PlaceTile(const int x, const int y, const UINT nMouseFlags);

@@ -306,6 +306,20 @@ void Tests::test_iso()
 	TEST(d.MoveInfantry(infantryIndex, infantryPosB));
 	REPORT_TEST(d.GetInfantryAt(infantryPosA) == -1);
 	REPORT_TEST(d.GetInfantryAt(infantryPosB) == infantryIndex);
+
+	const DWORD aircraftPosA = 5 + 6 * d.GetIsoSize();
+	const DWORD aircraftPosB = 6 + 6 * d.GetIsoSize();
+	const DWORD aircraftPosC = 7 + 6 * d.GetIsoSize();
+	const DWORD aircraftPosD = 8 + 6 * d.GetIsoSize();
+	TEST(d.AddAircraft(NULL, "TEST_AIRCRAFT_A", "Neutral", aircraftPosA));
+	TEST(d.AddAircraft(NULL, "TEST_AIRCRAFT_B", "Neutral", aircraftPosB));
+	d.DeleteAircraft(0);
+	TEST(d.AddAircraft(NULL, "TEST_AIRCRAFT_C", "Neutral", aircraftPosC));
+	REPORT_TEST(d.GetAirAt(aircraftPosC) == 0);
+	REPORT_TEST(d.GetAirAt(aircraftPosB) == 1);
+	TEST(d.MoveAircraft(1, aircraftPosD));
+	REPORT_TEST(d.GetAirAt(aircraftPosB) == -1);
+	REPORT_TEST(d.GetAirAt(aircraftPosD) == 1);
 	
 }
 

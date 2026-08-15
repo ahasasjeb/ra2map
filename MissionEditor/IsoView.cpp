@@ -1462,8 +1462,11 @@ void CIsoView::OnMouseMove(UINT nFlags, CPoint point)
 			//RedrawWindow(NULL, NULL, RDW_INVALIDATE);
 			locker.ensure_unlocked();
 
-			// Object dragging adds its guide line below and presents the composed frame once.
-			if (!(m_drag && AD.mode == 0))
+			const bool fastObjectPlacement = (nFlags & MK_LBUTTON) &&
+				((AD.mode == ACTIONMODE_PLACE && (AD.type == 1 || AD.type == 3 || AD.type == 4 || AD.type == 5)) ||
+					AD.mode == ACTIONMODE_RANDOMTERRAIN);
+			// Dragging and fast placement add their final graphics below, then present once.
+			if (!(m_drag && AD.mode == 0) && !fastObjectPlacement)
 			{
 				BlitBackbufferToHighRes();
 				RenderUIOverlay();
@@ -1981,9 +1984,11 @@ void CIsoView::OnMouseMove(UINT nFlags, CPoint point)
 			{
 				PlaceCurrentObjectAt(x, y);
 				m_lastPlacementCell = mapCoords;
-				// Coalesce rapid drag-paint placements instead of blocking input on a full
-				// synchronous map render for every mouse message.
-				RedrawWindow(NULL, NULL, RDW_INVALIDATE);
+				const bool supportsFastCommit =
+					(AD.mode == ACTIONMODE_RANDOMTERRAIN) ||
+					(AD.mode == ACTIONMODE_PLACE && (AD.type == 1 || AD.type == 3 || AD.type == 4 || AD.type == 5));
+				if (!supportsFastCommit || !RefreshObjectScene(mapCoords, mapCoords, false))
+					RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW);
 			}
 		}
 
@@ -3106,6 +3111,10 @@ void CIsoView::OnLButtonUp(UINT nFlags, CPoint point)
 		char strX[15], strY[15];
 		itoa(x, strX, 10);
 		itoa(y, strY, 10);
+		const MapCoords oldObjectPos(m_mapx, m_mapy);
+		const MapCoords newObjectPos(x, y);
+		const bool isCopy = (nFlags == MK_SHIFT);
+		bool supportsFastRefresh = false;
 		switch (m_type)
 		{
 		case 0: // drag infantry
@@ -3116,10 +3125,11 @@ void CIsoView::OnLButtonUp(UINT nFlags, CPoint point)
 			infantry.y = strY;
 			infantry.pos = "-1";
 
-			if (nFlags != MK_SHIFT)
+			if (!isCopy)
 				Map->MoveInfantry(m_id, x + y * Map->GetIsoSize());
 			else
 				Map->AddInfantry(&infantry);
+			supportsFastRefresh = true;
 
 			break;
 		}
@@ -3147,12 +3157,11 @@ void CIsoView::OnLButtonUp(UINT nFlags, CPoint point)
 			aircraft.y = strY;
 
 
-			if ((nFlags != MK_SHIFT))
-			{
-				Map->DeleteAircraft(m_id);
-			}
-
-			Map->AddAircraft(&aircraft);
+			if (!isCopy)
+				Map->MoveAircraft(m_id, x + y * Map->GetIsoSize());
+			else
+				Map->AddAircraft(&aircraft);
+			supportsFastRefresh = true;
 
 			break;
 		}
@@ -3163,10 +3172,11 @@ void CIsoView::OnLButtonUp(UINT nFlags, CPoint point)
 			unit.x = strX;
 			unit.y = strY;
 
-			if (nFlags != MK_SHIFT)
+			if (!isCopy)
 				Map->MoveUnit(m_id, x + y * Map->GetIsoSize());
 			else
 				Map->AddUnit(&unit);
+			supportsFastRefresh = true;
 
 			break;
 		}
@@ -3182,6 +3192,7 @@ void CIsoView::OnLButtonUp(UINT nFlags, CPoint point)
 			}
 
 			Map->AddTerrain(type, x + y * Map->GetIsoSize());
+			supportsFastRefresh = true;
 			break;
 		}
 
@@ -3225,7 +3236,8 @@ void CIsoView::OnLButtonUp(UINT nFlags, CPoint point)
 		line.right = 0;
 		line.bottom = 0;
 
-		RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW);
+		if (!supportsFastRefresh || !RefreshObjectScene(oldObjectPos, newObjectPos, !isCopy))
+			RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW);
 	}
 	else if (AD.mode == ACTIONMODE_MAPTOOL)
 	{
@@ -5907,6 +5919,261 @@ void CIsoView::DrawObjectPreviewAt(int x, int y)
 	}
 	for (auto& cell : oldCells)
 		Map->SetFielddataAt(cell.first, &cell.second);
+}
+
+// Commits object-only changes without running DrawMap(). Placement can be layered onto the
+// cached scene directly; moving first rebuilds the old object's small screen region, then draws
+// the object at its new position. lpdsTemp is patched as well, so later previews and panning see
+// the committed scene rather than forcing a delayed full redraw.
+bool CIsoView::RefreshObjectScene(const MapCoords& oldPos, const MapCoords& newPos, bool eraseOldObject)
+{
+	if (lpdsBack == NULL || lpdsTemp == NULL || Map->GetIsoSize() == 0 ||
+		m_viewScale.x <= 0.0f || m_viewScale.y <= 0.0f)
+		return false;
+
+	DDSURFACEDESC2 surfaceDesc = {};
+	surfaceDesc.dwSize = sizeof(surfaceDesc);
+	if (lpdsBack->GetSurfaceDesc(&surfaceDesc) != DD_OK)
+		return false;
+
+	RECT display = GetScaledDisplayRect();
+	display.left = max<LONG>(0, display.left);
+	display.top = max<LONG>(0, display.top);
+	display.right = min<LONG>(surfaceDesc.dwWidth, display.right);
+	display.bottom = min<LONG>(surfaceDesc.dwHeight, display.bottom);
+
+	int spriteWidth = 192;
+	int spriteHeight = 256;
+	const auto includePictureSize = [&](const PICDATA& picture)
+	{
+		if (picture.pic == NULL) return;
+		spriteWidth = max(spriteWidth, max(static_cast<int>(picture.wWidth), static_cast<int>(picture.wMaxWidth)));
+		spriteHeight = max(spriteHeight, max(static_cast<int>(picture.wHeight), static_cast<int>(picture.wMaxHeight)));
+	};
+	if (Map->isInside(newPos))
+	{
+		const FIELDDATA& field = *Map->GetFielddataAt(newPos);
+		if (field.unit >= 0)
+		{
+			UNIT unit;
+			Map->GetUnitData(field.unit, &unit);
+			includePictureSize(pics[GetCachedUnitPictureFilename(unit.type, atoi(unit.direction) / 32)]);
+		}
+		if (field.aircraft >= 0)
+		{
+			AIRCRAFT aircraft;
+			Map->GetAircraftData(field.aircraft, &aircraft);
+			includePictureSize(pics[GetCachedUnitPictureFilename(aircraft.type, atoi(aircraft.direction) / 32)]);
+		}
+		for (int i = 0; i < SUBPOS_COUNT; ++i)
+		{
+			if (field.infantry[i] < 0) continue;
+			INFANTRY infantry;
+			Map->GetInfantryData(field.infantry[i], &infantry);
+			const int direction = (7 - atoi(infantry.direction) / 32) % 8;
+			includePictureSize(pics[GetCachedUnitPictureFilename(infantry.type, direction)]);
+		}
+		if (field.terrain >= 0 && field.terraintype >= 0 && field.terraintype < 0x0F00)
+			includePictureSize(treeinfo[field.terraintype].pic);
+	}
+
+	const auto makeDirtyRect = [&](const MapCoords& pos)
+	{
+		const auto draw = GetRenderTargetCoordinates(pos);
+		const int halfWidth = spriteWidth / 2 + 96;
+		// BMP/voxel units are bottom-anchored while SHPs are centred. Cover both layouts
+		// plus a safety margin for art-defined offsets without approaching a full screen.
+		RECT rect = {
+			draw.x + f_x / 2 - halfWidth,
+			draw.y - spriteHeight - 96,
+			draw.x + f_x / 2 + halfWidth,
+			draw.y + f_y + 128
+		};
+		rect.left = max(rect.left, display.left);
+		rect.top = max(rect.top, display.top);
+		rect.right = min(rect.right, display.right);
+		rect.bottom = min(rect.bottom, display.bottom);
+		return rect;
+	};
+
+	RECT oldRect = makeDirtyRect(oldPos);
+	RECT newRect = makeDirtyRect(newPos);
+	if (newRect.right <= newRect.left || newRect.bottom <= newRect.top)
+		return false;
+
+	// Remove the cursor/drag line/preview from the working buffer. lpdsTemp only contains
+	// the committed map scene and is therefore the correct base for a partial update.
+	if (lpdsBack->BltFast(0, 0, lpdsTemp, NULL, DDBLTFAST_WAIT) != DD_OK)
+		return false;
+
+	m_previewHasSaved = FALSE;
+	m_previewSavedPixels.clear();
+	const size_t picsCountAtStart = pics.size();
+
+	const auto renderRegion = [&](RECT dirty, bool rebuildTerrain) -> bool
+	{
+		if (dirty.right <= dirty.left || dirty.bottom <= dirty.top)
+			return true;
+
+		if (rebuildTerrain)
+		{
+			DDBLTFX fill = {};
+			fill.dwSize = sizeof(fill);
+			fill.dwFillColor = RGB(255, 255, 255);
+			if (lpdsBack->Blt(&dirty, NULL, NULL, DDBLT_COLORFILL | DDBLT_WAIT, &fill) != DD_OK)
+				return false;
+		}
+
+		SurfaceLocker locker(lpdsBack);
+		DDSURFACEDESC2* desc = locker.ensure_locked();
+		if (desc == nullptr)
+			return false;
+
+		RECT windowRect = {};
+		GetWindowRect(&windowRect);
+		const auto mapAtScreen = [&](LONG sx, LONG sy)
+		{
+			const CPoint client(
+				static_cast<int>((sx - windowRect.left) / m_viewScale.x),
+				static_cast<int>((sy - windowRect.top) / m_viewScale.y));
+			return GetMapCoordinatesFromClientCoordinates(client, false, true);
+		};
+
+		const MapCoords corners[4] = {
+			mapAtScreen(dirty.left, dirty.top),
+			mapAtScreen(dirty.right, dirty.top),
+			mapAtScreen(dirty.left, dirty.bottom),
+			mapAtScreen(dirty.right, dirty.bottom)
+		};
+		int left = corners[0].x;
+		int right = corners[0].x;
+		int top = corners[0].y;
+		int bottom = corners[0].y;
+		for (int i = 1; i < 4; ++i)
+		{
+			left = min(left, static_cast<int>(corners[i].x));
+			right = max(right, static_cast<int>(corners[i].x));
+			top = min(top, static_cast<int>(corners[i].y));
+			bottom = max(bottom, static_cast<int>(corners[i].y));
+		}
+
+		// Include cells whose tall/wide sprites can reach into the dirty rectangle.
+		left = max(0, left - 8);
+		top = max(0, top - 8);
+		right = min(static_cast<int>(Map->GetIsoSize()), right + 9);
+		bottom = min(static_cast<int>(Map->GetIsoSize()), bottom + 9);
+
+		const int mapwidth = Map->GetWidth();
+		const int mapheight = Map->GetHeight();
+		const auto cellIsVisible = [&](int u, int v)
+		{
+			return !(u < 1 || v < 1 || u + v < mapwidth + 1 || u + v > mapwidth + mapheight * 2 ||
+				(v + 1 > mapwidth && u - 1 < v - mapwidth) ||
+				(u + 1 > mapwidth && v + mapwidth - 1 < u));
+		};
+
+		const DWORD heightStart = tilesets_start[atoi((*tiles).sections["General"].values["HeightBase"])];
+		const DrawMapCellContext ctx = { *desc, dirty, heightStart, TRUE, false };
+		const size_t oldTextCount = m_texts_to_render.size();
+		const size_t oldWaypointCount = m_waypoints_to_render.size();
+		const size_t oldCelltagCount = m_celltags_to_render.size();
+
+		if (rebuildTerrain)
+		{
+			for (int u = left; u < right; ++u)
+			{
+				for (int v = top; v < bottom; ++v)
+				{
+					if (!cellIsVisible(u, v)) continue;
+					FIELDDATA field = *Map->GetFielddataAt(MapCoords(u, v));
+					if (field.wGround >= *tiledata_count) field.wGround = 0;
+					if (!field.bRedrawTerrain)
+						DrawMapTerrainCell(field, GetRenderTargetCoordinates(MapCoords(u, v)), ctx);
+				}
+			}
+		}
+
+		for (int u = left; u < right; ++u)
+		{
+			for (int v = top; v < bottom; ++v)
+			{
+				if (!cellIsVisible(u, v)) continue;
+				const MapCoords pos(u, v);
+				FIELDDATA field = *Map->GetFielddataAt(pos);
+				if (field.wGround == 0xFFFF || field.wGround >= *tiledata_count) field.wGround = 0;
+				const DWORD originalGround = field.wGround;
+				const auto draw = GetRenderTargetCoordinates(pos);
+				if (rebuildTerrain)
+				{
+					if (field.bRedrawTerrain) DrawMapTerrainCell(field, draw, ctx);
+					DrawMapTerrainAnim(field, draw, ctx, originalGround);
+				}
+				DrawMapObjectsCell(pos, field, draw, ctx);
+			}
+		}
+
+		if (rebuildTerrain)
+		{
+			for (const auto& tube : Map->GetTubes())
+				DrawTube(*tube, desc);
+		}
+
+		locker.ensure_unlocked();
+		for (size_t i = oldWaypointCount; i < m_waypoints_to_render.size(); ++i)
+		{
+			const auto& waypoint = m_waypoints_to_render[i];
+			Blit((LPDIRECTDRAWSURFACE4)pics["FLAG"].pic, waypoint.drawx, waypoint.drawy);
+		}
+
+		m_texts_to_render.resize(oldTextCount);
+		m_waypoints_to_render.resize(oldWaypointCount);
+		m_celltags_to_render.resize(oldCelltagCount);
+
+		return lpdsTemp->Blt(&dirty, lpdsBack, &dirty, DDBLT_WAIT, NULL) == DD_OK;
+	};
+
+	bool refreshed = true;
+	if (eraseOldObject)
+	{
+		RECT expandedOld = oldRect;
+		InflateRect(&expandedOld, 32, 32);
+		RECT overlap = {};
+		if (IntersectRect(&overlap, &expandedOld, &newRect))
+		{
+			RECT combined = {
+				min(oldRect.left, newRect.left), min(oldRect.top, newRect.top),
+				max(oldRect.right, newRect.right), max(oldRect.bottom, newRect.bottom)
+			};
+			refreshed = renderRegion(combined, true);
+		}
+		else
+		{
+			refreshed = renderRegion(oldRect, true) && renderRegion(newRect, false);
+		}
+	}
+	else
+	{
+		refreshed = renderRegion(newRect, false);
+	}
+
+	if (!refreshed)
+		return false;
+
+	if (m_cellCursor != MapCoords(-1, -1))
+	{
+		SurfaceLocker locker(lpdsBack);
+		DDSURFACEDESC2* desc = locker.ensure_locked();
+		if (desc != nullptr)
+			DrawCellCursor(m_cellCursor, *desc);
+	}
+
+	BlitBackbufferToHighRes();
+	RenderUIOverlay();
+	FlipHighResBuffer();
+
+	if (pics.size() != picsCountAtStart)
+		m_picFileCache.clear();
+	return true;
 }
 
 // saves the pixels of the given backbuffer rect (window-relative coordinates) so that they can

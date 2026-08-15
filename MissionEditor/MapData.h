@@ -343,6 +343,7 @@ public:
 	BOOL AddUnit(UNIT* lpUnit, LPCTSTR lpType = NULL, LPCTSTR lpHouse = NULL, DWORD dwPos = 0, CString suggestedID = "");
 	BOOL MoveUnit(DWORD dwIndex, DWORD dwPos);
 	BOOL AddAircraft(AIRCRAFT* lpAircraft, LPCTSTR lpType = NULL, LPCTSTR lpHouse = NULL, DWORD dwPos = 0, CString suggestedID = "");
+	BOOL MoveAircraft(DWORD dwIndex, DWORD dwPos);
 	void GetCelltagData(DWORD dwIndex, CString* lpTag, DWORD* lpdwPos) const;
 	BOOL AddCelltag(LPCTSTR lpTag, DWORD dwPos);
 	void GetAircraftData(DWORD dwIndex, AIRCRAFT* lpAircraft) const;

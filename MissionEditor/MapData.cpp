@@ -2156,14 +2156,74 @@ void CMapData::DeleteAircraft(DWORD dwIndex)
 	if (dwIndex >= GetAircraftCount()) return;
 
 	CIniFileSection& sec = m_mapfile.sections["Aircraft"];
+	const size_t oldCount = sec.values.size();
+	const CString valueName = *sec.GetValueName(dwIndex);
 	int x = atoi(GetParam(*sec.GetValue(dwIndex), 4));
 	int y = atoi(GetParam(*sec.GetValue(dwIndex), 3));
 
+	sec.values.erase(valueName);
+	if (!m_noAutoObjectUpdate)
+	{
+		if (m_aircraft.size() == oldCount && dwIndex < m_aircraft.size())
+		{
+			const DWORD oldPos = x + y * GetIsoSize();
+			if (oldPos < fielddata_size && fielddata[oldPos].aircraft == static_cast<int>(dwIndex))
+				fielddata[oldPos].aircraft = -1;
 
-	m_mapfile.sections["Aircraft"].values.erase(*m_mapfile.sections["Aircraft"].GetValueName(dwIndex));
-	if (!m_noAutoObjectUpdate) UpdateAircraft(FALSE);
+			m_aircraft.erase(m_aircraft.begin() + dwIndex);
+			for (size_t i = dwIndex; i < m_aircraft.size(); ++i)
+			{
+				const DWORD pos = atoi(m_aircraft[i].x) + atoi(m_aircraft[i].y) * GetIsoSize();
+				if (pos < fielddata_size)
+					fielddata[pos].aircraft = static_cast<int>(i);
+			}
+		}
+		else
+		{
+			UpdateAircraft(FALSE);
+		}
+	}
 
 	Mini_UpdatePos(x, y, IsMultiplayer());
+}
+
+BOOL CMapData::MoveAircraft(DWORD dwIndex, DWORD dwPos)
+{
+	if (m_noAutoObjectUpdate || dwPos >= fielddata_size || dwIndex >= m_aircraft.size())
+		return FALSE;
+
+	CIniFileSection& sec = m_mapfile.sections["Aircraft"];
+	if (dwIndex >= sec.values.size())
+		return FALSE;
+
+	const int occupant = fielddata[dwPos].aircraft;
+	if (occupant >= 0 && occupant != static_cast<int>(dwIndex))
+		return FALSE;
+
+	AIRCRAFT& aircraft = m_aircraft[dwIndex];
+	const int oldX = atoi(aircraft.x);
+	const int oldY = atoi(aircraft.y);
+	const DWORD oldPos = oldX + oldY * GetIsoSize();
+	const int newX = dwPos % GetIsoSize();
+	const int newY = dwPos / GetIsoSize();
+
+	aircraft.x.Format("%d", newX);
+	aircraft.y.Format("%d", newY);
+	aircraft.deleted = 0;
+
+	if (oldPos < fielddata_size && fielddata[oldPos].aircraft == static_cast<int>(dwIndex))
+		fielddata[oldPos].aircraft = -1;
+	fielddata[dwPos].aircraft = static_cast<int>(dwIndex);
+
+	const CString valueName = *sec.GetValueName(dwIndex);
+	sec.values[valueName] = aircraft.house + "," + aircraft.type + "," + aircraft.strength + "," + aircraft.y + "," +
+		aircraft.x + "," + aircraft.direction + "," + aircraft.action + "," + aircraft.tag + "," +
+		aircraft.flag1 + "," + aircraft.flag2 + "," + aircraft.flag3 + "," + aircraft.flag4;
+
+	Mini_UpdatePos(oldX, oldY, IsMultiplayer());
+	if (oldPos != dwPos)
+		Mini_UpdatePos(newX, newY, IsMultiplayer());
+	return TRUE;
 }
 
 void CMapData::DeleteTerrain(DWORD dwIndex)
@@ -2850,7 +2910,35 @@ BOOL CMapData::AddAircraft(AIRCRAFT* lpAircraft, LPCTSTR lpType, LPCTSTR lpHouse
 
 	m_mapfile.sections["Aircraft"].values[id] = value;
 
-	if (!m_noAutoObjectUpdate) UpdateAircraft(FALSE);
+	if (!m_noAutoObjectUpdate)
+	{
+		CIniFileSection& sec = m_mapfile.sections["Aircraft"];
+		const auto inserted = sec.values.find(id);
+		if (inserted != sec.values.end() && m_aircraft.size() + 1 == sec.values.size())
+		{
+			const size_t index = std::distance(sec.values.begin(), inserted);
+			aircraft.deleted = 0;
+			m_aircraft.insert(m_aircraft.begin() + index, aircraft);
+
+			const DWORD newPos = atoi(aircraft.x) + atoi(aircraft.y) * GetIsoSize();
+			if (newPos < fielddata_size)
+				fielddata[newPos].aircraft = static_cast<int>(index);
+
+			for (size_t i = index + 1; i < m_aircraft.size(); ++i)
+			{
+				const DWORD pos = atoi(m_aircraft[i].x) + atoi(m_aircraft[i].y) * GetIsoSize();
+				if (pos < fielddata_size)
+					fielddata[pos].aircraft = static_cast<int>(i);
+			}
+
+			if (newPos < fielddata_size)
+				Mini_UpdatePos(newPos % GetIsoSize(), newPos / GetIsoSize(), IsMultiplayer());
+		}
+		else
+		{
+			UpdateAircraft(FALSE);
+		}
+	}
 
 	return TRUE;
 }
