@@ -265,6 +265,14 @@ void Tests::test_iso()
 {
 	CMapData d;
 	d.CreateMap(16, 10, 0, 0);
+	const CMapData* previousMap = Map;
+	struct MapPointerRestorer
+	{
+		const CMapData* previous;
+		~MapPointerRestorer() { Map = const_cast<CMapData*>(previous); }
+	} restoreMap{ previousMap };
+	Map = &d;
+
 	REPORT_TEST(d.ProjectCoords3d(MapCoords(0, 0)) == ProjectedCoords((26 - 2) * f_x / 2, 0));
 	REPORT_TEST(d.ProjectCoords3d(MapCoords(1, 0)) == ProjectedCoords((26 - 2 - 1) * f_x / 2, f_y / 2));
 	REPORT_TEST(d.ProjectCoords3d(MapCoords(0, 1)) == ProjectedCoords((26 - 2 + 1) * f_x / 2, f_y / 2));
@@ -272,6 +280,32 @@ void Tests::test_iso()
 	REPORT_TEST(d.ProjectCoords3d(MapCoords(1, 1), 1) == ProjectedCoords((26 - 2) * f_x / 2, f_y / 2));
 
 	REPORT_TEST(d.ToMapCoords3d(ProjectedCoords((26 - 2) * f_x / 2, 0), 0) == MapCoords(0, 0));
+
+	// Incremental unit cache maintenance must preserve the INI-sorted indices when a
+	// deleted numeric id is reused, and moving must update both field data and INI data.
+	const DWORD unitPosA = 5 + 5 * d.GetIsoSize();
+	const DWORD unitPosB = 6 + 5 * d.GetIsoSize();
+	const DWORD unitPosC = 7 + 5 * d.GetIsoSize();
+	const DWORD unitPosD = 8 + 5 * d.GetIsoSize();
+	TEST(d.AddUnit(NULL, "TEST_UNIT_A", "Neutral", unitPosA));
+	TEST(d.AddUnit(NULL, "TEST_UNIT_B", "Neutral", unitPosB));
+	d.DeleteUnit(0);
+	TEST(d.AddUnit(NULL, "TEST_UNIT_C", "Neutral", unitPosC));
+	REPORT_TEST(d.GetUnitAt(unitPosC) == 0);
+	REPORT_TEST(d.GetUnitAt(unitPosB) == 1);
+	TEST(d.MoveUnit(1, unitPosD));
+	REPORT_TEST(d.GetUnitAt(unitPosB) == -1);
+	REPORT_TEST(d.GetUnitAt(unitPosD) == 1);
+	REPORT_TEST(GetParam(*d.GetIniFile().sections["Units"].GetValue(1), 4) == "8");
+
+	const DWORD infantryPosA = 9 + 5 * d.GetIsoSize();
+	const DWORD infantryPosB = 10 + 5 * d.GetIsoSize();
+	TEST(d.AddInfantry(NULL, "TEST_INFANTRY", "Neutral", infantryPosA));
+	const int infantryIndex = d.GetInfantryAt(infantryPosA);
+	TEST(infantryIndex >= 0);
+	TEST(d.MoveInfantry(infantryIndex, infantryPosB));
+	REPORT_TEST(d.GetInfantryAt(infantryPosA) == -1);
+	REPORT_TEST(d.GetInfantryAt(infantryPosB) == infantryIndex);
 	
 }
 

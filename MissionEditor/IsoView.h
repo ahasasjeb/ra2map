@@ -423,6 +423,7 @@ private:
 	BOOL m_drag;
 	BOOL m_moved;
 	MapCoords m_cellCursor;
+	MapCoords m_lastPlacementCell = MapCoords(-1, -1); // suppress duplicate placement messages within one map cell
 public:
 	afx_msg BOOL OnMouseWheel(UINT nFlags, short zDelta, CPoint pt);
 	void Zoom(CPoint& pt, float f);

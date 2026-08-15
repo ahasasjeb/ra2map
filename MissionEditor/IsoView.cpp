@@ -1462,9 +1462,13 @@ void CIsoView::OnMouseMove(UINT nFlags, CPoint point)
 			//RedrawWindow(NULL, NULL, RDW_INVALIDATE);
 			locker.ensure_unlocked();
 
-			BlitBackbufferToHighRes();
-			RenderUIOverlay();
-			FlipHighResBuffer();
+			// Object dragging adds its guide line below and presents the composed frame once.
+			if (!(m_drag && AD.mode == 0))
+			{
+				BlitBackbufferToHighRes();
+				RenderUIOverlay();
+				FlipHighResBuffer();
+			}
 		}
 	}
 	
@@ -1492,17 +1496,23 @@ void CIsoView::OnMouseMove(UINT nFlags, CPoint point)
 	// drag
 	if (m_drag && AD.mode == 0)
 	{
-		RedrawWindow(NULL, NULL, RDW_INVALIDATE);
+		// The back buffer was restored from the clean scene at the start of this mouse
+		// move. Draw the guide into it directly instead of repainting the complete view.
+		HDC dc = NULL;
+		if (lpdsBack && lpdsBack->GetDC(&dc) == DD_OK)
+		{
+			SetROP2(dc, R2_NOT);
+			const auto renderOffset = ProjectedVec(f_x / 2, f_y / 2);
+			const auto from = GetRenderTargetCoordinates(MapCoords(m_mapx, m_mapy)) + renderOffset;
+			const auto to = GetRenderTargetCoordinates(mapCoords) + renderOffset;
+			MoveToEx(dc, from.x, from.y, NULL);
+			LineTo(dc, to.x, to.y);
+			lpdsBack->ReleaseDC(dc);
+		}
 
-		CPaintDC dc(this);
-		dc.SetROP2(R2_NOT);
-
-		const auto renderOffset = CPoint(f_x / 2 / m_viewScale.x, f_y / 2 / m_viewScale.y);
-		const auto from = GetClientCoordinates(MapCoords(m_mapx, m_mapy)) + renderOffset;
-		const auto to = GetClientCoordinates(mapCoords) + renderOffset;
-
-		dc.MoveTo(from.x, from.y);
-		dc.LineTo(to.x, to.y);
+		BlitBackbufferToHighRes();
+		RenderUIOverlay();
+		FlipHighResBuffer();
 	}
 	else if (AD.mode == ACTIONMODE_SETTILE && (nFlags & MK_LBUTTON) && ((nFlags & MK_SHIFT) || Map->hasLat(AD.type)) && !(nFlags & MK_CONTROL))
 	{
@@ -1965,8 +1975,16 @@ void CIsoView::OnMouseMove(UINT nFlags, CPoint point)
 		}
 		else
 		{
-			PlaceCurrentObjectAt(x, y);
-			RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW);
+			// Windows can deliver dozens of mouse-move messages while the pointer remains
+			// in one isometric cell. Place and schedule a redraw at most once per cell.
+			if (m_lastPlacementCell != mapCoords)
+			{
+				PlaceCurrentObjectAt(x, y);
+				m_lastPlacementCell = mapCoords;
+				// Coalesce rapid drag-paint placements instead of blocking input on a full
+				// synchronous map render for every mouse message.
+				RedrawWindow(NULL, NULL, RDW_INVALIDATE);
+			}
 		}
 
 
@@ -2389,6 +2407,8 @@ void CIsoView::OnLButtonDown(UINT nFlags, CPoint point)
 {
 	if (Map->GetIsoSize() == 0) return;
 	if (b_IsLoading == TRUE) return;
+	if (AD.mode == ACTIONMODE_PLACE || AD.mode == ACTIONMODE_RANDOMTERRAIN)
+		m_lastPlacementCell = MapCoords(-1, -1);
 
 
 	CIniFile& ini = Map->GetIniFile();
@@ -3000,6 +3020,7 @@ void CIsoView::PlaceTile(const int x, const int y, const UINT nMouseFlags)
 void CIsoView::OnLButtonUp(UINT nFlags, CPoint point)
 {
 	if (b_IsLoading == TRUE) return;
+	m_lastPlacementCell = MapCoords(-1, -1);
 
 	CIniFile& ini = Map->GetIniFile();
 
@@ -3095,12 +3116,10 @@ void CIsoView::OnLButtonUp(UINT nFlags, CPoint point)
 			infantry.y = strY;
 			infantry.pos = "-1";
 
-			if ((nFlags != MK_SHIFT))
-			{
-				Map->DeleteInfantry(m_id);
-			}
-
-			Map->AddInfantry(&infantry);
+			if (nFlags != MK_SHIFT)
+				Map->MoveInfantry(m_id, x + y * Map->GetIsoSize());
+			else
+				Map->AddInfantry(&infantry);
 
 			break;
 		}
@@ -3144,12 +3163,10 @@ void CIsoView::OnLButtonUp(UINT nFlags, CPoint point)
 			unit.x = strX;
 			unit.y = strY;
 
-			if (!(nFlags == MK_SHIFT))
-			{
-				Map->DeleteUnit(m_id);
-			}
-
-			Map->AddUnit(&unit);
+			if (nFlags != MK_SHIFT)
+				Map->MoveUnit(m_id, x + y * Map->GetIsoSize());
+			else
+				Map->AddUnit(&unit);
 
 			break;
 		}
@@ -3693,7 +3710,10 @@ CString CIsoView::GetCachedUnitPictureFilename(LPCTSTR type, int dir)
 		return it->second;
 
 	const CString result = GetUnitPictureFilename(type, dir);
-	m_picFileCache[key] = result;
+	// An empty result commonly means the graphic has not been lazily loaded yet.
+	// Caching that transient miss prevents the object from appearing in this frame.
+	if (!result.IsEmpty())
+		m_picFileCache[key] = result;
 	return result;
 }
 
@@ -7089,6 +7109,7 @@ void CIsoView::DrawMapObjectsCell(const MapCoords& mapCoords, FIELDDATA& m, cons
 			{
 				SetError(GetLanguageStringACP("LoadingGraphics"));
 				theApp.m_loading->LoadUnitGraphic(obj.type);
+				lpPicFile = GetCachedUnitPictureFilename(obj.type, atoi(obj.direction) / 32);
 				p = pics[lpPicFile];
 			}
 
@@ -7153,6 +7174,7 @@ void CIsoView::DrawMapObjectsCell(const MapCoords& mapCoords, FIELDDATA& m, cons
 				{
 					SetError(GetLanguageStringACP("LoadingGraphics"));
 					theApp.m_loading->LoadUnitGraphic(obj.type);
+					lpPicFile = GetCachedUnitPictureFilename(obj.type, dir);
 					p = pics[lpPicFile];
 				}
 

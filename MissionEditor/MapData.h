@@ -341,6 +341,7 @@ public:
 	void GetTerrainData(DWORD dwIndex, CString* lpType) const;
 	void GetTerrainData(DWORD dwIndex, TERRAIN* lpTerrain) const;
 	BOOL AddUnit(UNIT* lpUnit, LPCTSTR lpType = NULL, LPCTSTR lpHouse = NULL, DWORD dwPos = 0, CString suggestedID = "");
+	BOOL MoveUnit(DWORD dwIndex, DWORD dwPos);
 	BOOL AddAircraft(AIRCRAFT* lpAircraft, LPCTSTR lpType = NULL, LPCTSTR lpHouse = NULL, DWORD dwPos = 0, CString suggestedID = "");
 	void GetCelltagData(DWORD dwIndex, CString* lpTag, DWORD* lpdwPos) const;
 	BOOL AddCelltag(LPCTSTR lpTag, DWORD dwPos);
@@ -352,6 +353,7 @@ public:
 	void InitializeUnitTypes();
 	BOOL AddStructure(STRUCTURE* lpStructure, LPCTSTR lpType = NULL, LPCTSTR lpHouse = NULL, DWORD dwPos = 0, CString suggestedID = "");
 	BOOL AddInfantry(INFANTRY* lpInfantry, LPCTSTR lpType = NULL, LPCTSTR lpHouse = NULL, DWORD dwPos = 0, int suggestedIndex = -1);
+	BOOL MoveInfantry(DWORD dwIndex, DWORD dwPos);
 
 	// Preview placement helpers used by the isometric view to render a "ghost" object under the
 	// mouse cursor. Unlike Add*/Delete* they do not touch the INI file, the minimap or trigger a

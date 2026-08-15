@@ -2053,14 +2053,77 @@ void CMapData::DeleteUnit(DWORD dwIndex)
 	if (dwIndex >= GetUnitCount()) return;
 
 	CIniFileSection& sec = m_mapfile.sections["Units"];
+	const size_t oldCount = sec.values.size();
+	const CString valueName = *sec.GetValueName(dwIndex);
 	int x = atoi(GetParam(*sec.GetValue(dwIndex), 4));
 	int y = atoi(GetParam(*sec.GetValue(dwIndex), 3));
 
+	sec.values.erase(valueName);
+	if (!m_noAutoObjectUpdate)
+	{
+		// Unit indices follow the numerically sorted INI keys. Removing one entry only
+		// shifts the following indices, so there is no need to rescan every map cell.
+		if (m_units.size() == oldCount && dwIndex < m_units.size())
+		{
+			const DWORD oldPos = x + y * GetIsoSize();
+			if (oldPos < fielddata_size && fielddata[oldPos].unit == static_cast<int>(dwIndex))
+				fielddata[oldPos].unit = -1;
 
-	m_mapfile.sections["Units"].values.erase(*m_mapfile.sections["Units"].GetValueName(dwIndex));
-	if (!m_noAutoObjectUpdate) UpdateUnits(FALSE);
+			m_units.erase(m_units.begin() + dwIndex);
+			for (size_t i = dwIndex; i < m_units.size(); ++i)
+			{
+				const DWORD pos = atoi(m_units[i].x) + atoi(m_units[i].y) * GetIsoSize();
+				if (pos < fielddata_size)
+					fielddata[pos].unit = static_cast<int>(i);
+			}
+		}
+		else
+		{
+			// A bulk-edit caller may deliberately have left the cache stale.
+			UpdateUnits(FALSE);
+		}
+	}
 
 	Mini_UpdatePos(x, y, IsMultiplayer());
+}
+
+BOOL CMapData::MoveUnit(DWORD dwIndex, DWORD dwPos)
+{
+	if (m_noAutoObjectUpdate || dwPos >= fielddata_size || dwIndex >= m_units.size())
+		return FALSE;
+
+	CIniFileSection& sec = m_mapfile.sections["Units"];
+	if (dwIndex >= sec.values.size())
+		return FALSE;
+
+	const int occupant = fielddata[dwPos].unit;
+	if (occupant >= 0 && occupant != static_cast<int>(dwIndex))
+		return FALSE;
+
+	UNIT& unit = m_units[dwIndex];
+	const int oldX = atoi(unit.x);
+	const int oldY = atoi(unit.y);
+	const DWORD oldPos = oldX + oldY * GetIsoSize();
+	const int newX = dwPos % GetIsoSize();
+	const int newY = dwPos / GetIsoSize();
+
+	unit.x.Format("%d", newX);
+	unit.y.Format("%d", newY);
+	unit.deleted = 0;
+
+	if (oldPos < fielddata_size && fielddata[oldPos].unit == static_cast<int>(dwIndex))
+		fielddata[oldPos].unit = -1;
+	fielddata[dwPos].unit = static_cast<int>(dwIndex);
+
+	const CString valueName = *sec.GetValueName(dwIndex);
+	sec.values[valueName] = unit.house + "," + unit.type + "," + unit.strength + "," + unit.y + "," +
+		unit.x + "," + unit.direction + "," + unit.action + "," + unit.tag + "," +
+		unit.flag1 + "," + unit.flag2 + "," + unit.flag3 + "," + unit.flag4 + "," + unit.flag5 + "," + unit.flag6;
+
+	Mini_UpdatePos(oldX, oldY, IsMultiplayer());
+	if (oldPos != dwPos)
+		Mini_UpdatePos(newX, newY, IsMultiplayer());
+	return TRUE;
 }
 
 void CMapData::DeleteStructure(DWORD dwIndex)
@@ -2433,7 +2496,54 @@ BOOL CMapData::AddInfantry(INFANTRY* lpInfantry, LPCTSTR lpType, LPCTSTR lpHouse
 		if (dwPos < fielddata_size) fielddata[dwPos].infantry[sp] = m_infantry.size() - 1;
 	}
 
+	Mini_UpdatePos(dwPos % GetIsoSize(), dwPos / GetIsoSize(), IsMultiplayer());
+	return TRUE;
+}
 
+BOOL CMapData::MoveInfantry(DWORD dwIndex, DWORD dwPos)
+{
+	if (dwPos >= fielddata_size || dwIndex >= m_infantry.size() || m_infantry[dwIndex].deleted)
+		return FALSE;
+
+	INFANTRY& infantry = m_infantry[dwIndex];
+	const int oldX = atoi(infantry.x);
+	const int oldY = atoi(infantry.y);
+	const DWORD oldPos = oldX + oldY * GetIsoSize();
+
+	int newSubPos = -1;
+	for (int i = 0; i < SUBPOS_COUNT; ++i)
+	{
+		const int occupant = fielddata[dwPos].infantry[i];
+		if (occupant == -1 || occupant == static_cast<int>(dwIndex))
+		{
+			newSubPos = i;
+			break;
+		}
+	}
+	if (newSubPos < 0)
+		return FALSE;
+
+	if (oldPos < fielddata_size)
+	{
+		for (int i = 0; i < SUBPOS_COUNT; ++i)
+		{
+			if (fielddata[oldPos].infantry[i] == static_cast<int>(dwIndex))
+				fielddata[oldPos].infantry[i] = -1;
+		}
+	}
+
+	const int newX = dwPos % GetIsoSize();
+	const int newY = dwPos / GetIsoSize();
+	infantry.x.Format("%d", newX);
+	infantry.y.Format("%d", newY);
+	// The legacy format uses 0 for the centre slot and one-based values for the
+	// remaining visual slots; fielddata itself is always zero-based.
+	infantry.pos.Format("%d", newSubPos == 0 ? 0 : newSubPos + 1);
+	fielddata[dwPos].infantry[newSubPos] = static_cast<int>(dwIndex);
+
+	Mini_UpdatePos(oldX, oldY, IsMultiplayer());
+	if (oldPos != dwPos)
+		Mini_UpdatePos(newX, newY, IsMultiplayer());
 	return TRUE;
 }
 
@@ -2791,7 +2901,39 @@ BOOL CMapData::AddUnit(UNIT* lpUnit, LPCTSTR lpType, LPCTSTR lpHouse, DWORD dwPo
 
 	m_mapfile.sections["Units"].values[id] = value;
 
-	if (!m_noAutoObjectUpdate) UpdateUnits(FALSE);
+	if (!m_noAutoObjectUpdate)
+	{
+		CIniFileSection& sec = m_mapfile.sections["Units"];
+		const auto inserted = sec.values.find(id);
+		// Normally AddUnit adds exactly one cache entry. If a bulk editor left the
+		// cache out of sync, retain the old full rebuild as a correctness fallback.
+		if (inserted != sec.values.end() && m_units.size() + 1 == sec.values.size())
+		{
+			const size_t index = std::distance(sec.values.begin(), inserted);
+			unit.deleted = 0;
+			m_units.insert(m_units.begin() + index, unit);
+
+			const DWORD newPos = atoi(unit.x) + atoi(unit.y) * GetIsoSize();
+			if (newPos < fielddata_size)
+				fielddata[newPos].unit = static_cast<int>(index);
+
+			// Reusing a numeric INI id can shift later vector indices. Touch only those
+			// unit cells rather than the terrain-sized field array.
+			for (size_t i = index + 1; i < m_units.size(); ++i)
+			{
+				const DWORD pos = atoi(m_units[i].x) + atoi(m_units[i].y) * GetIsoSize();
+				if (pos < fielddata_size)
+					fielddata[pos].unit = static_cast<int>(i);
+			}
+
+			if (newPos < fielddata_size)
+				Mini_UpdatePos(newPos % GetIsoSize(), newPos / GetIsoSize(), IsMultiplayer());
+		}
+		else
+		{
+			UpdateUnits(FALSE);
+		}
+	}
 	return TRUE;
 }
 
