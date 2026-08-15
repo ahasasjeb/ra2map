@@ -3485,12 +3485,39 @@ void CIsoView::OnSize(UINT nType, int cx, int cy)
 	ddc->SetHWnd(0, m_hWnd);
 	updateFontScaled();
 
+	// Rebuild offscreen surfaces to match the new primary surface dimensions.
+	// Without this, resizing the window leaves the back buffer at the old size
+	// and the newly exposed area stays white.
+	if (dd && lpds)
+	{
+		DDSURFACEDESC2 ddsd;
+		memset(&ddsd, 0, sizeof(DDSURFACEDESC2));
+		ddsd.dwSize = sizeof(DDSURFACEDESC2);
+		ddsd.dwFlags = DDSD_WIDTH | DDSD_HEIGHT;
+		lpds->GetSurfaceDesc(&ddsd);
+		ddsd.ddsCaps.dwCaps = DDSCAPS_OFFSCREENPLAIN;
+		ddsd.dwFlags = DDSD_CAPS | DDSD_HEIGHT | DDSD_WIDTH;
+
+		auto rebuild = [](IDirectDraw4* dd, DDSURFACEDESC2& ddsd, LPDIRECTDRAWSURFACE4& surf) {
+			if (surf) { surf->Release(); surf = NULL; }
+			dd->CreateSurface(&ddsd, &surf, NULL);
+		};
+		rebuild(dd, ddsd, lpdsBack);
+		rebuild(dd, ddsd, lpdsTemp);
+		if (theApp.m_Options.bHighResUI)
+			rebuild(dd, ddsd, lpdsBackHighRes);
+		else if (lpdsBackHighRes)
+			{ lpdsBackHighRes->Release(); lpdsBackHighRes = NULL; }
+	}
+
 	CMyViewFrame& dlg = *(CMyViewFrame*)owner;
 	dlg.m_minimap.RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW);
 
 	UpdateScrollRanges();
 
 	GetWindowRect(&m_myRect);
+
+	RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW);
 }
 
 COLORREF CIsoView::GetColor(const char* house, const char* vcolor)
@@ -5782,12 +5809,6 @@ void CIsoView::DrawMap()
 	m_texts_to_render.clear();
 	m_waypoints_to_render.clear();
 	m_celltags_to_render.clear();
-
-	errstream << "DrawMap: before terrain loop, lpSurface=" << ddsd.lpSurface << " lPitch=" << ddsd.lPitch << " w=" << ddsd.dwWidth << " h=" << ddsd.dwHeight << endl;
-	errstream.flush();
-
-	errstream << "DrawMap: terrain1 loop left=" << left << " right=" << right << " top=" << top << " bottom=" << bottom << " tiledata=" << (void*)(*tiledata) << " count=" << (*tiledata_count) << endl;
-	errstream.flush();
 
 	const DrawMapCellContext ctx = { ddsd, r, MM_heightstart, bMarbleHeight, false };
 

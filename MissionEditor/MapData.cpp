@@ -521,12 +521,17 @@ void CMapData::UpdateIniFile(DWORD dwFlags)
 		cliffwater2set = atoi(g_data.sections["NewUrbanInfo"].values["CliffsWater2"]);
 
 		InitializeUnitTypes();
+		errstream << "UpdateIniFile: InitializeUnitTypes done\n"; errstream.flush();
 		UpdateBuildingInfo();
+		errstream << "UpdateIniFile: UpdateBuildingInfo done\n"; errstream.flush();
 		UpdateTreeInfo();
+		errstream << "UpdateIniFile: UpdateTreeInfo done\n"; errstream.flush();
 #ifdef SMUDGE_SUPP
 		UpdateSmudgeInfo();
+		errstream << "UpdateIniFile: UpdateSmudgeInfo done\n"; errstream.flush();
 #endif
 		UpdateMapFieldData(bSave);
+		errstream << "UpdateIniFile: UpdateMapFieldData done\n"; errstream.flush();
 
 
 	}
