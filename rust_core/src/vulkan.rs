@@ -767,19 +767,37 @@ impl Drop for VulkanRenderer {
     }
 }
 
-fn component(pixel: u32, mask: u32) -> u8 {
-    if mask == 0 {
-        return 0;
+#[derive(Clone, Copy)]
+struct ComponentDecoder {
+    mask: u32,
+    shift: u32,
+    maximum: u64,
+}
+
+impl ComponentDecoder {
+    fn new(mask: u32) -> Self {
+        let bits = mask.count_ones();
+        Self {
+            mask,
+            shift: mask.trailing_zeros(),
+            maximum: if bits == 32 {
+                u32::MAX as u64
+            } else if bits == 0 {
+                0
+            } else {
+                (1_u64 << bits) - 1
+            },
+        }
     }
-    let shift = mask.trailing_zeros();
-    let bits = mask.count_ones();
-    let value = ((pixel & mask) >> shift) as u64;
-    let maximum = if bits == 32 {
-        u32::MAX as u64
-    } else {
-        (1_u64 << bits) - 1
-    };
-    ((value * 255 + maximum / 2) / maximum) as u8
+
+    #[inline(always)]
+    fn decode(self, pixel: u32) -> u8 {
+        if self.maximum == 0 {
+            return 0;
+        }
+        let value = ((pixel & self.mask) >> self.shift) as u64;
+        ((value * 255 + self.maximum / 2) / self.maximum) as u8
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -833,31 +851,136 @@ fn write_scaled_pixels(
         return Err("unsupported Vulkan destination pixel format".into());
     }
 
+    // DirectDraw normally exposes the desktop as little-endian B8G8R8X8. This is the
+    // editor's hot presentation path, so avoid rebuilding mask metadata and performing
+    // three integer divisions for every output pixel. Precomputing the horizontal source
+    // offsets also turns nearest-neighbour scaling from one division per pixel into one
+    // division per output column.
+    let source_is_bgrx8888 = bytes_per_pixel == 4
+        && red_mask == 0x00ff_0000
+        && green_mask == 0x0000_ff00
+        && blue_mask == 0x0000_00ff;
+    let source_rect_is_inside = source_left >= 0
+        && source_top >= 0
+        && (source_left as usize).saturating_add(source_rect_width) <= source_width
+        && (source_top as usize).saturating_add(source_rect_height) <= source_height;
+
+    if source_is_bgrx8888
+        && source_rect_is_inside
+        && source_rect_width == destination_width
+        && source_rect_height == destination_height
+    {
+        let source_left_bytes = source_left as usize * 4;
+        for destination_y in 0..destination_height {
+            let source_y = source_top as usize + destination_y;
+            let source_start = source_y * source_pitch + source_left_bytes;
+            let source_row = &source[source_start..source_start + destination_width * 4];
+            let output_start = destination_y * destination_width * 4;
+            let output_row = &mut destination[output_start..output_start + destination_width * 4];
+            if bgra {
+                // Copy a complete pixel and only force its unused X byte to opaque. Keeping
+                // this as one integer load/OR/store lets LLVM vectorize whole scanlines.
+                for (output, input) in output_row
+                    .chunks_exact_mut(4)
+                    .zip(source_row.chunks_exact(4))
+                {
+                    let pixel =
+                        u32::from_le_bytes([input[0], input[1], input[2], input[3]]) | 0xff00_0000;
+                    output.copy_from_slice(&pixel.to_le_bytes());
+                }
+            } else {
+                for (output, input) in output_row
+                    .chunks_exact_mut(4)
+                    .zip(source_row.chunks_exact(4))
+                {
+                    output.copy_from_slice(&[input[2], input[1], input[0], 255]);
+                }
+            }
+        }
+        return Ok(());
+    }
+
+    let source_x_offsets: Vec<isize> = (0..destination_width)
+        .map(|destination_x| {
+            i64::from(source_left)
+                + (destination_x as i64 * source_rect_width as i64 / destination_width as i64)
+        })
+        .map(|source_x| {
+            if source_x < 0 || source_x >= source_width as i64 {
+                -1
+            } else {
+                (source_x as usize * bytes_per_pixel) as isize
+            }
+        })
+        .collect();
+
+    if source_is_bgrx8888 {
+        for destination_y in 0..destination_height {
+            let source_y = i64::from(source_top)
+                + (destination_y as i64 * source_rect_height as i64 / destination_height as i64);
+            let row_start = destination_y * destination_width * 4;
+            let output_row = &mut destination[row_start..row_start + destination_width * 4];
+            if source_y < 0 || source_y >= source_height as i64 {
+                output_row.fill(255);
+                continue;
+            }
+
+            let source_row = &source[source_y as usize * source_pitch..];
+            for (output, source_offset) in output_row
+                .chunks_exact_mut(4)
+                .zip(source_x_offsets.iter().copied())
+            {
+                if source_offset < 0 {
+                    output.copy_from_slice(&[255, 255, 255, 255]);
+                    continue;
+                }
+                let input = source_offset as usize;
+                if bgra {
+                    output.copy_from_slice(&[
+                        source_row[input],
+                        source_row[input + 1],
+                        source_row[input + 2],
+                        255,
+                    ]);
+                } else {
+                    output.copy_from_slice(&[
+                        source_row[input + 2],
+                        source_row[input + 1],
+                        source_row[input],
+                        255,
+                    ]);
+                }
+            }
+        }
+        return Ok(());
+    }
+
+    // Unusual 16/24-bit desktop formats retain the generic conversion path, but the
+    // invariant mask metadata is calculated once per frame instead of per channel for
+    // every pixel.
+    let red_decoder = ComponentDecoder::new(red_mask);
+    let green_decoder = ComponentDecoder::new(green_mask);
+    let blue_decoder = ComponentDecoder::new(blue_mask);
     for destination_y in 0..destination_height {
         let source_y = i64::from(source_top)
             + (destination_y as i64 * source_rect_height as i64 / destination_height as i64);
-        for destination_x in 0..destination_width {
-            let source_x = i64::from(source_left)
-                + (destination_x as i64 * source_rect_width as i64 / destination_width as i64);
+        for (destination_x, source_offset) in source_x_offsets.iter().copied().enumerate() {
             let output = (destination_y * destination_width + destination_x) * 4;
-            let (red, green, blue) = if source_x < 0
-                || source_y < 0
-                || source_x >= source_width as i64
-                || source_y >= source_height as i64
-            {
-                (255, 255, 255)
-            } else {
-                let input = source_y as usize * source_pitch + source_x as usize * bytes_per_pixel;
-                let mut pixel = 0_u32;
-                for byte in 0..bytes_per_pixel {
-                    pixel |= u32::from(source[input + byte]) << (byte * 8);
-                }
-                (
-                    component(pixel, red_mask),
-                    component(pixel, green_mask),
-                    component(pixel, blue_mask),
-                )
-            };
+            let (red, green, blue) =
+                if source_offset < 0 || source_y < 0 || source_y >= source_height as i64 {
+                    (255, 255, 255)
+                } else {
+                    let input = source_y as usize * source_pitch + source_offset as usize;
+                    let mut pixel = 0_u32;
+                    for byte in 0..bytes_per_pixel {
+                        pixel |= u32::from(source[input + byte]) << (byte * 8);
+                    }
+                    (
+                        red_decoder.decode(pixel),
+                        green_decoder.decode(pixel),
+                        blue_decoder.decode(pixel),
+                    )
+                };
             if bgra {
                 destination[output..output + 4].copy_from_slice(&[blue, green, red, 255]);
             } else {
@@ -1070,9 +1193,9 @@ mod tests {
     #[test]
     fn expands_rgb565_components() {
         let pixel = 0b11111_100000_00000_u32;
-        assert_eq!(component(pixel, 0xf800), 255);
-        assert!((component(pixel, 0x07e0) as i16 - 130).abs() <= 1);
-        assert_eq!(component(pixel, 0x001f), 0);
+        assert_eq!(ComponentDecoder::new(0xf800).decode(pixel), 255);
+        assert!((ComponentDecoder::new(0x07e0).decode(pixel) as i16 - 130).abs() <= 1);
+        assert_eq!(ComponentDecoder::new(0x001f).decode(pixel), 0);
     }
 
     #[test]
@@ -1101,6 +1224,38 @@ mod tests {
         )
         .unwrap();
         assert_eq!(destination, [30, 20, 10, 255]);
+    }
+
+    #[test]
+    fn copies_unscaled_bgrx_subrectangle_without_changing_rgb() {
+        let source = [
+            3_u8, 2, 1, 0, 30, 20, 10, 0, 60, 50, 40, 0, 6, 5, 4, 0, 90, 80, 70, 0, 120, 110, 100,
+            0,
+        ];
+        let mut destination = [0_u8; 16];
+        write_scaled_pixels(
+            &mut destination,
+            2,
+            2,
+            vk::Format::B8G8R8A8_UNORM,
+            &source,
+            3,
+            2,
+            12,
+            4,
+            0x00ff0000,
+            0x0000ff00,
+            0x000000ff,
+            1,
+            0,
+            2,
+            2,
+        )
+        .unwrap();
+        assert_eq!(
+            destination,
+            [30, 20, 10, 255, 60, 50, 40, 255, 90, 80, 70, 255, 120, 110, 100, 255]
+        );
     }
 
     #[test]
