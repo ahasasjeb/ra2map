@@ -185,6 +185,9 @@ public:
 	void FillArea(DWORD dwX, DWORD dwY, DWORD dwID, BYTE bSubTile);
 	BOOL m_NoMove;
 	void PlaceCurrentObjectAt(int x, int y);
+	void DrawObjectPreviewAt(int x, int y);
+	void SavePreviewRegion(const RECT& rect);
+	void RestorePreviewRegion();
 	void PlaceTile(const int x, const int y, const UINT nMouseFlags);
 	void ShowAllTileSets();
 	void HideTileSet(DWORD dwTileSet);
@@ -368,6 +371,14 @@ public:
 	LPDIRECTDRAWSURFACE4 lpdsBack;
 	LPDIRECTDRAWSURFACE4 lpdsTemp; // used for saving the isoview when drawing current tile
 	LPDIRECTDRAWSURFACE4 lpdsBackHighRes; // used for rendering text and some lines in high-res
+	BOOL m_bSkipTempSave = FALSE; // if set, DrawMap() does not update lpdsTemp (used by the fast placement preview, as lpdsTemp must never contain the preview ghost)
+
+	// fast placement preview: the saved clean pixels below the currently shown preview ghost.
+	// They are used to erase the ghost on the next mouse move without a full map redraw and
+	// without relying on lpdsTemp (which may hold stale preview ghosts from other tools).
+	BOOL m_previewHasSaved = FALSE;
+	RECT m_previewSavedRect = { 0, 0, 0, 0 };
+	std::vector<BYTE> m_previewSavedPixels;
 	LPDIRECTDRAWSURFACE4 lpds;
 	DDPIXELFORMAT pf;	
 	std::unique_ptr<FSunPackLib::ColorConverter> m_color_converter;

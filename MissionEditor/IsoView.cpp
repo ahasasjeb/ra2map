@@ -1121,7 +1121,12 @@ void CIsoView::OnMouseMove(UINT nFlags, CPoint point)
 
 
 
-	if (lpdsBack)
+	// the fast placement preview is self-contained: it erases the previous ghost using its own
+	// saved clean pixels, so it must not restore from lpdsTemp here (lpdsTemp can hold stale
+	// preview ghosts from other tools, e.g. after a tile preview)
+	const BOOL bFastPreview = (AD.mode == ACTIONMODE_PLACE || AD.mode == ACTIONMODE_RANDOMTERRAIN) && (nFlags & ~MK_CONTROL) == 0 && AD.type != 7 && AD.type != 6;
+
+	if (lpdsBack && !bFastPreview)
 		// reset back buffer to last DrawMap()
 		lpdsBack->BltFast(0, 0, lpdsTemp, NULL, DDBLTFAST_WAIT);
 		//lpdsBack->Blt(NULL, lpdsTemp, NULL, 0, 0);
@@ -1348,7 +1353,14 @@ void CIsoView::OnMouseMove(UINT nFlags, CPoint point)
 			RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW);
 			Map->Undo();
 		}
-		else if ((AD.mode == ACTIONMODE_PLACE || AD.mode == ACTIONMODE_RANDOMTERRAIN) && (nFlags & ~MK_CONTROL) == 0 && AD.type != 7 && (AD.type != 6 || (AD.type == 6 && ((AD.data >= 30 && AD.data <= 33) || AD.data == 2 || AD.data == 3)))) // everything placing but not overlay!
+		else if (bFastPreview)
+		{
+			// Fast placement preview: renders the "ghost" object below the mouse cursor without
+			// touching the INI file or re-rendering the whole map, so the preview stays in sync
+			// with the mouse cursor.
+			DrawObjectPreviewAt(x, y);
+		}
+		else if ((AD.mode == ACTIONMODE_PLACE || AD.mode == ACTIONMODE_RANDOMTERRAIN) && (nFlags & ~MK_CONTROL) == 0 && AD.type != 7 && (AD.type == 6 && ((AD.data >= 30 && AD.data <= 33) || AD.data == 2 || AD.data == 3))) // overlay brush preview (tiberium, veins, ...)
 		{
 			FIELDDATA oldData[32][32];
 			INFANTRY infData[SUBPOS_COUNT][32][32];
@@ -5290,6 +5302,564 @@ void CIsoView::PlaceCurrentObjectAt(int x, int y)
 
 }
 
+// Fast placement preview.
+//
+// The old implementation added the object to the map (which triggers a full rebuild of the
+// object arrays via UpdateUnits()/UpdateStructures()/UpdateAircraft()), forced a full synchronous
+// map redraw (RedrawWindow(RDW_UPDATENOW) -> DrawMap()) and then removed the object again
+// (triggering yet another full rebuild). On bigger maps this is far too slow to follow the mouse.
+//
+// This version injects the object directly into the object arrays and the field data (no INI
+// file, no minimap update, no full array rebuild), redraws only the small area around the object
+// (no terrain rendering) and restores the map data afterwards.
+//
+// The preview is self-contained: the clean pixels below the currently shown ghost are saved
+// (SavePreviewRegion) and used to erase the ghost on the next mouse move (RestorePreviewRegion).
+// It deliberately does not rely on lpdsTemp, which can hold stale preview ghosts from other tools
+// (e.g. after a tile preview). Any full DrawMap() call (from any source) invalidates the saved
+// region; the next preview call then establishes a clean base frame via a full redraw first.
+void CIsoView::DrawObjectPreviewAt(int x, int y)
+{
+	const DWORD dwIsoSize = Map->GetIsoSize();
+	const DWORD dwIsoSizeSq = dwIsoSize * dwIsoSize;
+	const DWORD dwPos = x + y * dwIsoSize;
+
+	enum PreviewType { PT_NONE, PT_UNIT, PT_STRUCTURE, PT_AIRCRAFT, PT_INFANTRY, PT_TERRAIN };
+
+	// removes the currently shown preview ghost (if any) and updates the screen
+	const auto eraseGhost = [&]()
+	{
+		if (m_previewHasSaved)
+		{
+			RestorePreviewRegion();
+			// keep m_previewHasSaved - the saved clean pixels are still valid, restoring them
+			// again is a cheap no-op. This avoids full redraws when hovering over occupied cells.
+			BlitBackbufferToHighRes();
+			RenderUIOverlay();
+			FlipHighResBuffer();
+		}
+		else
+		{
+			// no saved clean pixels (e.g. the last preview used a full redraw) - do a clean
+			// full redraw to remove the ghost
+			m_bSkipTempSave = TRUE;
+			DrawMap();
+			m_bSkipTempSave = FALSE;
+		}
+	};
+
+	// 1) check whether the object can be placed here at all (same rules as PlaceCurrentObjectAt())
+	PreviewType pt = PT_NONE;
+	CString terrainType;
+	if (AD.mode == ACTIONMODE_RANDOMTERRAIN)
+	{
+		if (Map->GetTerrainAt(dwPos) >= 0)
+		{
+			eraseGhost();
+			return; // not placeable -> nothing to draw
+		}
+
+		int n = rand() * rndterrainsrc.size() / RAND_MAX;
+		if (n >= rndterrainsrc.size()) n = rndterrainsrc.size() - 1;
+		if (n < 0) n = 0;
+
+		terrainType = rndterrainsrc[n];
+		pt = PT_TERRAIN;
+	}
+	else if (AD.type == 1) // infantry
+	{
+		if (Map->GetInfantryCountAt(dwPos) >= SUBPOS_COUNT)
+		{
+			eraseGhost();
+			return;
+		}
+		pt = PT_INFANTRY;
+	}
+	else if (AD.type == 2) // structure
+	{
+		int n = Map->GetStructureAt(dwPos);
+		if (n >= 0)
+		{
+			STDOBJECTDATA sod;
+			Map->GetStdStructureData(n, &sod);
+			if (strcmp(sod.type, "GAPAVE") != NULL)
+			{
+				eraseGhost();
+				return;
+			}
+		}
+		pt = PT_STRUCTURE;
+	}
+	else if (AD.type == 3) // aircraft
+	{
+		if (Map->GetAirAt(dwPos) >= 0)
+		{
+			eraseGhost();
+			return;
+		}
+		pt = PT_AIRCRAFT;
+	}
+	else if (AD.type == 4) // vehicle
+	{
+		if (Map->GetUnitAt(dwPos) >= 0)
+		{
+			eraseGhost();
+			return;
+		}
+		pt = PT_UNIT;
+	}
+	else if (AD.type == 5) // terrain
+	{
+		if (Map->GetTerrainAt(dwPos) >= 0)
+		{
+			eraseGhost();
+			return;
+		}
+		terrainType = AD.data_s;
+		pt = PT_TERRAIN;
+	}
+	else
+	{
+		eraseGhost();
+		return; // not supported by this fast path
+	}
+
+	// 2) determine the object's footprint and the screen area affected by the preview object
+	//    (window-relative coordinates, the same coordinate space BlitPic() renders into)
+	int footprintX1 = x, footprintY1 = y, footprintX2 = x, footprintY2 = y;
+	int left = 0, top = 0, right = 0, bottom = 0;
+	int dirtyCells = 0;
+	RECT ghostRect = { 0, 0, 0, 0 };
+	{
+		const int bid = (pt == PT_STRUCTURE) ? Map->GetUnitTypeID(AD.data_s) : -1;
+		int w = 1, h = 1;
+		if (bid > -1 && bid < 0x0F00)
+		{
+			w = buildinginfo[bid].w;
+			h = buildinginfo[bid].h;
+			footprintX2 = x + h - 1;
+			footprintY2 = y + w - 1;
+		}
+
+		int spW = 0, spH = 0;
+		PICDATA pic;
+		pic.pic = NULL;
+		const int dirIdx = 64 / 32; // default direction "64"
+		switch (pt)
+		{
+		case PT_STRUCTURE:
+			if (bid > -1 && bid < 0x0F00)
+			{
+				const int dir = (7 - dirIdx) % 8;
+				pic = buildinginfo[bid].pic[dir];
+				if (pic.pic == NULL) pic = buildinginfo[bid].pic[0];
+			}
+			break;
+		case PT_UNIT:
+		case PT_AIRCRAFT:
+			pic = pics[GetCachedUnitPictureFilename(AD.data_s, dirIdx)];
+			break;
+		case PT_INFANTRY:
+			pic = pics[GetCachedUnitPictureFilename(AD.data_s, (7 - dirIdx) % 8)];
+			break;
+		case PT_TERRAIN:
+		{
+			const int id = Map->GetUnitTypeID(terrainType);
+			if (id > -1 && id < 0x0F00)
+				pic = treeinfo[id].pic;
+			break;
+		}
+		default:
+			break;
+		}
+		if (pic.pic)
+		{
+			spW = max(pic.wMaxWidth, pic.wWidth);
+			spH = max(pic.wMaxHeight, pic.wHeight);
+		}
+		if (spW < 64) spW = 64;
+		if (spH < 64) spH = 64;
+
+		int gx0 = INT_MAX, gy0 = INT_MAX, gx1 = INT_MIN, gy1 = INT_MIN;
+		for (int uc = footprintX1; uc <= footprintX2; uc++)
+		{
+			for (int vc = footprintY1; vc <= footprintY2; vc++)
+			{
+				const auto rt = GetRenderTargetCoordinates(MapCoords(uc, vc));
+				const int cx = rt.x + f_x / 2;
+				const int cy = rt.y + f_y / 2;
+				if (cx - spW / 2 < gx0) gx0 = cx - spW / 2;
+				// structure sprites are vertically anchored at the top corner of the cell,
+				// not at the cell center - cover that as well
+				if (cy - spH / 2 - f_y / 2 < gy0) gy0 = cy - spH / 2 - f_y / 2;
+				if (cx + spW / 2 > gx1) gx1 = cx + spW / 2;
+				if (cy + spH / 2 > gy1) gy1 = cy + spH / 2;
+			}
+		}
+
+		// small safety margin for unusual sprite offsets (e.g. voxel BMP offsets)
+		gx0 -= 16;
+		gy0 -= 16;
+		gx1 += 16;
+		gy1 += 16;
+
+		// the unexpanded ghost rect - it is used to save/restore the clean pixels below the ghost
+		ghostRect.left = gx0;
+		ghostRect.top = gy0;
+		ghostRect.right = gx1;
+		ghostRect.bottom = gy1;
+
+		// expand the rect so that other objects whose sprites reach into the ghost area get
+		// redrawn as well (they are the ones that must be drawn on top of the ghost)
+		const int kOtherWHalf = 160; // generous half width of other objects' sprites
+		const int kOtherHHalf = 256; // generous half height of other objects' sprites
+		gx0 -= kOtherWHalf;
+		gx1 += kOtherWHalf;
+		gy0 -= kOtherHHalf;
+		gy1 += kOtherHHalf;
+
+		RECT wr;
+		GetWindowRect(&wr);
+		const CPoint tl((int)((gx0 - wr.left) / m_viewScale.x), (int)((gy0 - wr.top) / m_viewScale.y));
+		const CPoint br((int)((gx1 - wr.left) / m_viewScale.x), (int)((gy1 - wr.top) / m_viewScale.y));
+		const auto mTL = GetMapCoordinatesFromClientCoordinates(tl, false, true);
+		const auto mBR = GetMapCoordinatesFromClientCoordinates(br, false, true);
+		left = min(mTL.x, mBR.x) - 2;
+		top = min(mTL.y, mBR.y) - 2;
+		right = max(mTL.x, mBR.x) + 2;
+		bottom = max(mTL.y, mBR.y) + 2;
+		// make sure the object's own footprint cells are always included (the reverse mapping
+		// above can miss them on very uneven terrain)
+		left = min(left, footprintX1 - 2);
+		top = min(top, footprintY1 - 2);
+		right = max(right, footprintX2 + 2);
+		bottom = max(bottom, footprintY2 + 2);
+		if (left < 0) left = 0;
+		if (top < 0) top = 0;
+		if (right > (int)dwIsoSize) right = (int)dwIsoSize;
+		if (bottom > (int)dwIsoSize) bottom = (int)dwIsoSize;
+		dirtyCells = (right - left) * (bottom - top);
+	}
+
+	// 3) inject the preview object directly into the object arrays + field data
+	BOOL bInjected = FALSE;
+	std::vector<std::pair<DWORD, FIELDDATA>> oldCells; // restore information for the touched cells
+	const auto injectGhost = [&]()
+	{
+		char sx[15], sy[15];
+		itoa(x, sx, 10);
+		itoa(y, sy, 10);
+
+		switch (pt)
+		{
+		case PT_UNIT:
+		{
+			UNIT unit;
+			unit.type = AD.data_s;
+			unit.house = currentOwner;
+			unit.action = "Guard";
+			unit.tag = "None";
+			unit.direction = "64";
+			unit.strength = "256";
+			unit.x = sx;
+			unit.y = sy;
+			unit.flag1 = "0";
+			unit.flag2 = "-1";
+			unit.flag3 = "0";
+			unit.flag4 = "-1";
+			unit.flag5 = "1";
+			unit.flag6 = "0";
+			unit.deleted = 0;
+
+			oldCells.push_back({ dwPos, *Map->GetFielddataAt(dwPos) });
+			const int pushedIndex = Map->PreviewPushUnit(unit);
+			Map->GetFielddataAt(dwPos)->unit = pushedIndex;
+			break;
+		}
+		case PT_STRUCTURE:
+		{
+			STRUCTUREPAINT spd;
+			spd.col = GetColor(currentOwner);
+			spd.strength = 256;
+			spd.upgrade1 = "";
+			spd.upgrade2 = "";
+			spd.upgrade3 = "";
+			spd.upradecount = 0;
+			spd.x = x;
+			spd.y = y;
+			spd.direction = 64;
+			spd.type = AD.data_s;
+
+			const int pushedIndex = Map->PreviewPushStructure(spd);
+
+			const int bid = Map->GetUnitTypeID(AD.data_s);
+			int w = 1, h = 1;
+			if (bid > -1 && bid < 0x0F00)
+			{
+				w = buildinginfo[bid].w;
+				h = buildinginfo[bid].h;
+			}
+
+			for (int d = 0; d < h; d++)
+			{
+				for (int e = 0; e < w; e++)
+				{
+					const DWORD pos = (x + d) + (y + e) * dwIsoSize;
+					if (pos >= dwIsoSizeSq) continue;
+
+					FIELDDATA* fd = Map->GetFielddataAt(pos);
+					oldCells.push_back({ pos, *fd });
+					fd->structure = pushedIndex;
+					fd->structuretype = bid;
+				}
+			}
+			break;
+		}
+		case PT_AIRCRAFT:
+		{
+			AIRCRAFT aircraft;
+			aircraft.type = AD.data_s;
+			aircraft.house = currentOwner;
+			aircraft.action = "Guard";
+			aircraft.tag = "None";
+			aircraft.direction = "64";
+			aircraft.strength = "256";
+			aircraft.x = sx;
+			aircraft.y = sy;
+			aircraft.flag1 = "0";
+			aircraft.flag2 = "0";
+			aircraft.flag3 = "1";
+			aircraft.flag4 = "0";
+			aircraft.deleted = 0;
+
+			oldCells.push_back({ dwPos, *Map->GetFielddataAt(dwPos) });
+			const int pushedIndex = Map->PreviewPushAircraft(aircraft);
+			Map->GetFielddataAt(dwPos)->aircraft = pushedIndex;
+			break;
+		}
+		case PT_INFANTRY:
+		{
+			int sp = -1;
+			for (int i = 0; i < SUBPOS_COUNT; i++)
+			{
+				if (Map->GetInfantryAt(dwPos, i) == -1)
+				{
+					sp = i;
+					break;
+				}
+			}
+			if (sp < 0) return;
+
+			INFANTRY inf;
+			inf.action = "Guard";
+			inf.tag = "None";
+			inf.direction = "64";
+			inf.flag1 = "0";
+			inf.flag2 = "-1";
+			inf.flag3 = "0";
+			inf.flag4 = "1";
+			inf.flag5 = "0";
+			inf.strength = "256";
+			inf.house = currentOwner;
+			inf.pos = "-1";
+			inf.type = AD.data_s;
+			inf.x = sx;
+			inf.y = sy;
+			inf.deleted = 0;
+
+			oldCells.push_back({ dwPos, *Map->GetFielddataAt(dwPos) });
+			const int pushedIndex = Map->PreviewPushInfantry(inf);
+			Map->GetFielddataAt(dwPos)->infantry[sp] = pushedIndex;
+			break;
+		}
+		case PT_TERRAIN:
+		{
+			TERRAIN td;
+			td.deleted = 0;
+			td.type = terrainType;
+			td.x = x;
+			td.y = y;
+
+			oldCells.push_back({ dwPos, *Map->GetFielddataAt(dwPos) });
+			const int pushedIndex = Map->PreviewPushTerrain(td);
+			Map->GetFielddataAt(dwPos)->terrain = pushedIndex;
+			Map->GetFielddataAt(dwPos)->terraintype = Map->GetUnitTypeID(terrainType);
+			break;
+		}
+		default:
+			return;
+		}
+
+		bInjected = TRUE;
+	};
+
+	// 4) draw the preview
+	if (dirtyCells <= 0 || dirtyCells > 7000 || lpdsBack == NULL || m_viewScale.x <= 0.0f || m_viewScale.y <= 0.0f)
+	{
+		// The affected area is too large (e.g. zoomed out very far) or the incremental path is
+		// not available: use the full redraw path. Suppress the lpdsTemp update so that lpdsTemp
+		// never contains the preview ghost.
+		injectGhost();
+		if (bInjected)
+		{
+			m_bSkipTempSave = TRUE;
+			DrawMap();
+			m_bSkipTempSave = FALSE;
+		}
+	}
+	else
+	{
+		// if we don't have saved clean pixels for the previous ghost (e.g. the scene changed in
+		// the meantime), establish a clean base frame first - the ghost is not injected yet
+		if (!m_previewHasSaved)
+		{
+			m_bSkipTempSave = TRUE;
+			DrawMap();
+			m_bSkipTempSave = FALSE;
+		}
+
+		injectGhost();
+
+		if (bInjected)
+		{
+			// erase the previous ghost and save the clean pixels below the new ghost
+			RestorePreviewRegion();
+			SavePreviewRegion(ghostRect);
+
+			// incremental redraw of only the affected area
+			SurfaceLocker locker(lpdsBack);
+			auto desc = locker.ensure_locked();
+			if (!desc)
+			{
+				// cannot lock the surface - use the full redraw path as a safe fallback
+				locker.ensure_unlocked();
+				m_previewHasSaved = FALSE;
+				m_bSkipTempSave = TRUE;
+				DrawMap();
+				m_bSkipTempSave = FALSE;
+			}
+			else
+			{
+				DDSURFACEDESC2& ddsd = *desc;
+				const RECT r = GetScaledDisplayRect();
+				const int mapwidth = Map->GetWidth();
+				const int mapheight = Map->GetHeight();
+				const DrawMapCellContext ctx = { ddsd, r, 0, TRUE, false };
+
+				for (int u = left; u < right; u++)
+				{
+					for (int v = top; v < bottom; v++)
+					{
+						if (u < 1 || v < 1 || u + v < mapwidth + 1 || u + v > mapwidth + mapheight * 2 ||
+							(v + 1 > mapwidth && u - 1 < v - mapwidth) || (u + 1 > mapwidth && v + mapwidth - 1 < u))
+							continue;
+
+						FIELDDATA m = *Map->GetFielddataAt(MapCoords(u, v));
+						if (m.wGround == 0xFFFF) m.wGround = 0;
+						const auto drawCoords = GetRenderTargetCoordinates(MapCoords(u, v));
+
+						DrawMapObjectsCell(MapCoords(u, v), m, drawCoords, ctx);
+					}
+				}
+
+				locker.ensure_unlocked();
+
+				BlitBackbufferToHighRes();
+				RenderUIOverlay();
+				FlipHighResBuffer();
+
+				m_previewHasSaved = TRUE;
+			}
+		}
+	}
+
+	// 5) restore the map data (remove the preview object again)
+	if (bInjected)
+	{
+		switch (pt)
+		{
+		case PT_UNIT: Map->PreviewPopUnit(); break;
+		case PT_STRUCTURE: Map->PreviewPopStructure(); break;
+		case PT_AIRCRAFT: Map->PreviewPopAircraft(); break;
+		case PT_INFANTRY: Map->PreviewPopInfantry(); break;
+		case PT_TERRAIN: Map->PreviewPopTerrain(); break;
+		default: break;
+		}
+	}
+	for (auto& cell : oldCells)
+		Map->SetFielddataAt(cell.first, &cell.second);
+}
+
+// saves the pixels of the given backbuffer rect (window-relative coordinates) so that they can
+// be restored later to erase the placement preview ghost without a full map redraw
+void CIsoView::SavePreviewRegion(const RECT& rect)
+{
+	m_previewHasSaved = FALSE;
+
+	if (lpdsBack == NULL || bpp <= 0) return;
+
+	SurfaceLocker locker(lpdsBack);
+	auto desc = locker.ensure_locked();
+	if (!desc) return;
+
+	const DDSURFACEDESC2& ddsd = *desc;
+
+	RECT rr = rect;
+	if (rr.left < 0) rr.left = 0;
+	if (rr.top < 0) rr.top = 0;
+	if (rr.right > (LONG)ddsd.dwWidth) rr.right = (LONG)ddsd.dwWidth;
+	if (rr.bottom > (LONG)ddsd.dwHeight) rr.bottom = (LONG)ddsd.dwHeight;
+	if (rr.right <= rr.left || rr.bottom <= rr.top) return;
+
+	const int bytesPerPixel = bpp; // bpp is bytes per pixel
+	const int w = rr.right - rr.left;
+	const int h = rr.bottom - rr.top;
+	const size_t rowBytes = (size_t)w * bytesPerPixel;
+
+	m_previewSavedPixels.resize((size_t)h * rowBytes);
+
+	const BYTE* srcBase = (const BYTE*)ddsd.lpSurface + (size_t)rr.top * ddsd.lPitch + (size_t)rr.left * bytesPerPixel;
+	BYTE* dst = m_previewSavedPixels.data();
+	for (int i = 0; i < h; i++)
+		memcpy(dst + (size_t)i * rowBytes, srcBase + (size_t)i * ddsd.lPitch, rowBytes);
+
+	m_previewSavedRect = rr;
+	m_previewHasSaved = TRUE;
+}
+
+// restores the previously saved preview region (see SavePreviewRegion) to erase the placement
+// preview ghost without a full map redraw
+void CIsoView::RestorePreviewRegion()
+{
+	if (!m_previewHasSaved || m_previewSavedPixels.empty() || lpdsBack == NULL || bpp <= 0) return;
+
+	SurfaceLocker locker(lpdsBack);
+	auto desc = locker.ensure_locked();
+	if (!desc) return;
+
+	const DDSURFACEDESC2& ddsd = *desc;
+
+	RECT rr = m_previewSavedRect;
+	if (rr.left < 0) rr.left = 0;
+	if (rr.top < 0) rr.top = 0;
+	if (rr.right > (LONG)ddsd.dwWidth) rr.right = (LONG)ddsd.dwWidth;
+	if (rr.bottom > (LONG)ddsd.dwHeight) rr.bottom = (LONG)ddsd.dwHeight;
+	if (rr.right <= rr.left || rr.bottom <= rr.top) return;
+
+	const int bytesPerPixel = bpp; // bpp is bytes per pixel
+	const int w = rr.right - rr.left;
+	const int h = rr.bottom - rr.top;
+	const size_t rowBytes = (size_t)w * bytesPerPixel;
+
+	// defensive: only restore if the saved pixel data fits the region
+	if (m_previewSavedPixels.size() < (size_t)h * rowBytes) return;
+
+	const BYTE* src = m_previewSavedPixels.data();
+	BYTE* dstBase = (BYTE*)ddsd.lpSurface + (size_t)rr.top * ddsd.lPitch + (size_t)rr.left * bytesPerPixel;
+	for (int i = 0; i < h; i++)
+		memcpy(dstBase + (size_t)i * ddsd.lPitch, src + (size_t)i * rowBytes, rowBytes);
+}
+
 void CIsoView::OnTimer(UINT nIDEvent)
 {
 	// theApp.m_loading->FreeAll();
@@ -5676,6 +6246,11 @@ void CIsoView::DrawMap()
 {
 	const CMapData* const Map = ::Map;
 
+	// a full map redraw replaces the whole scene, so the saved clean region of the fast
+	// placement preview is not valid anymore
+	m_previewHasSaved = FALSE;
+	m_previewSavedPixels.clear();
+
 	if (bNoDraw) return;
 
 	if (bCancelDraw)
@@ -5895,7 +6470,8 @@ void CIsoView::DrawMap()
 			AD.tool->render();
 	}
 
-	lpdsTemp->Blt(NULL, lpdsBack, NULL, 0, 0); // lpdsTemp always holds the scene drawn above, unscaled to the window
+	if (!m_bSkipTempSave)
+		lpdsTemp->Blt(NULL, lpdsBack, NULL, 0, 0); // lpdsTemp always holds the scene drawn above, unscaled to the window (except when suppressed by the fast placement preview, as lpdsTemp must never contain a preview ghost)
 
 	if (m_cellCursor != MapCoords(-1, -1))
 	{

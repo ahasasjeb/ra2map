@@ -437,6 +437,57 @@ public:
 	void InitializeUnitTypes();
 	BOOL AddStructure(STRUCTURE* lpStructure, LPCTSTR lpType = NULL, LPCTSTR lpHouse = NULL, DWORD dwPos = 0, CString suggestedID = "");
 	BOOL AddInfantry(INFANTRY* lpInfantry, LPCTSTR lpType = NULL, LPCTSTR lpHouse = NULL, DWORD dwPos = 0, int suggestedIndex = -1);
+
+	// Preview placement helpers used by the isometric view to render a "ghost" object under the
+	// mouse cursor. Unlike Add*/Delete* they do not touch the INI file, the minimap or trigger a
+	// full object array rebuild, so they are cheap enough to be called on every mouse move.
+	// The object pushed by a Push method MUST be removed with the matching Pop method before any
+	// other map modification happens.
+	int PreviewPushUnit(const UNIT& unit)
+	{
+		m_units.push_back(unit);
+		return static_cast<int>(m_units.size()) - 1;
+	}
+	void PreviewPopUnit()
+	{
+		if (!m_units.empty()) m_units.pop_back();
+	}
+	int PreviewPushStructure(const STRUCTUREPAINT& structurePaint)
+	{
+		m_structurepaint.push_back(structurePaint);
+		return static_cast<int>(m_structurepaint.size()) - 1;
+	}
+	void PreviewPopStructure()
+	{
+		if (!m_structurepaint.empty()) m_structurepaint.pop_back();
+	}
+	int PreviewPushAircraft(const AIRCRAFT& aircraft)
+	{
+		m_aircraft.push_back(aircraft);
+		return static_cast<int>(m_aircraft.size()) - 1;
+	}
+	void PreviewPopAircraft()
+	{
+		if (!m_aircraft.empty()) m_aircraft.pop_back();
+	}
+	int PreviewPushInfantry(const INFANTRY& infantry)
+	{
+		m_infantry.push_back(infantry);
+		return static_cast<int>(m_infantry.size()) - 1;
+	}
+	void PreviewPopInfantry()
+	{
+		if (!m_infantry.empty()) m_infantry.pop_back();
+	}
+	int PreviewPushTerrain(const TERRAIN& terrain)
+	{
+		m_terrain.push_back(terrain);
+		return static_cast<int>(m_terrain.size()) - 1;
+	}
+	void PreviewPopTerrain()
+	{
+		if (!m_terrain.empty()) m_terrain.pop_back();
+	}
 	BOOL AddNode(NODE* lpNode, WORD dwPos);
 	void GetStdStructureData(DWORD dwIndex, STDOBJECTDATA* lpStdStructure) const;
 	void GetStructureData(DWORD dwIndex, STRUCTURE* lpStructure) const;
