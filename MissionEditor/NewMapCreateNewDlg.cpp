@@ -26,6 +26,7 @@
 #include "NewMapCreateNewDlg.h"
 #include "variables.h"
 #include "functions.h"
+#include "TheaterConfiguration.h"
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -84,18 +85,11 @@ BOOL CNewMapCreateNewDlg::OnInitDialog()
 	SetDlgItemText(IDCANCEL, GetLanguageStringACP("Cancel"));
 
 	CComboBox& theater=*((CComboBox*)GetDlgItem(IDC_THEATER));
-	theater.AddString(THEATER0);
-	theater.AddString(THEATER1);
-#ifdef RA2_MODE
-	theater.AddString(THEATER2);
-	if(yuri_mode) // MW YR support
+	for (const auto& entry : GetConfiguredTheaters(yuri_mode != FALSE))
 	{
-		theater.AddString(THEATER3);
-		theater.AddString(THEATER4);
-		theater.AddString(THEATER5);
+		const int comboIndex = theater.AddString(entry.name);
+		theater.SetItemData(comboIndex, static_cast<DWORD_PTR>(entry.index));
 	}
-
-#endif
 
 	m_Theater=0;
 	m_Width=50;
@@ -129,5 +123,8 @@ void CNewMapCreateNewDlg::OnOK()
 		if(res==IDNO) return;
 	}
 
+	CComboBox& theater = *((CComboBox*)GetDlgItem(IDC_THEATER));
+	const int selectedTheater = static_cast<int>(theater.GetItemData(theater.GetCurSel()));
 	CDialog::OnOK();
+	m_Theater = selectedTheater;
 }

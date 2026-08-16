@@ -41,6 +41,7 @@
 #include "AiTriggerTypesEnable.h"
 #include "AITriggerTypes.h"
 #include "resource.h"
+#include <filesystem>
 #include "SingleplayerSettings.h"	// Hinzugefügt von der Klassenansicht
 #include "loading.h"
 #include "TileSetBrowserFrame.h"	// Hinzugefügt von der Klassenansicht
@@ -77,7 +78,7 @@ public:
 	CAITriggerTypes m_aitriggertypes;
 	CAiTriggerTypesEnable m_aitriggertypesenable;
 	void SetText(const char* text);
-	void SaveMap(CString FileName);
+	void SaveMap(CString FileName, bool interactive = true);
 	void SetReady();
 	CScriptTypes m_Scripttypes;
 	CTriggers m_triggers;
@@ -141,7 +142,6 @@ protected:
 	afx_msg void OnDebugExportmappacknosections();
 	afx_msg void OnDebugExportmappack();
 	afx_msg void OnFileNew();
-	afx_msg void OnHelpTipoftheday();
 	afx_msg void OnOptionsSimpleview();
 	afx_msg void OnOptionsShowminimap();
 	afx_msg void OnFileValidatemap();
@@ -231,11 +231,22 @@ protected:
 	afx_msg void OnFileFile3();
 	afx_msg void OnFileFile4();
 	afx_msg void OnMaptoolsSearchwaypoint();
+	afx_msg void OnMaptoolsNavigatecoordinate();
+	afx_msg void OnEditMultiselection();
+	afx_msg void OnEditPropertybrush();
+	afx_msg void OnTimer(UINT_PTR nIDEvent);
 	afx_msg void OnMaptoolsToolscripts();
 	//}}AFX_MSG
 	DECLARE_MESSAGE_MAP()
 private:
 	void UnloadAll();
+	void RefreshMapWriteTime();
+	void CreateAutomaticSave();
+	void PruneAutomaticSaves(const std::filesystem::path& directory);
+	std::filesystem::file_time_type m_knownMapWriteTime{};
+	bool m_hasKnownMapWriteTime = false;
+	bool m_externalChangeReported = false;
+	bool m_automaticSaveInProgress = false;
 	
 	HCURSOR m_hGameCursor;
 	

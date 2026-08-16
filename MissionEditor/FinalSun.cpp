@@ -317,6 +317,9 @@ BOOL CFinalSunApp::InitInstance()
 	opts.bShowStats = optini.sections["UserInterface"].values.emplace("ShowStats", opts.bShowStats ? "1" : "0").first->second == "1";
 	opts.bHighResUI = optini.sections["UserInterface"].values.emplace("HighRes", opts.bHighResUI ? "1" : "0").first->second == "1";	
 	opts.useDefaultMouseCursor = optini.sections["UserInterface"].values.emplace("UseDefaultMouseCursor", opts.useDefaultMouseCursor ? "1" : "0").first->second == "1";
+	opts.bFileWatcher = optini.sections["AutoSave"].values.emplace("FileWatcher", opts.bFileWatcher ? "1" : "0").first->second != "0";
+	opts.autoSaveIntervalMinutes = std::clamp(atoi(optini.sections["AutoSave"].values.emplace("IntervalMinutes", std::to_string(opts.autoSaveIntervalMinutes).c_str()).first->second), 0, 1440);
+	opts.autoSaveMaxCount = std::clamp(atoi(optini.sections["AutoSave"].values.emplace("MaxCount", std::to_string(opts.autoSaveMaxCount).c_str()).first->second), 1, 100);
 
 	opts.fMiniMapScale = static_cast<float>(atof(optini.sections["MiniMap"].values.emplace("Scale", std::to_string(opts.fMiniMapScale).c_str()).first->second));
 
@@ -406,22 +409,6 @@ void CFinalSunApp::ParseCommandLine()
 
 	currentMapFile = data;
 #endif
-}
-
-void CFinalSunApp::ShowTipAtStartup(void)
-{
-	CTipDlg dlg;
-	if (dlg.m_bStartup)
-		dlg.DoModal();
-
-
-}
-
-void CFinalSunApp::ShowTipOfTheDay(void)
-{
-	CTipDlg dlg;
-	dlg.DoModal();
-
 }
 
 int CFinalSunApp::Run()

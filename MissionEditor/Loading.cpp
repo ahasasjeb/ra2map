@@ -3640,6 +3640,45 @@ BOOL CLoading::InitMixFiles()
 		exit(199);
 	}
 
+	// Explicit custom archives have the highest lookup priority. The key is
+	// the relative/absolute MIX filename; Yes selects the editor directory,
+	// while any other value selects the game directory.
+	if (const CIniFileSection* extraMixes = g_data.GetSection("ExtraMixes"))
+	{
+		for (const auto& configuredMix : extraMixes->values)
+		{
+			CString filename = configuredMix.first;
+			filename.Trim();
+			if (filename.IsEmpty())
+				continue;
+
+			const bool absolute = (filename.GetLength() > 1 && filename[1] == ':') ||
+				filename.Left(2) == "\\\\";
+			CString path = filename;
+			if (!absolute)
+			{
+				const bool editorPath = configuredMix.second.CompareNoCase("yes") == 0 ||
+					configuredMix.second.CompareNoCase("true") == 0 || configuredMix.second == "1";
+				path = CString(editorPath ? AppPath : TSPath) + "\\" + filename;
+			}
+
+			if (!DoesFileExist(path))
+			{
+				errstream << "ExtraMix not found: " << static_cast<LPCTSTR>(path) << endl;
+				continue;
+			}
+
+			HMIXFILE mix = FSunPackLib::XCC_OpenMix(path, NULL);
+			if (mix != NULL)
+			{
+				m_hExtraMixes.push_back(mix);
+				errstream << "ExtraMix loaded: " << static_cast<LPCTSTR>(path) << endl;
+			}
+			else
+				errstream << "ExtraMix could not be opened: " << static_cast<LPCTSTR>(path) << endl;
+		}
+	}
+
 	errstream << "Loading local.mix";
 	errstream.flush();
 	if(DoesFileExist((CString)TSPath+"\\Local.mix")==FALSE || theApp.m_Options.bSearchLikeTS==FALSE)
@@ -4040,6 +4079,10 @@ CLoading::~CLoading()
 
 void CLoading::Unload()
 {
+	for (HMIXFILE extraMix : m_hExtraMixes)
+		FSunPackLib::XCC_CloseMix(extraMix);
+	m_hExtraMixes.clear();
+
 	FSunPackLib::XCC_CloseMix(m_hCache);
 	FSunPackLib::XCC_CloseMix(m_hConquer);
 	FSunPackLib::XCC_CloseMix(m_hIsoSnow);
@@ -4111,9 +4154,13 @@ HMIXFILE CLoading::FindFileInMix(LPCTSTR lpFilename, TheaterChar* pTheaterChar)
 	if(pTheaterChar) 
 		*pTheaterChar = TheaterChar::None;
 
+	for (HMIXFILE extraMix : m_hExtraMixes)
+		if (extraMix != NULL && FSunPackLib::XCC_DoesFileExist(lpFilename, extraMix))
+			return extraMix;
+
 	int i;
 	// MW: added ecache support
-	for(i=100;i>=0; i--)
+	for(i=99;i>=0; i--)
 	{
 		HMIXFILE cuExp=m_hECache[i];
 

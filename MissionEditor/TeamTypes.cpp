@@ -24,6 +24,7 @@
 #include "stdafx.h"
 #include "FinalSun.h"
 #include "TeamTypes.h"
+#include "WaypointCodec.h"
 #include "FinalSunDlg.h"
 #include "mapdata.h"
 #include "variables.h"
@@ -194,114 +195,6 @@ CString btos(BOOL b)
 	if(b==TRUE) s="yes";
 	return s;
 }
-
-int letter2number(char let){
-	int reply=let-'A';
-	/*if(let=='A')reply=0;
-	if(let=='B')reply=1;
-	if(let=='C')reply=2;
-	if(let=='D')reply=3;
-	if(let=='E')reply=4;
-	if(let=='F')reply=5;
-	if(let=='G')reply=6;
-	if(let=='H')reply=7;
-	if(let=='I')reply=8;
-	if(let=='J')reply=9;
-	if(let=='K')reply=10;
-	if(let=='L')reply=11;
-	if(let=='M')reply=12;
-	if(let=='N')reply=13;
-	if(let=='O')reply=14;
-	if(let=='P')reply=15;
-	if(let=='Q')reply=16;
-	if(let=='R')reply=17;
-	if(let=='S')reply=18;
-	if(let=='T')reply=19;
-	if(let=='U')reply=20;
-	if(let=='V')reply=21;
-	if(let=='W')reply=22;
-	if(let=='X')reply=23;
-	if(let=='Y')reply=24;
-	if(let=='Z')reply=25;*/
-	return reply;
-
-}
-
-char number2letter(int let){
-	int reply=let+'A';
-	/*if(let==0)reply='A';
-	if(let==1)reply='B';
-	if(let==2)reply='C';
-	if(let==3)reply='D';
-	if(let==4)reply='E';
-	if(let==5)reply='F';
-	if(let==6)reply='G';
-	if(let==7)reply='H';
-	if(let==8)reply='I';
-	if(let==9)reply='J';
-	if(let==10)reply='K';
-	if(let==11)reply='L';
-	if(let==12)reply='M';
-	if(let==13)reply='N';
-	if(let==14)reply='O';
-	if(let==15)reply='P';
-	if(let==16)reply='Q';
-	if(let==17)reply='R';
-	if(let==18)reply='S';
-	if(let==19)reply='T';
-	if(let==20)reply='U';
-	if(let==21)reply='V';
-	if(let==22)reply='W';
-	if(let==23)reply='X';
-	if(let==24)reply='Y';
-	if(let==25)reply='Z';*/
-
-	return reply;
-
-}
-
-int GetWaypoint(const char* c)
-{
-	if(strlen(c)==0) return -1;
-    int i;
-    int res=0;
-    for(i=0;i<strlen(c);i++)
-    {
-        int addval=letter2number(c[i]);
-        res+=addval+(res+1)*(i*25)+i;
-    }
-	return res;
-}
-
-CString GetWaypoint(int n)
-{
-	if(n==-1) return (CString)("");
-	int i,e;
-	for(i=-1;i<26;i++)
-	{
-		for(e=0;e<26;e++)
-		{
-			char c[50];
-			CString p;
-			if(i==-1)
-			{
-				c[0]=number2letter(e);
-				c[1]=0;
-				if(GetWaypoint(c)==n) return c;
-			}
-			else
-			{
-				c[0]=number2letter(i);
-				c[1]=number2letter(e);
-				c[2]=0;
-				if(GetWaypoint(c)==n) return c;
-			}
-
-		}
-	}
-	return (CString)("");
-}
-	
 
 /////////////////////////////////////////////////////////////////////////////
 // Behandlungsroutinen für Nachrichten CTeamTypes 

@@ -71,7 +71,7 @@ struct FIELDDATA
 	short smudge;
 	int smudgetype;
 #endif
-	short waypoint; // waypoint number
+	int waypoint; // waypoint number; extended maps can contain more than 32767 entries
 
 	NODEDATA node; // node info
 	BYTE overlay; // overlay number

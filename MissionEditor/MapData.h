@@ -645,6 +645,7 @@ private:
 	// undo/redo history lives in its own class now (see MapSnapshots.h)
 	CMapSnapshots m_snapshots;
 	int m_money;
+	std::vector<BYTE> m_copySelectionMask;
 
 	vector<STRUCTUREPAINT> m_structurepaint;
 
@@ -767,6 +768,7 @@ public:
 	void GetStructurePaint(int index, STRUCTUREPAINT* lpStructurePaint) const;
 	void Paste(int x, int y, int z_mod);
 	void Copy(int left = 0, int top = 0, int right = 0, int bottom = 0);
+	void CopySelection(const std::vector<MapCoords>& cells);
 	CString GetTheater();
 	BOOL IsMultiplayer();
 	void CreateShore(int left, int top, int right, int bottom, BOOL bRemoveUseless = TRUE);

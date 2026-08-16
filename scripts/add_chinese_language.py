@@ -92,15 +92,6 @@ MV_TubeEndNotUnique=隧道管 %5（%1, %2）->（%3, %4）与另外 %6 条隧道
 MV_TubeInvalidCounterpartEnd=隧道管 %5（%1, %2）->（%3, %4）有 %6 条其他隧道管以本管起点为终点，但本管终点与那些管的起点不匹配。\n这会在游戏中导致不可预知的错误和崩溃。\n对应管必须同时对调起点和终点。
 MV_TubeInvalidCounterpartStart=隧道管 %5（%1, %2）->（%3, %4）有 %6 条其他隧道管以本管终点为起点，但本管起点与那些管的终点不匹配。\n这会在游戏中导致不可预知的错误和崩溃。\n对应管必须同时对调起点和终点。
 
-; tip dialog
-CG_IDS_DIDYOUKNOW=你知道吗……
-CG_IDS_FILE_ABSENT=未找到提示文件
-CG_IDP_FILE_CORRUPT=提示文件存在语法错误
-TipDialogNext=下一条提示
-TipDialogShowAtStartup=启动时显示提示
-TipDialogClose=关闭
-TipDialogCaption=每日提示
-
 ; main dialog strings
 MainDialogCaption=%9
 MainDialogCaptionRA2=%9
@@ -115,7 +106,6 @@ FileImportModHelp=将 *.rul 模组导入地图
 FileQuitHelp=退出 %9
 FileRunTiberianSunHelp=启动 泰伯利亚之日
 HelpInfoHelp=显示关于 %9 的信息
-HelpTipOfTheDayHelp=显示每日提示
 OptionsShowMapViewHelp=显示等距地图视图
 TabBasic=常规
 TabSingleplayerSettings=附加
@@ -546,7 +536,6 @@ Smooth zoom=平滑缩放
 Use default mouse cursor=使用默认鼠标指针
 Help=帮助
 Info=信息
-Tip of the day=每日提示
 Show logs=显示日志
 GDI Wall=GDI 围墙
 Nod Wall=Nod 围墙

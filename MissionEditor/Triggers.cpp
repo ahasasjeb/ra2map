@@ -30,8 +30,7 @@
 #include "functions.h"
 #include "inlines.h"
 
-CString GetWaypoint(int n);
-int GetWaypoint(const char* c);
+#include "WaypointCodec.h"
 
 #ifdef _DEBUG
 #define new DEBUG_NEW

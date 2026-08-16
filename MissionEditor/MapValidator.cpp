@@ -28,6 +28,7 @@
 #include "variables.h"
 #include "functions.h"
 #include "inlines.h"
+#include "BuildingFoundation.h"
 #include <algorithm>
 #include <string>
 
@@ -374,21 +375,83 @@ BOOL CMapValidator::CheckMap()
 		}
 	}
 
-	int i;
-	BOOL bWaypBig=FALSE;
-	for(i=0;i<Map->GetWaypointCount();i++)
+	// Extended structural checks. These operate on the editor's actual cached
+	// footprint, so Ares Foundation=Custom buildings are validated correctly.
+	const CIniFileSection* structures = ini.GetSection("Structures");
+	if (structures)
 	{
-		DWORD pos;
-		CString id;
+		const int isoSize = static_cast<int>(Map->GetIsoSize());
+		std::vector<std::vector<CString>> occupied(static_cast<size_t>(isoSize) * isoSize);
+		const CIniFileSection* ignoreSection = g_data.GetSection("StructureOverlappingCheckIgnores");
 
-		Map->GetWaypointData(i, &id, &pos);
+		for (const auto& entry : structures->values)
+		{
+			const CString type = GetParam(entry.second, 1);
+			bool ignored = false;
+			if (ignoreSection)
+			{
+				for (const auto& ignore : ignoreSection->values)
+				{
+					if (ignore.first.CompareNoCase(type) == 0 || ignore.second.CompareNoCase(type) == 0)
+					{
+						ignored = true;
+						break;
+					}
+				}
+			}
+			if (ignored)
+				continue;
 
-		if(atoi(id)>99) bWaypBig=TRUE;
+			const int buildingType = Map->GetUnitTypeID(type);
+			const int originX = atoi(GetParam(entry.second, 4));
+			const int originY = atoi(GetParam(entry.second, 3));
+			for (const auto& cell : GetBuildingFoundation(buildingType))
+			{
+				const int x = originX + cell.x;
+				const int y = originY + cell.y;
+				if (x < 0 || y < 0 || x >= isoSize || y >= isoSize)
+					continue;
+				occupied[static_cast<size_t>(x) + static_cast<size_t>(y) * isoSize].push_back(type);
+			}
+		}
+
+		for (size_t pos = 0; pos < occupied.size(); ++pos)
+		{
+			if (occupied[pos].size() < 2)
+				continue;
+
+			bAllow = FALSE;
+			CString names;
+			for (size_t i = 0; i < occupied[pos].size(); ++i)
+			{
+				if (i) names += ", ";
+				names += occupied[pos][i];
+			}
+			CString error = GetLanguageStringACP("MV_OverlapStructures");
+			error = TranslateStringVariables(1, error, std::to_string(pos % isoSize).c_str());
+			error = TranslateStringVariables(2, error, std::to_string(pos / isoSize).c_str());
+			error = TranslateStringVariables(3, error, names);
+			AddItemWithNewLine(m_MapProblemList, error, 0);
+		}
 	}
 
-	if(bWaypBig)
-		AddItemWithNewLine(m_MapProblemList, GetLanguageStringACP("MV_>100Waypoint"), 1);
-	
+	for (const char* sectionName : { "Triggers", "Actions", "Events", "Tags" })
+	{
+		const CIniFileSection* section = ini.GetSection(sectionName);
+		if (!section)
+			continue;
+		for (const auto& entry : section->values)
+		{
+			if (entry.second.Find(",,") < 0)
+				continue;
+			bAllow = FALSE;
+			CString error = GetLanguageStringACP("MV_LogicMissingParams");
+			error = TranslateStringVariables(1, error, sectionName);
+			error = TranslateStringVariables(2, error, entry.first);
+			AddItemWithNewLine(m_MapProblemList, error, 0);
+		}
+	}
+
 	if(Map->IsYRMap())
 	{
 		AddItemWithNewLine(m_MapProblemList, GetLanguageStringACP("NeedsYR"), 1);

@@ -27,6 +27,7 @@
 #include "Tube.h"
 #include "MissionEditorPackLib.h"
 #include "RustCore.h"
+#include "WaypointCodec.h"
 
 class TestError : public std::runtime_error
 {
@@ -92,6 +93,7 @@ int Tests::run()
 		[this]() { test_iso(); },
 		[this]() { test_codecs(); },
 		[this]() { test_csf(); },
+		[this]() { test_waypoint_codec(); },
 	});
 	for (const auto f : test_functions)
 	{
@@ -321,6 +323,21 @@ void Tests::test_iso()
 	REPORT_TEST(d.GetAirAt(aircraftPosB) == -1);
 	REPORT_TEST(d.GetAirAt(aircraftPosD) == 1);
 	
+}
+
+void Tests::test_waypoint_codec()
+{
+	REPORT_TEST(GetWaypoint("A") == 0);
+	REPORT_TEST(GetWaypoint("Z") == 25);
+	REPORT_TEST(GetWaypoint("AA") == 26);
+	REPORT_TEST(GetWaypoint("ZZ") == 701);
+	REPORT_TEST(GetWaypoint("AAA") == 702);
+	REPORT_TEST(GetWaypoint("aBc") == 730);
+	REPORT_TEST(GetWaypoint("A1") == -1);
+	REPORT_TEST(GetWaypoint(0) == CString("A"));
+	REPORT_TEST(GetWaypoint(701) == CString("ZZ"));
+	REPORT_TEST(GetWaypoint(702) == CString("AAA"));
+	REPORT_TEST(GetWaypoint(18277) == CString("ZZZ"));
 }
 
 void Tests::test_codecs()

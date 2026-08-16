@@ -287,6 +287,9 @@
     <ClCompile Include="MiniMap.cpp" />
     <ClCompile Include="MMXSavingOptionsDlg.cpp" />
     <ClCompile Include="MultiSaveOptionsDlg.cpp" />
+	<ClCompile Include="MultiSelectionTool.cpp" />
+	<ClCompile Include="PropertyBrushTool.cpp" />
+	<ClCompile Include="TheaterConfiguration.cpp" />
     <ClCompile Include="MyComboBox.cpp" />
     <ClCompile Include="MyViewFrame.cpp" />
     <ClCompile Include="NewMap.cpp" />
@@ -323,9 +326,11 @@
       <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='FinalSunRelease|x64'">stdafx.h</PrecompiledHeaderFile>
     </ClCompile>
     <ClCompile Include="structs.cpp" />
+	<ClCompile Include="BuildingFoundation.cpp" />
     <ClCompile Include="Tags.cpp" />
     <ClCompile Include="TaskForce.cpp" />
     <ClCompile Include="TeamTypes.cpp" />
+	<ClCompile Include="WaypointCodec.cpp" />
     <ClCompile Include="TerrainDlg.cpp" />
     <ClCompile Include="TerrainModifier.cpp" />
     <ClCompile Include="tests.cpp">
@@ -334,7 +339,6 @@
     <ClCompile Include="TextDrawer.cpp" />
     <ClCompile Include="TileSetBrowserFrame.cpp" />
     <ClCompile Include="TileSetBrowserView.cpp" />
-    <ClCompile Include="TipDlg.cpp" />
     <ClCompile Include="ToolSettingsBar.cpp" />
     <ClCompile Include="TriggerActionsDlg.cpp" />
     <ClCompile Include="TriggerEditorDlg.cpp" />
@@ -401,6 +405,9 @@
     <ClInclude Include="MiniMap.h" />
     <ClInclude Include="MMXSavingOptionsDlg.h" />
     <ClInclude Include="MultiSaveOptionsDlg.h" />
+	<ClInclude Include="MultiSelectionTool.h" />
+	<ClInclude Include="PropertyBrushTool.h" />
+	<ClInclude Include="TheaterConfiguration.h" />
     <ClInclude Include="MyComboBox.h" />
     <ClInclude Include="MyViewFrame.h" />
     <ClInclude Include="NewMap.h" />
@@ -424,16 +431,17 @@
     <ClInclude Include="SpecialFlags.h" />
     <ClInclude Include="StdAfx.h" />
     <ClInclude Include="structs.h" />
+	<ClInclude Include="BuildingFoundation.h" />
     <ClInclude Include="Tags.h" />
     <ClInclude Include="TaskForce.h" />
     <ClInclude Include="TeamTypes.h" />
+	<ClInclude Include="WaypointCodec.h" />
     <ClInclude Include="TerrainDlg.h" />
     <ClInclude Include="TerrainModifier.h" />
     <ClInclude Include="tests.h" />
     <ClInclude Include="TextDrawer.h" />
     <ClInclude Include="TileSetBrowserFrame.h" />
     <ClInclude Include="TileSetBrowserView.h" />
-    <ClInclude Include="TipDlg.h" />
     <ClInclude Include="ToolSettingsBar.h" />
     <ClInclude Include="TriggerActionsDlg.h" />
     <ClInclude Include="TriggerEditorDlg.h" />
@@ -461,7 +469,6 @@
     <Image Include="res\FinalSun.ico" />
     <Image Include="res\ico00003.ico" />
     <Image Include="res\idr_main.ico" />
-    <Image Include="res\litebulb.bmp" />
     <Image Include="res\mv_probl.bmp" />
     <Image Include="res\scrollcursor_ra2.bmp" />
     <Image Include="res\scrollcursor_ts.bmp" />

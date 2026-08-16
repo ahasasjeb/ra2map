@@ -52,6 +52,10 @@
 #include "inlines.h"
 #include "MapCode.h"
 #include "SearchWaypointDlg.h"
+#include "MultiSelectionTool.h"
+#include "PropertyBrushTool.h"
+#include <filesystem>
+#include <chrono>
 #include "userscriptsdlg.h"
 
 
@@ -132,7 +136,6 @@ BEGIN_MESSAGE_MAP(CFinalSunDlg, CDialog)
 	ON_COMMAND(ID_DEBUG_EXPORTMAPPACKNOSECTIONS, OnDebugExportmappacknosections)
 	ON_COMMAND(ID_DEBUG_EXPORTMAPPACK, OnDebugExportmappack)
 	ON_COMMAND(ID_FILE_NEW, OnFileNew)
-	ON_COMMAND(ID_HELP_TIPOFTHEDAY, OnHelpTipoftheday)
 	ON_COMMAND(ID_OPTIONS_SIMPLEVIEW, OnOptionsSimpleview)
 	ON_COMMAND(ID_OPTIONS_SHOWMINIMAP, OnOptionsShowminimap)
 	ON_COMMAND(ID_FILE_VALIDATEMAP, OnFileValidatemap)
@@ -223,6 +226,10 @@ BEGIN_MESSAGE_MAP(CFinalSunDlg, CDialog)
 	ON_COMMAND(ID_FILE_FILE3, OnFileFile3)
 	ON_COMMAND(ID_FILE_FILE4, OnFileFile4)
 	ON_COMMAND(ID_MAPTOOLS_SEARCHWAYPOINT, OnMaptoolsSearchwaypoint)
+	ON_COMMAND(ID_MAPTOOLS_NAVIGATECOORDINATE, OnMaptoolsNavigatecoordinate)
+	ON_COMMAND(ID_EDIT_MULTISELECT, OnEditMultiselection)
+	ON_COMMAND(ID_EDIT_PROPERTYBRUSH, OnEditPropertybrush)
+	ON_WM_TIMER()
 	ON_COMMAND(ID_MAPTOOLS_TOOLSCRIPTS, OnMaptoolsToolscripts)
 	//}}AFX_MSG_MAP
 		ON_COMMAND(ID_OPTIONS_SMOOTHZOOM, &CFinalSunDlg::OnOptionsSmoothzoom)
@@ -237,6 +244,9 @@ BOOL CFinalSunDlg::OnInitDialog()
 {
 
 	CDialog::OnInitDialog();
+	SetTimer(0xFA21, 2000, nullptr);
+	if (theApp.m_Options.autoSaveIntervalMinutes > 0)
+		SetTimer(0xFA22, static_cast<UINT>(theApp.m_Options.autoSaveIntervalMinutes) * 60U * 1000U, nullptr);
 
 	m_hArrowCursor = theApp.m_Options.useDefaultMouseCursor ? LoadCursor(NULL, IDC_ARROW) : m_hGameCursor;
 
@@ -378,15 +388,7 @@ BOOL CFinalSunDlg::OnInitDialog()
 	ShowWindow(SW_SHOWMAXIMIZED);
 	CDialog::BringWindowToTop();
 	
-	if (currentMapFile.IsEmpty()) // no map file specified
-	{
-		// ok, let the user choose a map!
-		// hmm... no, don´t let him. we already have our tips dialog.
-		// OnFileOpenmap();
-
-		theApp.ShowTipAtStartup();
-	}
-	else // yah, map file specified
+	if (!currentMapFile.IsEmpty()) // map file specified
 	{
 		CString str = GetLanguageStringACP("MainDialogCaption");
  		str+=" (";
@@ -847,7 +849,7 @@ void CFinalSunDlg::OnFileSave()
 
 
 
-void CFinalSunDlg::SaveMap(CString FileName_)
+void CFinalSunDlg::SaveMap(CString FileName_, bool interactive)
 {
 	SetCursor(LoadCursor(NULL, IDC_WAIT));
 
@@ -1025,7 +1027,7 @@ void CFinalSunDlg::SaveMap(CString FileName_)
 			opt.m_Standard=TRUE;
 
 		
-		if(opt.DoModal()==IDCANCEL) return;
+		if(interactive && opt.DoModal()==IDCANCEL) return;
 
 		gm="";
 		if(opt.m_Standard) gm+="standard, ";
@@ -1092,7 +1094,7 @@ void CFinalSunDlg::SaveMap(CString FileName_)
 			opt.m_MegaWealth=gm.Find("megawealth")>=0;
 		}
 
-		if(opt.DoModal()==IDCANCEL) return;
+		if(interactive && opt.DoModal()==IDCANCEL) return;
 
 		Description=opt.m_Description;
 		standard=opt.m_Standard;
@@ -1496,13 +1498,16 @@ void CFinalSunDlg::SaveMap(CString FileName_)
 			else
 			{
 				// MW 07/20/01:
-				InsertPrevFile(u8FileName.c_str());
+				if (interactive)
+					InsertPrevFile(u8FileName.c_str());
 			}
 		}
 
 		deleteFile(tempfile);
 
 	SetCursor(m_hArrowCursor);
+	if (!m_automaticSaveInProgress)
+		RefreshMapWriteTime();
 	//SetReady();
 
 	}
@@ -1554,9 +1559,6 @@ void CFinalSunDlg::OnMenuSelect(UINT nItemID, UINT nFlags, HMENU hSysMenu)
 		break;
 	case ID_HELP_INFO:
 		SetText(GetLanguageStringACP("HelpInfoHelp"));
-		break;
-	case ID_HELP_TIPOFTHEDAY:
-		SetText(GetLanguageStringACP("HelpTipOfTheDayHelp"));
 		break;
 	case ID_OPTIONS_EXPORTRULESINI:
 		SetText(GetLanguageStringACP("ExportRulesHelp"));
@@ -2208,13 +2210,6 @@ void CFinalSunDlg::UpdateStrings()
 	
 	
 	RedrawWindow(NULL,NULL,RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
-}
-
-void CFinalSunDlg::OnHelpTipoftheday() 
-{
-	CTipDlg tip;
-	tip.DoModal();
-	
 }
 
 void CFinalSunDlg::UnloadAll()
@@ -4059,6 +4054,151 @@ void CFinalSunDlg::OnMaptoolsSearchwaypoint()
 	if(dlg.m_WaypointIndex<0) return;
 
 	m_view.m_isoview->FocusWaypoint(dlg.m_WaypointIndex);
+}
+
+void CFinalSunDlg::RefreshMapWriteTime()
+{
+	m_hasKnownMapWriteTime = false;
+	m_externalChangeReported = false;
+	if (currentMapFile.IsEmpty())
+		return;
+
+	std::error_code error;
+	const std::filesystem::path path(utf8ToUtf16(currentMapFile.GetString()));
+	if (!std::filesystem::exists(path, error) || error)
+		return;
+	m_knownMapWriteTime = std::filesystem::last_write_time(path, error);
+	m_hasKnownMapWriteTime = !error;
+}
+
+void CFinalSunDlg::PruneAutomaticSaves(const std::filesystem::path& directory)
+{
+	std::error_code error;
+	std::vector<std::filesystem::directory_entry> files;
+	for (std::filesystem::directory_iterator it(directory, error), end; !error && it != end; it.increment(error))
+	{
+		if (it->is_regular_file(error))
+			files.push_back(*it);
+	}
+	std::sort(files.begin(), files.end(), [](const auto& left, const auto& right)
+	{
+		std::error_code leftError;
+		std::error_code rightError;
+		return left.last_write_time(leftError) > right.last_write_time(rightError);
+	});
+	for (size_t i = static_cast<size_t>(theApp.m_Options.autoSaveMaxCount); i < files.size(); ++i)
+		std::filesystem::remove(files[i].path(), error);
+}
+
+void CFinalSunDlg::CreateAutomaticSave()
+{
+	if (m_automaticSaveInProgress || currentMapFile.IsEmpty() || Map->GetIsoSize() == 0)
+		return;
+
+	std::error_code error;
+	const std::filesystem::path directory = std::filesystem::path(utf8ToUtf16(u8AppDataPath)) / L"Autosaves";
+	std::filesystem::create_directories(directory, error);
+	if (error)
+		return;
+
+	SYSTEMTIME now{};
+	GetLocalTime(&now);
+	wchar_t timestamp[32]{};
+	swprintf_s(timestamp, L"%04u%02u%02u-%02u%02u%02u", now.wYear, now.wMonth, now.wDay, now.wHour, now.wMinute, now.wSecond);
+	const std::filesystem::path source(utf8ToUtf16(currentMapFile.GetString()));
+	std::filesystem::path destination = directory / (source.stem().wstring() + L"-" + timestamp + source.extension().wstring());
+
+	m_automaticSaveInProgress = true;
+	SaveMap(utf16ToUtf8(destination.wstring()).c_str(), false);
+	m_automaticSaveInProgress = false;
+	PruneAutomaticSaves(directory);
+}
+
+void CFinalSunDlg::OnTimer(UINT_PTR nIDEvent)
+{
+	if (nIDEvent == 0xFA21)
+	{
+		if (theApp.m_Options.bFileWatcher && !m_automaticSaveInProgress && !currentMapFile.IsEmpty())
+		{
+			std::error_code error;
+			const std::filesystem::path path(utf8ToUtf16(currentMapFile.GetString()));
+			if (std::filesystem::exists(path, error) && !error)
+			{
+				const auto writeTime = std::filesystem::last_write_time(path, error);
+				if (!error)
+				{
+					if (!m_hasKnownMapWriteTime)
+					{
+						m_knownMapWriteTime = writeTime;
+						m_hasKnownMapWriteTime = true;
+					}
+					else if (writeTime != m_knownMapWriteTime)
+					{
+						m_knownMapWriteTime = writeTime;
+						if (!m_externalChangeReported)
+						{
+							m_externalChangeReported = true;
+							MessageBox(GetLanguageStringACP("FileWatcherMessage"),
+								GetLanguageStringACP("FileWatcherCap"), MB_OK | MB_ICONWARNING);
+						}
+					}
+				}
+			}
+		}
+		return;
+	}
+	if (nIDEvent == 0xFA22)
+	{
+		CreateAutomaticSave();
+		return;
+	}
+	CDialog::OnTimer(nIDEvent);
+}
+
+void CFinalSunDlg::OnMaptoolsNavigatecoordinate()
+{
+	if (Map->GetIsoSize() == 0)
+		return;
+
+	const CString value = InputBox(
+		GetLanguageStringACP("NavigateCoordinatePrompt"),
+		GetLanguageStringACP("NavigateCoordinateCap"));
+	if (value.IsEmpty())
+		return;
+
+	int x = -1;
+	int y = -1;
+	char trailing = '\0';
+	if (sscanf_s(value, " %d , %d %c", &x, &y, &trailing, 1) != 2 ||
+		x < 0 || y < 0 || x >= static_cast<int>(Map->GetIsoSize()) || y >= static_cast<int>(Map->GetIsoSize()))
+	{
+		MessageBox(GetLanguageStringACP("NavigateCoordinateInvalid"),
+			GetLanguageStringACP("NavigateCoordinateCap"), MB_OK | MB_ICONERROR);
+		return;
+	}
+
+	m_view.m_isoview->FocusMapCoordinate(x, y);
+}
+
+void CFinalSunDlg::OnEditMultiselection()
+{
+	if (Map->GetIsoSize() == 0)
+		return;
+	AD.reset();
+	AD.mode = ACTIONMODE_MAPTOOL;
+	AD.tool = std::make_unique<MultiSelectionTool>(*Map, *m_view.m_isoview);
+	SetText(GetLanguageStringACP("MultiSelectionHelp"));
+	m_view.m_isoview->RedrawWindow(nullptr, nullptr, RDW_INVALIDATE);
+}
+
+void CFinalSunDlg::OnEditPropertybrush()
+{
+	if (Map->GetIsoSize() == 0)
+		return;
+	AD.reset();
+	AD.mode = ACTIONMODE_MAPTOOL;
+	AD.tool = std::make_unique<PropertyBrushTool>(*Map, *m_view.m_isoview);
+	SetText(GetLanguageStringACP("PropertyBrushHelp"));
 }
 
 void CFinalSunDlg::OnMaptoolsToolscripts() 

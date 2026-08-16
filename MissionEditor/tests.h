@@ -34,4 +34,5 @@ private:
     void test_iso();
     void test_codecs();
     void test_csf();
+	void test_waypoint_codec();
 };

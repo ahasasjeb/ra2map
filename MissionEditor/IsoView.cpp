@@ -57,6 +57,7 @@ static char THIS_FILE[] = __FILE__;
 #include <algorithm>
 #include "TextDrawer.h"
 #include "RustCore.h"
+#include "BuildingFoundation.h"
 
 /* -------- */
 
@@ -167,6 +168,82 @@ private:
 	bool m_hasRect = false;
 	bool m_locked = false;
 };
+
+namespace
+{
+	template <typename TItems, typename TGetPosition>
+	bool CompositeColorKeySurface(
+		IDirectDrawSurface4* targetSurface,
+		IDirectDrawSurface4* sourceSurface,
+		const TItems& items,
+		size_t beginIndex,
+		TGetPosition getPosition)
+	{
+		if (beginIndex >= items.size())
+			return true;
+		if (targetSurface == nullptr || sourceSurface == nullptr)
+			return false;
+
+		SurfaceLocker targetLocker(targetSurface);
+		SurfaceLocker sourceLocker(sourceSurface);
+		DDSURFACEDESC2* target = targetLocker.ensure_locked();
+		DDSURFACEDESC2* source = sourceLocker.ensure_locked();
+		if (target == nullptr || source == nullptr ||
+			target->lpSurface == nullptr || source->lpSurface == nullptr ||
+			target->lPitch <= 0 || source->lPitch <= 0)
+			return false;
+
+		const int targetBpp = (target->ddpfPixelFormat.dwRGBBitCount + 7) / 8;
+		const int sourceBpp = (source->ddpfPixelFormat.dwRGBBitCount + 7) / 8;
+		if (targetBpp != sourceBpp || targetBpp <= 0 || targetBpp > 4)
+			return false;
+
+		DDCOLORKEY sourceKey = {};
+		if (sourceSurface->GetColorKey(DDCKEY_SRCBLT, &sourceKey) != DD_OK)
+		{
+			memcpy(&sourceKey.dwColorSpaceLowValue, source->lpSurface, sourceBpp);
+			sourceKey.dwColorSpaceHighValue = sourceKey.dwColorSpaceLowValue;
+		}
+
+		const DWORD colorMask = source->ddpfPixelFormat.dwRBitMask |
+			source->ddpfPixelFormat.dwGBitMask |
+			source->ddpfPixelFormat.dwBBitMask;
+		const DWORD keyLow = sourceKey.dwColorSpaceLowValue & colorMask;
+		const DWORD keyHigh = sourceKey.dwColorSpaceHighValue & colorMask;
+		const BYTE* sourcePixels = static_cast<const BYTE*>(source->lpSurface);
+		BYTE* targetPixels = static_cast<BYTE*>(target->lpSurface);
+
+		for (size_t itemIndex = beginIndex; itemIndex < items.size(); ++itemIndex)
+		{
+			const auto position = getPosition(items[itemIndex]);
+			for (int sourceY = 0; sourceY < static_cast<int>(source->dwHeight); ++sourceY)
+			{
+				const int targetY = position.y + sourceY;
+				if (targetY < 0 || targetY >= static_cast<int>(target->dwHeight))
+					continue;
+
+				for (int sourceX = 0; sourceX < static_cast<int>(source->dwWidth); ++sourceX)
+				{
+					const int targetX = position.x + sourceX;
+					if (targetX < 0 || targetX >= static_cast<int>(target->dwWidth))
+						continue;
+
+					const BYTE* sourcePixel = sourcePixels + sourceY * source->lPitch + sourceX * sourceBpp;
+					DWORD sourceColor = 0;
+					memcpy(&sourceColor, sourcePixel, sourceBpp);
+					sourceColor &= colorMask;
+					if (sourceColor >= keyLow && sourceColor <= keyHigh)
+						continue;
+
+					BYTE* targetPixel = targetPixels + targetY * target->lPitch + targetX * targetBpp;
+					memcpy(targetPixel, sourcePixel, targetBpp);
+				}
+			}
+		}
+
+		return true;
+	}
+}
 
 
 CIsoView::CIsoView()
@@ -2114,11 +2191,42 @@ void CIsoView::OnRButtonUp(UINT nFlags, CPoint point)
 		rscroll = FALSE;
 		m_bPanFastPath = FALSE;
 		ShowCursor(TRUE);
+
 		if (!b_IsLoading)
 		{
+			// A timer tick may have changed the logical offset without getting a
+			// chance to present it. Keep the clean cached scene and offset aligned.
+			if (m_lastFrameValid && m_viewOffset != m_lastViewOffset)
+			{
+				m_viewOffset = m_lastViewOffset;
+				SetScroll(m_viewOffset.x, m_viewOffset.y);
+			}
+
+			bool presentedCleanFrame = false;
+			if (m_lastFrameValid && lpdsTemp != nullptr && lpdsBack != nullptr &&
+				lpdsBack->Blt(NULL, lpdsTemp, NULL, DDBLT_WAIT, NULL) == DD_OK)
+			{
+				if (m_cellCursor != MapCoords(-1, -1))
+				{
+					SurfaceLocker locker(lpdsBack);
+					auto desc = locker.ensure_locked();
+					if (desc)
+						DrawCellCursor(m_cellCursor, *desc);
+				}
+
+				BlitBackbufferToHighRes();
+				RenderUIOverlay();
+				FlipHighResBuffer();
+				presentedCleanFrame = true;
+			}
+
+			if (!presentedCleanFrame)
+				InvalidateRect(NULL, FALSE);
+
 			CMyViewFrame& dlg = *(CMyViewFrame*)owner;
-			dlg.m_minimap.RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW);
+			dlg.m_minimap.Invalidate(FALSE);
 		}
+		return;
 	}
 
 	if (b_IsLoading)
@@ -3980,6 +4088,8 @@ void CIsoView::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
 	int nPos;
 
 	m_bPanFastPath = FALSE;
+	if (AD.mode == ACTIONMODE_MAPTOOL && AD.tool && AD.tool->onKeyDown(nChar))
+		return;
 
 
 
@@ -4999,6 +5109,9 @@ void CIsoView::FlipHighResBuffer(const RECT* sourceRectOverride)
 	}
 
 	// DirectDraw fallback: copy/stretch the same source rectangle used by Vulkan.
+	if (theApp.m_Options.bVSync && dd != nullptr)
+		dd->WaitForVerticalBlank(DDWAITVB_BLOCKBEGIN, NULL);
+
 	RECT destinationRect;
 	GetWindowRect(&destinationRect);
 	lpds->Blt(&destinationRect, presentSurface, &sourceRect, DDBLT_WAIT, 0);
@@ -5085,15 +5198,19 @@ void CIsoView::PlaceCurrentObjectAt(int x, int y)
 	}
 	else if (AD.type == 2) // add structure
 	{
-		int n = Map->GetStructureAt(x + y * Map->GetIsoSize());
-		if (n >= 0)
+		const int buildingType = Map->GetUnitTypeID(AD.data_s);
+		for (const auto& cell : GetBuildingFoundation(buildingType))
 		{
-			STDOBJECTDATA sod;
-			Map->GetStdStructureData(n, &sod);
-			if (strcmp(sod.type, "GAPAVE") != NULL)
-			{
-				//isMoving=FALSE;
+			const MapCoords target(x + cell.x, y + cell.y);
+			if (!Map->isInside(target))
 				return;
+			const int existing = Map->GetStructureAt(target);
+			if (existing >= 0)
+			{
+				STDOBJECTDATA sod;
+				Map->GetStdStructureData(existing, &sod);
+				if (strcmp(sod.type, "GAPAVE") != NULL)
+					return;
 			}
 		}
 
@@ -5550,15 +5667,25 @@ void CIsoView::DrawObjectPreviewAt(int x, int y)
 	}
 	else if (AD.type == 2) // structure
 	{
-		int n = Map->GetStructureAt(dwPos);
-		if (n >= 0)
+		const int buildingType = Map->GetUnitTypeID(AD.data_s);
+		for (const auto& cell : GetBuildingFoundation(buildingType))
 		{
-			STDOBJECTDATA sod;
-			Map->GetStdStructureData(n, &sod);
-			if (strcmp(sod.type, "GAPAVE") != NULL)
+			const MapCoords target(x + cell.x, y + cell.y);
+			if (!Map->isInside(target))
 			{
 				eraseGhost();
 				return;
+			}
+			const int existing = Map->GetStructureAt(target);
+			if (existing >= 0)
+			{
+				STDOBJECTDATA sod;
+				Map->GetStdStructureData(existing, &sod);
+				if (strcmp(sod.type, "GAPAVE") != NULL)
+				{
+					eraseGhost();
+					return;
+				}
 			}
 		}
 		pt = PT_STRUCTURE;
@@ -5605,13 +5732,19 @@ void CIsoView::DrawObjectPreviewAt(int x, int y)
 	RECT ghostRect = { 0, 0, 0, 0 };
 	{
 		const int bid = (pt == PT_STRUCTURE) ? Map->GetUnitTypeID(AD.data_s) : -1;
-		int w = 1, h = 1;
 		if (bid > -1 && bid < 0x0F00)
 		{
-			w = buildinginfo[bid].w;
-			h = buildinginfo[bid].h;
-			footprintX2 = x + h - 1;
-			footprintY2 = y + w - 1;
+			footprintX1 = INT_MAX;
+			footprintY1 = INT_MAX;
+			footprintX2 = INT_MIN;
+			footprintY2 = INT_MIN;
+			for (const auto& cell : GetBuildingFoundation(bid))
+			{
+				footprintX1 = min(footprintX1, x + cell.x);
+				footprintY1 = min(footprintY1, y + cell.y);
+				footprintX2 = max(footprintX2, x + cell.x);
+				footprintY2 = max(footprintY2, y + cell.y);
+			}
 		}
 
 		int spW = 0, spH = 0;
@@ -5766,25 +5899,17 @@ void CIsoView::DrawObjectPreviewAt(int x, int y)
 			const int pushedIndex = Map->PreviewPushStructure(spd);
 
 			const int bid = Map->GetUnitTypeID(AD.data_s);
-			int w = 1, h = 1;
-			if (bid > -1 && bid < 0x0F00)
+			for (const auto& cell : GetBuildingFoundation(bid))
 			{
-				w = buildinginfo[bid].w;
-				h = buildinginfo[bid].h;
-			}
-
-			for (int d = 0; d < h; d++)
-			{
-				for (int e = 0; e < w; e++)
-				{
-					const DWORD pos = (x + d) + (y + e) * dwIsoSize;
-					if (pos >= dwIsoSizeSq) continue;
-
-					FIELDDATA* fd = Map->GetFielddataAt(pos);
-					oldCells.push_back({ pos, *fd });
-					fd->structure = pushedIndex;
-					fd->structuretype = bid;
-				}
+				const int cellX = x + cell.x;
+				const int cellY = y + cell.y;
+				if (cellX < 0 || cellY < 0 || cellX >= static_cast<int>(dwIsoSize) ||
+					cellY >= static_cast<int>(dwIsoSize)) continue;
+				const DWORD pos = cellX + cellY * dwIsoSize;
+				FIELDDATA* fd = Map->GetFielddataAt(pos);
+				oldCells.push_back({ pos, *fd });
+				fd->structure = pushedIndex;
+				fd->structuretype = bid;
 			}
 			break;
 		}
@@ -6161,10 +6286,38 @@ bool CIsoView::RefreshObjectScene(const MapCoords& oldPos, const MapCoords& newP
 		}
 
 		locker.ensure_unlocked();
-		for (size_t i = oldWaypointCount; i < m_waypoints_to_render.size(); ++i)
+		const bool celltagsComposited = CompositeColorKeySurface(
+			lpdsBack,
+			(LPDIRECTDRAWSURFACE4)pics["CELLTAG"].pic,
+			m_celltags_to_render,
+			oldCelltagCount,
+			[](const ProjectedCoords& position) { return position; });
+		const bool waypointsComposited = CompositeColorKeySurface(
+			lpdsBack,
+			(LPDIRECTDRAWSURFACE4)pics["FLAG"].pic,
+			m_waypoints_to_render,
+			oldWaypointCount,
+			[](const WaypointToRender& waypoint)
+			{
+				return ProjectedCoords(waypoint.drawx + 1, waypoint.drawy + 1);
+			});
+
+		// Keep DirectDraw only as a recovery path if a surface cannot be locked.
+		if (!celltagsComposited)
 		{
-			const auto& waypoint = m_waypoints_to_render[i];
-			Blit((LPDIRECTDRAWSURFACE4)pics["FLAG"].pic, waypoint.drawx, waypoint.drawy);
+			for (size_t i = oldCelltagCount; i < m_celltags_to_render.size(); ++i)
+			{
+				const auto& position = m_celltags_to_render[i];
+				Blit((LPDIRECTDRAWSURFACE4)pics["CELLTAG"].pic, position.x - 1, position.y - 1);
+			}
+		}
+		if (!waypointsComposited)
+		{
+			for (size_t i = oldWaypointCount; i < m_waypoints_to_render.size(); ++i)
+			{
+				const auto& waypoint = m_waypoints_to_render[i];
+				Blit((LPDIRECTDRAWSURFACE4)pics["FLAG"].pic, waypoint.drawx, waypoint.drawy);
+			}
 		}
 
 		m_texts_to_render.resize(oldTextCount);
@@ -6332,6 +6485,9 @@ void CIsoView::OnTimer(UINT_PTR nIDEvent)
 	}
 	else if (nIDEvent == 11)
 	{
+		if ((GetAsyncKeyState(VK_RBUTTON) & 0x8000) == 0)
+			return;
+
 		// BUGSEARCH
 		//if(b_IsLoading) return;	
 		// 
@@ -6736,6 +6892,15 @@ void CIsoView::DrawMap()
 
 	if (Map->GetIsoSize() == 0) return;
 
+#ifdef NOSURFACES
+	if (m_bPanFastPath && bIncrementalPan && rscroll &&
+		(GetAsyncKeyState(VK_RBUTTON) & 0x8000) == 0)
+	{
+		m_bPanFastPath = FALSE;
+		return;
+	}
+#endif
+
 	m_colorCache.clear();
 
 	// the picture filename cache depends on the loaded pictures (SHP vs BMP fallback) - invalidate it when new pictures were loaded
@@ -6919,11 +7084,34 @@ void CIsoView::DrawMap()
 	lpdsBack->Unlock(NULL);
 #endif
 
-	// delayed waypoint rendering
-	for (const auto& wp : m_waypoints_to_render)
+	const bool celltagsComposited = CompositeColorKeySurface(
+		lpdsBack,
+		(LPDIRECTDRAWSURFACE4)pics["CELLTAG"].pic,
+		m_celltags_to_render,
+		0,
+		[](const ProjectedCoords& position) { return position; });
+	const bool waypointsComposited = CompositeColorKeySurface(
+		lpdsBack,
+		(LPDIRECTDRAWSURFACE4)pics["FLAG"].pic,
+		m_waypoints_to_render,
+		0,
+		[](const WaypointToRender& waypoint)
+		{
+			return ProjectedCoords(waypoint.drawx + 1, waypoint.drawy + 1);
+		});
+
+	if (!celltagsComposited)
 	{
-		Blit((LPDIRECTDRAWSURFACE4)pics["FLAG"].pic, wp.drawx, wp.drawy);
+		for (const auto& position : m_celltags_to_render)
+			Blit((LPDIRECTDRAWSURFACE4)pics["CELLTAG"].pic, position.x - 1, position.y - 1);
 	}
+	if (!waypointsComposited)
+	{
+		for (const auto& waypoint : m_waypoints_to_render)
+			Blit((LPDIRECTDRAWSURFACE4)pics["FLAG"].pic, waypoint.drawx, waypoint.drawy);
+	}
+	m_celltags_to_render.clear();
+	m_waypoints_to_render.clear();
 
 	// map tool rendering
 	if (AD.mode == ACTIONMODE_MAPTOOL)
@@ -6957,7 +7145,7 @@ void CIsoView::DrawMap()
 		m_texts_to_render.push_back({ moneyStr.c_str(), r.left + 10, r.top + 10, RGB(0,0,0), true });
 	}
 
-	if (rscroll)
+	if (rscroll && (GetAsyncKeyState(VK_RBUTTON) & 0x8000) != 0)
 	{
 		const auto& sc = pics["SCROLLCURSOR"];
 		Blit((LPDIRECTDRAWSURFACE4)sc.pic, rclick_x * m_viewScale.x + r.left - sc.wWidth / 2, rclick_y * m_viewScale.y + r.top - sc.wHeight / 2);
@@ -6966,8 +7154,6 @@ void CIsoView::DrawMap()
 	BlitBackbufferToHighRes(); // lpdsBackHighRes contains the same graphic, but scaled to the whole window
 		
 	RenderUIOverlay();
-	if (theApp.m_Options.bVSync)
-		dd->WaitForVerticalBlank(DDWAITVB_BLOCKBEGIN, NULL);
 	FlipHighResBuffer();
 	last_succeeded_operation = 10100;
 
@@ -7164,24 +7350,23 @@ void CIsoView::DrawMapObjectsCell(const MapCoords& mapCoords, FIELDDATA& m, cons
 	{
 		last_succeeded_operation = 10101;
 
-		// for structures we need to check if they weren´t drawn earlier
-		// (every field that this building achieves has this building as .structure)
-		if (Map->GetStructureAt(mapCoords - MapVec(-1, 0)) != m.structure && Map->GetStructureAt(mapCoords - MapVec(0, -1)) != m.structure)
-		{
+		STRUCTUREPAINT objp;
+		Map->GetStructurePaint(m.structure, &objp);
+		const auto& foundation = GetBuildingFoundation(m.structuretype);
+		const MapCoords firstCell(objp.x + foundation.front().x, objp.y + foundation.front().y);
 
-			STRUCTUREPAINT objp;
-			Map->GetStructurePaint(m.structure, &objp);
+		// Every foundation cell points at the same structure. Draw it exactly
+		// once, including sparse and non-rectangular custom foundations.
+		if (mapCoords == firstCell)
+		{
 
 			const auto drawCoordsBld = GetRenderTargetCoordinates(MapCoords(objp.x, objp.y));
 			int id = m.structuretype;
 
 
-			int w = 1, h = 1;
 			PICDATA pic;
 			if (id > -1 && id < 0x0F00)
 			{
-				w = buildinginfo[id].w;
-				h = buildinginfo[id].h;
 				int dir = objp.direction / 32;
 
 				// MW April 13th 2001: fix for building direction
@@ -7193,12 +7378,23 @@ void CIsoView::DrawMapObjectsCell(const MapCoords& mapCoords, FIELDDATA& m, cons
 			}
 
 #ifndef NOSURFACES
-			DrawCell(drawCoordsBld.x, drawCoordsBld.y, w, h, colorref_conv[objp.col]);
+			for (const auto& cell : foundation)
+			{
+				const auto foundationDraw = GetRenderTargetCoordinates(
+					MapCoords(objp.x + cell.x, objp.y + cell.y));
+				DrawCell(foundationDraw.x, foundationDraw.y, 1, 1, colorref_conv[objp.col]);
+			}
 #else
 			// MW 07/19/01: Paint cell if user chose so...
 			if (theApp.m_Options.bShowCells)
 			{
-				DrawCell(ddsd.lpSurface, ddsd.dwWidth, ddsd.dwHeight, ddsd.lPitch, drawCoordsBld.x, drawCoordsBld.y, w, h, colorref_conv[objp.col]);
+				for (const auto& cell : foundation)
+				{
+					const auto foundationDraw = GetRenderTargetCoordinates(
+						MapCoords(objp.x + cell.x, objp.y + cell.y));
+					DrawCell(ddsd.lpSurface, ddsd.dwWidth, ddsd.dwHeight, ddsd.lPitch,
+						foundationDraw.x, foundationDraw.y, 1, 1, colorref_conv[objp.col]);
+				}
 			}
 #endif
 
@@ -7284,30 +7480,43 @@ void CIsoView::DrawMapObjectsCell(const MapCoords& mapCoords, FIELDDATA& m, cons
 
 		CString house = m.node.house;
 		CString tmp;
-				
-		if (Map->GetNodeAt(mapCoords + MapVec(1, 0), tmp) != m.node.index && Map->GetNodeAt(mapCoords + MapVec(0, 1), tmp) != m.node.index)
+		const auto& foundation = GetBuildingFoundation(m.node.type);
+		MapCoords nodeOrigin;
+		bool foundOrigin = false;
+		for (const auto& anchor : foundation)
 		{
-			// Bounds-check node type before indexing buildinginfo (MO has many building
-			// types and m.node.type can exceed the 0x0F00 array size, causing AV).
-			int nodeW = 1, nodeH = 1;
-			if (m.node.type < 0x0F00)
+			const MapCoords candidate(mapCoords.x - anchor.x, mapCoords.y - anchor.y);
+			bool matches = true;
+			for (const auto& cell : foundation)
 			{
-				nodeW = buildinginfo[m.node.type].w;
-				nodeH = buildinginfo[m.node.type].h;
+				if (Map->GetNodeAt(candidate + MapVec(cell.x, cell.y), tmp) != m.node.index)
+				{
+					matches = false;
+					break;
+				}
 			}
-			const auto drawCoordsBld = GetRenderTargetCoordinates(mapCoords - MapVec(nodeH - 1, nodeW - 1));
+			if (matches)
+			{
+				nodeOrigin = candidate;
+				foundOrigin = true;
+				break;
+			}
+		}
+		const MapCoords firstCell(nodeOrigin.x + foundation.front().x,
+			nodeOrigin.y + foundation.front().y);
+
+		if (foundOrigin && mapCoords == firstCell)
+		{
+			const auto drawCoordsBld = GetRenderTargetCoordinates(nodeOrigin);
 
 			COLORREF c;
 			c = GetColor(house);
 
 
 			int id = m.node.type;
-			int w = 1, h = 1;
 			PICDATA pic;
 			if (id > -1 && id < 0x0F00)
 			{
-				w = buildinginfo[id].w;
-				h = buildinginfo[id].h;
 				pic = buildinginfo[id].pic[0];
 			}
 
@@ -7318,7 +7527,13 @@ void CIsoView::DrawMapObjectsCell(const MapCoords& mapCoords, FIELDDATA& m, cons
 			{
 #endif
 				// place it 2 pixels lower so that user can see the dotted lines even if the building itself has the cells drawn
-				DrawCell(ddsd.lpSurface, ddsd.dwWidth, ddsd.dwHeight, ddsd.lPitch, drawCoordsBld.x, drawCoordsBld.y + 3, w, h, colorref_conv[c], true);
+				for (const auto& cell : foundation)
+				{
+					const auto foundationDraw = GetRenderTargetCoordinates(
+						MapCoords(nodeOrigin.x + cell.x, nodeOrigin.y + cell.y));
+					DrawCell(ddsd.lpSurface, ddsd.dwWidth, ddsd.dwHeight, ddsd.lPitch,
+						foundationDraw.x, foundationDraw.y + 3, 1, 1, colorref_conv[c], true);
+				}
 
 #ifdef NOSURFACES				
 			}
@@ -7639,23 +7854,7 @@ void CIsoView::DrawMapObjectsCell(const MapCoords& mapCoords, FIELDDATA& m, cons
 
 	if (m.celltag != -1)
 	{
-
-#ifdef NOSURFACES
-	if (!ctx.bPanMode)
-		lpdsBack->Unlock(NULL);
-#endif
-	if (ctx.bPanMode)
-	{
 		m_celltags_to_render.push_back(ProjectedCoords(drawCoords.x, drawCoords.y));
-	}
-	else
-	{
-		Blit((LPDIRECTDRAWSURFACE4)pics["CELLTAG"].pic, drawCoords.x - 1, drawCoords.y - 1);
-
-#ifdef NOSURFACES
-		lpdsBack->Lock(NULL, &ddsd, DDLOCK_SURFACEMEMORYPTR | DDLOCK_WAIT | DDLOCK_NOSYSLOCK, NULL);
-#endif
-	}
 	}
 
 	if (m.waypoint != -1)
@@ -7664,11 +7863,6 @@ void CIsoView::DrawMapObjectsCell(const MapCoords& mapCoords, FIELDDATA& m, cons
 		DWORD dwPos;
 		CString ID;
 		Map->GetWaypointData(m.waypoint, &ID, &dwPos);
-#ifdef NOSURFACES
-		if (!ctx.bPanMode)
-			lpdsBack->Unlock(NULL);
-#endif
-
 		// move the graphic and text into place
 #ifdef RA2_MODE
 		int image_fudge_x = 4;
@@ -7693,10 +7887,6 @@ void CIsoView::DrawMapObjectsCell(const MapCoords& mapCoords, FIELDDATA& m, cons
 		const auto waypointTextCoords = ProjectedCoords({ drawCoords.x, drawCoords.y }) + waypointTextOffset;
 		m_waypoints_to_render.push_back({ waypointImageCoords.x, waypointImageCoords.y });
 		m_texts_to_render.push_back({ ID.GetString(), waypointTextCoords.x, waypointTextCoords.y, RGB(0,0,255), false, useFont9, true});
-#ifdef NOSURFACES
-		if (!ctx.bPanMode)
-			lpdsBack->Lock(NULL, &ddsd, DDLOCK_SURFACEMEMORYPTR | DDLOCK_WAIT | DDLOCK_NOSYSLOCK, NULL);
-#endif
 	}
 }
 
@@ -7817,17 +8007,13 @@ bool CIsoView::DrawMapPan(int left, int right, int top, int bottom, DWORD MM_hei
 	else if (sy < 0) fillRectWhite(rc.left, rc.bottom + sy, rc.right, rc.bottom);
 
 	// exposed strip bands (in surface coordinates, clamped to the surface)
-	RECT stripX;
-	stripX.top = rc.top;
-	stripX.bottom = rc.bottom;
+	RECT stripX = { rc.left, rc.top, rc.left, rc.bottom };
 	if (sx > 0) { stripX.left = rc.left; stripX.right = min(rc.right, static_cast<LONG>(rc.left + sx)); }
-	else { stripX.left = max(rc.left, static_cast<LONG>(rc.right + sx)); stripX.right = rc.right; }
+	else if (sx < 0) { stripX.left = max(rc.left, static_cast<LONG>(rc.right + sx)); stripX.right = rc.right; }
 
-	RECT stripY;
-	stripY.left = rc.left;
-	stripY.right = rc.right;
+	RECT stripY = { rc.left, rc.top, rc.right, rc.top };
 	if (sy > 0) { stripY.top = rc.top; stripY.bottom = min(rc.bottom, static_cast<LONG>(rc.top + sy)); }
-	else { stripY.top = max(rc.top, static_cast<LONG>(rc.bottom + sy)); stripY.bottom = rc.bottom; }
+	else if (sy < 0) { stripY.top = max(rc.top, static_cast<LONG>(rc.bottom + sy)); stripY.bottom = rc.bottom; }
 
 	// margin around the exposed region so that tall sprites crossing the border get redrawn too
 	const int marginX = 8 * f_x;
@@ -7845,21 +8031,9 @@ bool CIsoView::DrawMapPan(int left, int right, int top, int bottom, DWORD MM_hei
 		stripYExp.bottom = min(rc.bottom, stripYExp.bottom + marginY);
 	}
 
-	// the terrain pass uses a slightly inflated region, as tiles can stick out of their cell bounds
-	RECT stripXTerrain = stripX;
-	if (stripXTerrain.left < stripXTerrain.right)
-	{
-		stripXTerrain.left = max(rc.left, stripXTerrain.left - f_x);
-		stripXTerrain.right = min(rc.right, stripXTerrain.right + f_x);
-	}
-	RECT stripYTerrain = stripY;
-	if (stripYTerrain.top < stripYTerrain.bottom)
-	{
-		stripYTerrain.top = max(rc.top, stripYTerrain.top - f_y);
-		stripYTerrain.bottom = min(rc.bottom, stripYTerrain.bottom + f_y);
-	}
-
 	const DrawMapCellContext ctx = { *desc, rc, MM_heightstart, bMarbleHeight, true };
+	const DrawMapCellContext terrainStripXCtx = { *desc, stripX, MM_heightstart, bMarbleHeight, true };
+	const DrawMapCellContext terrainStripYCtx = { *desc, stripY, MM_heightstart, bMarbleHeight, true };
 
 	const int mapwidth = Map->GetWidth();
 	const int mapheight = Map->GetHeight();
@@ -7869,14 +8043,56 @@ bool CIsoView::DrawMapPan(int left, int right, int top, int bottom, DWORD MM_hei
 		return !(u < 1 || v < 1 || u + v < mapwidth + 1 || u + v > mapwidth + mapheight * 2 || (v + 1 > mapwidth && u - 1 < v - mapwidth) || (u + 1 > mapwidth && v + mapwidth - 1 < u));
 	};
 
+	auto overlapsBand = [](const RECT& band, int x0, int y0, int x1, int y1)
+	{
+		if (band.left >= band.right || band.top >= band.bottom) return false;
+		return x0 < band.right && x1 > band.left && y0 < band.bottom && y1 > band.top;
+	};
+
 	auto overlapsStrip = [&](int x0, int y0, int x1, int y1, const RECT& bandA, const RECT& bandB)
 	{
-		auto overlap = [](const RECT& band, int bx0, int by0, int bx1, int by1)
+		return overlapsBand(bandA, x0, y0, x1, y1) || overlapsBand(bandB, x0, y0, x1, y1);
+	};
+
+	// Terrain artwork is often much taller and wider than its logical cell.
+	// Use the real subtile bitmap bounds, otherwise the owner cell can be outside
+	// the exposed band while its cliff/shore pixels still need to be filled.
+	auto getTerrainBounds = [&](FIELDDATA field, const ProjectedCoords& drawCoords)
+	{
+		RECT bounds = { drawCoords.x, drawCoords.y, drawCoords.x, drawCoords.y };
+		if (field.wGround >= *tiledata_count)
+			return bounds;
+
+		if (theApp.m_Options.bMarbleMadness)
 		{
-			if (band.left >= band.right || band.top >= band.bottom) return false;
-			return bx0 < band.right && bx1 > band.left && by0 < band.bottom && by1 > band.top;
-		};
-		return overlap(bandA, x0, y0, x1, y1) || overlap(bandB, x0, y0, x1, y1);
+			if ((*tiledata)[field.wGround].wMarbleGround != 0xFFFF)
+				field.wGround = (*tiledata)[field.wGround].wMarbleGround;
+			else if (bMarbleHeight)
+			{
+				field.wGround = MM_heightstart + field.bHeight;
+				field.bSubTile = 0;
+			}
+		}
+
+		if (field.wGround >= *tiledata_count)
+			return bounds;
+
+		TILEDATA* tile = &(*tiledata)[field.wGround];
+		if (tile->bReplacementCount && field.bRNDImage > 0)
+		{
+			const int replacement = min<int>(field.bRNDImage, tile->bReplacementCount) - 1;
+			tile = &tile->lpReplacements[replacement];
+		}
+		if (field.bSubTile >= tile->wTileCount || tile->tiles[field.bSubTile].pic == nullptr)
+			return bounds;
+
+		const SUBTILE& subtile = tile->tiles[field.bSubTile];
+		const auto imagePosition = drawCoords + subtile.drawOffset();
+		bounds.left = imagePosition.x;
+		bounds.top = imagePosition.y;
+		bounds.right = imagePosition.x + subtile.wWidth;
+		bounds.bottom = imagePosition.y + subtile.wHeight;
+		return bounds;
 	};
 
 	// move the already collected texts/waypoints/celltags along with the map content
@@ -7929,17 +8145,24 @@ bool CIsoView::DrawMapPan(int left, int right, int top, int bottom, DWORD MM_hei
 			const MapCoords mapCoords(u, v);
 			FIELDDATA m = *Map->GetFielddataAt(mapCoords);
 			const auto drawCoords = GetRenderTargetCoordinates(mapCoords);
-			const int x0 = drawCoords.x;
-			const int y0 = drawCoords.y;
-
-			if (!overlapsStrip(x0, y0, x0 + f_x, y0 + f_y, stripXTerrain, stripYTerrain))
-				continue;
 
 			if (m.wGround >= (*tiledata_count))
 				m.wGround = 0;
 
 			if (!m.bRedrawTerrain)
-				DrawMapTerrainCell(m, drawCoords, ctx);
+			{
+				const RECT terrainBounds = getTerrainBounds(m, drawCoords);
+				if (overlapsBand(stripX, terrainBounds.left, terrainBounds.top, terrainBounds.right, terrainBounds.bottom))
+				{
+					FIELDDATA terrain = m;
+					DrawMapTerrainCell(terrain, drawCoords, terrainStripXCtx);
+				}
+				if (overlapsBand(stripY, terrainBounds.left, terrainBounds.top, terrainBounds.right, terrainBounds.bottom))
+				{
+					FIELDDATA terrain = m;
+					DrawMapTerrainCell(terrain, drawCoords, terrainStripYCtx);
+				}
+			}
 		}
 	}
 
@@ -7956,19 +8179,36 @@ bool CIsoView::DrawMapPan(int left, int right, int top, int bottom, DWORD MM_hei
 			const int x0 = drawCoords.x;
 			const int y0 = drawCoords.y;
 
-			if (!overlapsStrip(x0, y0, x0 + f_x, y0 + f_y, stripXExp, stripYExp))
-				continue;
-
 			if (m.wGround == 0xFFFF)
 				m.wGround = 0;
 
 			const DWORD dwOrigGround = m.wGround;
+			const bool objectsNeedRedraw = overlapsStrip(x0, y0, x0 + f_x, y0 + f_y, stripXExp, stripYExp);
+			const RECT terrainBounds = getTerrainBounds(m, drawCoords);
+			const bool terrainNeedsStripX = m.bRedrawTerrain &&
+				overlapsBand(stripX, terrainBounds.left, terrainBounds.top, terrainBounds.right, terrainBounds.bottom);
+			const bool terrainNeedsStripY = m.bRedrawTerrain &&
+				overlapsBand(stripY, terrainBounds.left, terrainBounds.top, terrainBounds.right, terrainBounds.bottom);
 
-			if (m.bRedrawTerrain)
-				DrawMapTerrainCell(m, drawCoords, ctx);
+			if (!objectsNeedRedraw && !terrainNeedsStripX && !terrainNeedsStripY)
+				continue;
 
-			DrawMapTerrainAnim(m, drawCoords, ctx, dwOrigGround);
-			DrawMapObjectsCell(mapCoords, m, drawCoords, ctx);
+			if (terrainNeedsStripX)
+			{
+				FIELDDATA terrain = m;
+				DrawMapTerrainCell(terrain, drawCoords, terrainStripXCtx);
+			}
+			if (terrainNeedsStripY)
+			{
+				FIELDDATA terrain = m;
+				DrawMapTerrainCell(terrain, drawCoords, terrainStripYCtx);
+			}
+
+			if (objectsNeedRedraw)
+			{
+				DrawMapTerrainAnim(m, drawCoords, ctx, dwOrigGround);
+				DrawMapObjectsCell(mapCoords, m, drawCoords, ctx);
+			}
 		}
 	}
 
@@ -7980,20 +8220,33 @@ bool CIsoView::DrawMapPan(int left, int right, int top, int bottom, DWORD MM_hei
 
 	locker.ensure_unlocked();
 
+	// Full redraw, local redraw and incremental pan all use the same explicit
+	// color-key compositor, so a label cannot switch rendering implementations.
+	const bool celltagsCached = CompositeColorKeySurface(
+		lpdsTemp,
+		(LPDIRECTDRAWSURFACE4)pics["CELLTAG"].pic,
+		m_celltags_to_render,
+		0,
+		[](const ProjectedCoords& position) { return position; });
+	const bool waypointsCached = CompositeColorKeySurface(
+		lpdsTemp,
+		(LPDIRECTDRAWSURFACE4)pics["FLAG"].pic,
+		m_waypoints_to_render,
+		0,
+		[](const WaypointToRender& waypoint)
+		{
+			return ProjectedCoords(waypoint.drawx + 1, waypoint.drawy + 1);
+		});
+
+	if (!celltagsCached || !waypointsCached)
+		return false;
+
+	m_celltags_to_render.clear();
+	m_waypoints_to_render.clear();
+
 	// copy the shifted + patched scene to the back buffer
-	lpdsBack->Blt(NULL, lpdsTemp, NULL, 0, 0);
-
-	// deferred celltags of the exposed region
-	for (const auto& pos : m_celltags_to_render)
-	{
-		Blit((LPDIRECTDRAWSURFACE4)pics["CELLTAG"].pic, pos.x - 1, pos.y - 1);
-	}
-
-	// waypoint flags
-	for (const auto& wp : m_waypoints_to_render)
-	{
-		Blit((LPDIRECTDRAWSURFACE4)pics["FLAG"].pic, wp.drawx, wp.drawy);
-	}
+	if (lpdsBack->Blt(NULL, lpdsTemp, NULL, DDBLT_WAIT, NULL) != DD_OK)
+		return false;
 
 	if (m_cellCursor != MapCoords(-1, -1))
 	{
@@ -8003,7 +8256,7 @@ bool CIsoView::DrawMapPan(int left, int right, int top, int bottom, DWORD MM_hei
 			DrawCellCursor(m_cellCursor, *backDesc);
 	}
 
-	if (rscroll)
+	if (rscroll && (GetAsyncKeyState(VK_RBUTTON) & 0x8000) != 0)
 	{
 		const auto& sc = pics["SCROLLCURSOR"];
 		Blit((LPDIRECTDRAWSURFACE4)sc.pic, rclick_x * m_viewScale.x + r.left - sc.wWidth / 2, rclick_y * m_viewScale.y + r.top - sc.wHeight / 2);
@@ -8011,8 +8264,6 @@ bool CIsoView::DrawMapPan(int left, int right, int top, int bottom, DWORD MM_hei
 
 	BlitBackbufferToHighRes();
 	RenderUIOverlay();
-	if (theApp.m_Options.bVSync)
-		dd->WaitForVerticalBlank(DDWAITVB_BLOCKBEGIN, NULL);
 	FlipHighResBuffer();
 	last_succeeded_operation = 10100;
 
@@ -8186,14 +8437,17 @@ void CIsoView::OnKillFocus(CWnd* pNewWnd)
 // takes an index, not an waypoint id!
 void CIsoView::FocusWaypoint(int index)
 {
-	int x, y;
-
 	DWORD dwPos;
-
 	Map->GetWaypointData(index, NULL, &dwPos);
+	Map->GetWaypointData(index, NULL, &dwPos);
+	FocusMapCoordinate(dwPos % Map->GetIsoSize(), dwPos / Map->GetIsoSize());
+}
 
-	x = dwPos % Map->GetIsoSize();
-	y = dwPos / Map->GetIsoSize();
+void CIsoView::FocusMapCoordinate(int x, int y)
+{
+	if (Map->GetIsoSize() == 0 || x < 0 || y < 0 ||
+		x >= static_cast<int>(Map->GetIsoSize()) || y >= static_cast<int>(Map->GetIsoSize()))
+		return;
 
 	ToPhys3d(&x, &y);
 

@@ -114,8 +114,6 @@ IDB_CELLTAG             BITMAP                  "res\\celltag_ts.bmp"
 
 #endif
 #endif
-IDB_LIGHTBULB           BITMAP                  "res\\litebulb.bmp"
-
 IDB_MV_ICONS            BITMAP                  "res\\bmp00005.bmp"
 
 #if defined(APSTUDIO_INVOKED) || defined(TS_MODE)
@@ -318,18 +316,6 @@ FONT 8, "MS Shell Dlg 2"
 BEGIN
     LTEXT           "Map name:",IDC_STATIC,5,4,41,14
     EDITTEXT        IDC_MAPNAME,54,4,155,14,ES_AUTOHSCROLL
-END
-
-IDD_TIP DIALOGEX 0, 0, 275, 174
-STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "Tip of the day"
-FONT 8, "MS Shell Dlg 2"
-BEGIN
-    LTEXT           "TIP",IDC_TIPSTRING,28,63,177,60
-    CONTROL         "&Show tips at program start",IDC_STARTUP,"Button",BS_AUTOCHECKBOX | WS_GROUP | WS_TABSTOP,13,152,134,10
-    PUSHBUTTON      "&Next tip",IDC_NEXTTIP,157,152,52,14,WS_GROUP
-    DEFPUSHBUTTON   "&Close",IDOK,216,152,50,14,WS_GROUP
-    CONTROL         "",IDC_TOOLTIPCENTER,"Static",SS_BLACKFRAME,12,11,251,134
 END
 
 IDD_FINALSUN_DIALOG DIALOGEX 0, 0, 414, 287
@@ -1726,11 +1712,6 @@ BEGIN
 
     IDD_MYOPENDIALOG, DIALOG
     BEGIN
-    END
-
-    IDD_TIP, DIALOG
-    BEGIN
-        RIGHTMARGIN, 274
     END
 
     IDD_FINALSUN_DIALOG, DIALOG
@@ -3177,6 +3158,8 @@ BEGIN
         MENUITEM "Copy whole map",              ID_EDIT_COPYWHOLEMAP
         MENUITEM "Paste\tCtrl+V",               ID_EDIT_PASTE
         MENUITEM "Paste centered",              ID_EDIT_PASTEWHOLEMAP
+        MENUITEM "Multi-selection",             ID_EDIT_MULTISELECT
+        MENUITEM "Property brush",              ID_EDIT_PROPERTYBRUSH
         MENUITEM SEPARATOR
         MENUITEM "Map",                         ID_EDIT_MAP
         MENUITEM "Basic",                       ID_EDIT_BASICSETTINGS
@@ -3227,6 +3210,7 @@ BEGIN
         MENUITEM "Paint cliff back",            ID_MAPTOOLS_BACKCLIFF
         MENUITEM SEPARATOR
         MENUITEM "Search Waypoint",             ID_MAPTOOLS_SEARCHWAYPOINT
+        MENUITEM "Navigate to coordinate",      ID_MAPTOOLS_NAVIGATECOORDINATE
         MENUITEM SEPARATOR
         MENUITEM "Tool Scripts",                ID_MAPTOOLS_TOOLSCRIPTS
     END
@@ -3248,8 +3232,6 @@ BEGIN
         MENUITEM "Manual\tF1",                  ID_HELP
         MENUITEM SEPARATOR
         MENUITEM "Info",                        ID_HELP_INFO
-        MENUITEM "Tip of the day",              ID_HELP_TIPOFTHEDAY
-        MENUITEM SEPARATOR
         MENUITEM "Show logs",                   ID_HELP_SHOWLOGS
     END
 END
@@ -3284,6 +3266,8 @@ BEGIN
         MENUITEM "Copy whole map",              ID_EDIT_COPYWHOLEMAP
         MENUITEM "Paste\tCtrl+V",               ID_EDIT_PASTE
         MENUITEM "Paste centered",              ID_EDIT_PASTEWHOLEMAP
+        MENUITEM "Multi-selection",             ID_EDIT_MULTISELECT
+        MENUITEM "Property brush",              ID_EDIT_PROPERTYBRUSH
         MENUITEM SEPARATOR
         MENUITEM "Map",                         ID_EDIT_MAP
         MENUITEM "Basic",                       ID_EDIT_BASICSETTINGS
@@ -3334,6 +3318,7 @@ BEGIN
         MENUITEM "Paint cliff back",            ID_MAPTOOLS_BACKCLIFF
         MENUITEM SEPARATOR
         MENUITEM "Search Waypoint",             ID_MAPTOOLS_SEARCHWAYPOINT
+        MENUITEM "Navigate to coordinate",      ID_MAPTOOLS_NAVIGATECOORDINATE
         MENUITEM SEPARATOR
         MENUITEM "Tool Scripts",                ID_MAPTOOLS_TOOLSCRIPTS
     END
@@ -3355,8 +3340,6 @@ BEGIN
         MENUITEM "Manual\tF1",                  ID_HELP
         MENUITEM SEPARATOR
         MENUITEM "Info",                        ID_HELP_INFO
-        MENUITEM "Tip of the day",              ID_HELP_TIPOFTHEDAY
-        MENUITEM SEPARATOR
         MENUITEM "Show logs",                   ID_HELP_SHOWLOGS
     END
 END
@@ -3467,11 +3450,6 @@ END
 #endif
 
 IDD_FINALSUN_DIALOG AFX_DIALOG_LAYOUT
-BEGIN
-    0
-END
-
-IDD_TIP AFX_DIALOG_LAYOUT
 BEGIN
     0
 END

@@ -69,6 +69,9 @@ struct OPTIONS{
 	bool viewScaleUseSteps = true;
 	float viewScaleSpeed = 15.0f;
 	bool useDefaultMouseCursor = false;
+	bool bFileWatcher = true;
+	int autoSaveIntervalMinutes = 5;
+	int autoSaveMaxCount = 10;
 
 public:
 	BOOL bSearchLikeTS;
@@ -116,8 +119,6 @@ public:
 	UINT m_cf;
 	HACCEL m_hAccel;
 	void ParseCommandLine();
-	void ShowTipAtStartup(void);
-	void ShowTipOfTheDay(void);
 
 private:
 	std::string m_u8LogFileName;

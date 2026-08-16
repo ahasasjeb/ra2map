@@ -77,21 +77,37 @@ BOOL CRTPDlg::OnInitDialog()
 	CDialog::OnInitDialog();
 
 	int i;
+	const CString randomTerrainSetting = g_data.GetValueByName(
+		"EditorFeatures", "RandomTerrainObjects", "Yes");
+	const bool includeAllTerrain = randomTerrainSetting.CompareNoCase("no") != 0 &&
+		randomTerrainSetting.CompareNoCase("false") != 0 && randomTerrainSetting != "0";
 	for(i=0;i<rules.sections["TerrainTypes"].values.size();i++)
 	{
 		CString unitname=*rules.sections["TerrainTypes"].GetValue(i);
-		CString addedString=unitname;
 
+#ifdef RA2_MODE
 		if(g_data.sections["IgnoreRA2"].FindValue(unitname)>=0) continue;
-	
-		addedString=TranslateStringACP(addedString);
-			
-				
-		if(unitname.Find("TREE")>=0) 
+		if(g_data.sections["IgnoreTerrainRA2"].FindValue(unitname)>=0) continue;
+#else
+		if(g_data.sections["IgnoreTS"].FindValue(unitname)>=0) continue;
+		if(g_data.sections["IgnoreTerrainTS"].FindValue(unitname)>=0) continue;
+#endif
+#ifdef RA2_MODE
+		if (Map->GetTheater()==THEATER0 && g_data.sections["IgnoreTemperateRA2"].FindValue(unitname) >= 0) continue;
+		if (Map->GetTheater()==THEATER1 && g_data.sections["IgnoreSnowRA2"].FindValue(unitname) >= 0) continue;
+		if (Map->GetTheater()==THEATER2 && g_data.sections["IgnoreUrbanRA2"].FindValue(unitname) >= 0) continue;
+		if (Map->GetTheater()==THEATER3 && g_data.sections["IgnoreNewUrbanRA2"].FindValue(unitname) >= 0) continue;
+		if (Map->GetTheater()==THEATER4 && g_data.sections["IgnoreLunarRA2"].FindValue(unitname) >= 0) continue;
+		if (Map->GetTheater()==THEATER5 && g_data.sections["IgnoreDesertRA2"].FindValue(unitname) >= 0) continue;
+#else
+		if (Map->GetTheater()==THEATER0 && g_data.sections["IgnoreTemperateTS"].FindValue(unitname) >= 0) continue;
+		if (Map->GetTheater()==THEATER1 && g_data.sections["IgnoreSnowTS"].FindValue(unitname) >= 0) continue;
+#endif
+
+		if(unitname.GetLength()>0 && unitname!="VEINTREE" &&
+			(includeAllTerrain || unitname.Find("TREE")>=0))
 		{
-			
-						
-			if(unitname.GetLength()>0 && unitname!="VEINTREE") // out with it :-)
+			if (!includeAllTerrain)
 			{
 				int TreeMin=atoi(g_data.sections[Map->GetTheater()+"Limits"].values["TreeMin"]);
 				int TreeMax=atoi(g_data.sections[Map->GetTheater()+"Limits"].values["TreeMax"]);
@@ -103,8 +119,8 @@ BOOL CRTPDlg::OnInitDialog()
 				
 				if(n<TreeMin || n>TreeMax) continue;
 
-				m_Available.AddString(unitname);			
 			}
+			m_Available.AddString(unitname);
 		}
 	}
 	

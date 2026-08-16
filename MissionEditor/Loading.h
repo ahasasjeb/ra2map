@@ -25,6 +25,7 @@
 #include "MissionEditorPackLib.h"
 #include <memory>
 #include <optional>
+#include <vector>
 
 #if _MSC_VER > 1000
 #pragma once
@@ -190,6 +191,7 @@ private:
 	HMIXFILE m_hBuildings;
 	EXPANDMIX m_hExpand[101]; // 1 added for ra2md.mix
 	HMIXFILE m_hECache[100];
+	std::vector<HMIXFILE> m_hExtraMixes;
 	HMIXFILE m_hIsoSnow;
 	HMIXFILE m_hIsoTemp;
 	HMIXFILE m_hIsoUrb;

@@ -34,6 +34,7 @@ enum class MapToolMouseFlags
     MBUTTON = 2,
     RBUTTON = 4,
     SHIFT = 8
+	, CTRL = 16
 };
 DEFINE_ENUM_FLAG_OPERATORS(MapToolMouseFlags);
 
@@ -52,6 +53,8 @@ inline MapToolMouseFlags MapToolMouseFlagsFromWin32(UINT nFlags) {
 
     if ((nFlags & MK_SHIFT) == MK_SHIFT)
         flags |= MapToolMouseFlags::SHIFT;
+	if ((nFlags & MK_CONTROL) == MK_CONTROL)
+		flags |= MapToolMouseFlags::CTRL;
         
     return flags;
 }
@@ -71,6 +74,7 @@ public:
     virtual void onLButtonUp(const ProjectedCoords& projCoords, const MapCoords& mapCoords3d, MapToolMouseFlags flags) {};
     virtual void onMouseMove(const ProjectedCoords& projCoords, const MapCoords& mapCoords3d, MapToolMouseFlags flags) {};
     virtual void render() {};
+	virtual bool onKeyDown(UINT key) { return false; };
 
 protected:
     MapTool(CMapData& map, CIsoView& view) : m_map(map), m_view(view) {};    

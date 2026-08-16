@@ -6,7 +6,7 @@ This repository contains the source code for the FinalSun/FinalAlert (YR) Missio
 
 The editor can be switched between English, German and **Simplified Chinese (简体中文)** in **Options → Settings**. On a Chinese Windows system the first run selects 简体中文 automatically.
 
-编辑器可在 **选项 → 设置** 中切换英语、德语和**简体中文**。中文 Windows 首次启动时会自动选择简体中文。语言字符串位于 `MissionEditor/data/FinalAlert2/FALanguage.ini` 与 `MissionEditor/data/FinalSun/FSLanguage.ini`，每日提示位于同目录的 `TIPS.CHS`。
+编辑器可在 **选项 → 设置** 中切换英语、德语和**简体中文**。中文 Windows 首次启动时会自动选择简体中文。语言字符串位于 `MissionEditor/data/FinalAlert2/FALanguage.ini` 与 `MissionEditor/data/FinalSun/FSLanguage.ini`。
 
 The official version for both applications has been increased to v2.0 in order to illustrate they now run properly on modern operating systems. We also used this opporunity to update the application and fix some known issues.
 

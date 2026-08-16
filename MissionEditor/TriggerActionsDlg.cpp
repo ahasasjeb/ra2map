@@ -29,8 +29,7 @@
 #include "functions.h"
 #include "inlines.h"
 
-CString GetWaypoint(int n);
-int GetWaypoint(const char* c);
+#include "WaypointCodec.h"
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -42,11 +41,7 @@ static char THIS_FILE[] = __FILE__;
 BOOL IsWaypointFormat(CString s)
 {
 	if(s.GetLength()==0) return TRUE;
-	
-	if(s[0]>='A' && s[0]<='Z')
-		return TRUE;
-
-	return FALSE;
+	return GetWaypoint(s) >= 0;
 
 }
 

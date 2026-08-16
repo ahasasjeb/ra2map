@@ -160,6 +160,7 @@ protected:
 	DECLARE_MESSAGE_MAP()
 public:
 	void FocusWaypoint(int index);
+	void FocusMapCoordinate(int x, int y);
 	RECT m_funcRect;
 	Vec2<CSProjected, float> GetViewScale() const
 	{

@@ -29,6 +29,7 @@
 #include "mapdata.h"
 #include "variables.h"
 #include "functions.h"
+#include "TheaterConfiguration.h"
 
 extern CFinalSunApp theApp;
 
@@ -126,11 +127,11 @@ BOOL CNewMap::OnInitDialog()
 	m_House=rules.sections[HOUSES].values["0"];
 
 	CComboBox& theater=*((CComboBox*)GetDlgItem(IDC_THEATER));
-	theater.AddString(THEATER0);
-	theater.AddString(THEATER1);
-#ifdef RA2_MODE
-	theater.AddString(THEATER2);
-#endif
+	for (const auto& entry : GetConfiguredTheaters(false))
+	{
+		const int comboIndex = theater.AddString(entry.name);
+		theater.SetItemData(comboIndex, static_cast<DWORD_PTR>(entry.index));
+	}
 
 	m_Theater=0;
 
@@ -197,8 +198,10 @@ void CNewMap::OnBrowse()
 void CNewMap::OnOK() 
 {
 	UpdateData();	
-
+	CComboBox& theater = *((CComboBox*)GetDlgItem(IDC_THEATER));
+	const int selectedTheater = static_cast<int>(theater.GetItemData(theater.GetCurSel()));
 	CDialog::OnOK();
+	m_Theater = selectedTheater;
 }
 
 void CNewMap::OnMultiplayer() 

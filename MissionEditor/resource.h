@@ -4,8 +4,6 @@
 //
 #define IDD_TIBERIANSUNMISSIONEDITOR_DIALOG 102
 #define IDD_FINALSUN_DIALOG             102
-#define IDB_LIGHTBULB                   103
-#define IDD_TIP                         104
 
 #define IDR_MAINFRAME                   128
 #define IDR_MAIN                        129
@@ -98,9 +96,6 @@
 #define IDD_COMBO_UINPUT                289
 #define IDC_EDITOR_ARROW                299
 #define IDC_BULB                        1000
-#define IDC_STARTUP                     1001
-#define IDC_NEXTTIP                     1002
-#define IDC_TIPSTRING                   1004
 #define IDC_TAB                         1007
 #define IDC_NAME                        1010
 #define IDC_NEWINIFORMAT                1011
@@ -542,7 +537,6 @@
 #define ID_DEBUG_EXPORTMAPPACKNOSECTIONS 40019
 #define IDS_VERSION                     40019
 #define IDS_VERSIONTEXTTS               40020
-#define ID_HELP_TIPOFTHEDAY             40022
 #define ID_OPTIONS_SIMPLEVIEW           40023
 #define ID_OPTIONS_SHOWMINIMAP          40024
 #define ID_FILE_VALIDATEMAP             40025
@@ -598,7 +592,10 @@
 #define ID_FILE_FILE3                   40131
 #define ID_FILE_FILE4                   40132
 #define ID_MAPTOOLS_SEARCHWAYPOINT      40133
+#define ID_MAPTOOLS_NAVIGATECOORDINATE  40134
 #define ID_MAPTOOLS_TOOLSCRIPTS         40135
+#define ID_EDIT_MULTISELECT             40136
+#define ID_EDIT_PROPERTYBRUSH           40137
 #define ID_HELP_SHOWLOGS                40138
 #define ID_HELP_                        40139
 #define ID_HELP_SHOWLOGS40140           40140

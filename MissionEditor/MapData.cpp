@@ -24,6 +24,7 @@
 
 #include "stdafx.h"
 #include "MapData.h"
+#include "BuildingFoundation.h"
 #include "DynamicGraphDlg.h"
 #include "MissionEditorPackLib.h"
 #include "inlines.h"
@@ -1641,21 +1642,19 @@ void CMapData::UpdateStructures(BOOL bSave)
 
 				int x = atoi(GetParam(*sec.GetValue(i), 4));
 				int y = atoi(GetParam(*sec.GetValue(i), 3));
-				int d, e;
 				int bid = buildingid[GetParam(*sec.GetValue(i), 1)];
-				for (d = 0;d < buildinginfo[bid].h;d++)
+				for (const auto& cell : GetBuildingFoundation(bid))
 				{
-					for (e = 0;e < buildinginfo[bid].w;e++)
+					const int cellX = x + cell.x;
+					const int cellY = y + cell.y;
+					const int pos = cellX + cellY * GetIsoSize();
+					if (cellX >= 0 && cellY >= 0 && cellX < GetIsoSize() && cellY < GetIsoSize() &&
+						pos >= 0 && pos < fielddata_size)
 					{
-						int pos = (x + d) + (y + e) * GetIsoSize();
-						if (pos < fielddata_size)
-						{
-							fielddata[pos].structure = i;
-							fielddata[pos].structuretype = bid;
-						}
-
-						Mini_UpdatePos(x + d, y + e, IsMultiplayer());
+						fielddata[pos].structure = i;
+						fielddata[pos].structuretype = bid;
 					}
+					Mini_UpdatePos(cellX, cellY, IsMultiplayer());
 				}
 
 
@@ -1884,16 +1883,17 @@ void CMapData::UpdateNodes(BOOL bSave)
 					int x = atoi(sx);
 					int y = atoi(sy);
 					int bid = buildingid[type];
-					int d, f;
-					for (d = 0;d < buildinginfo[bid].h;d++)
+					for (const auto& cell : GetBuildingFoundation(bid))
 					{
-						for (f = 0;f < buildinginfo[bid].w;f++)
-						{
-							int pos = x + d + (y + f) * GetIsoSize();
-							fielddata[pos].node.type = buildingid[type];
-							fielddata[pos].node.house = *m_mapfile.sections[MAPHOUSES].GetValue(i);
-							fielddata[pos].node.index = e;
-						}
+						const int cellX = x + cell.x;
+						const int cellY = y + cell.y;
+						const int pos = cellX + cellY * GetIsoSize();
+						if (cellX < 0 || cellY < 0 || cellX >= GetIsoSize() || cellY >= GetIsoSize() ||
+							pos < 0 || pos >= fielddata_size)
+							continue;
+						fielddata[pos].node.type = buildingid[type];
+						fielddata[pos].node.house = *m_mapfile.sections[MAPHOUSES].GetValue(i);
+						fielddata[pos].node.index = e;
 					}
 				}
 			}
@@ -2138,16 +2138,10 @@ void CMapData::DeleteStructure(DWORD dwIndex)
 	m_mapfile.sections["Structures"].values.erase(*m_mapfile.sections["Structures"].GetValueName(dwIndex));
 	if (!m_noAutoObjectUpdate) UpdateStructures(FALSE);
 
-	int d, e;
 	int bid = buildingid[type];
-	for (d = 0;d < buildinginfo[bid].h;d++)
+	for (const auto& cell : GetBuildingFoundation(bid))
 	{
-		for (e = 0;e < buildinginfo[bid].w;e++)
-		{
-			int pos = (x + d) + (y + e) * GetIsoSize();
-
-			Mini_UpdatePos(x + d, y + e, IsMultiplayer());
-		}
+		Mini_UpdatePos(x + cell.x, y + cell.y, IsMultiplayer());
 	}
 }
 
@@ -3824,6 +3818,7 @@ void CMapData::UpdateBuildingInfo(LPCSTR lpUnitType)
 	if (!lpUnitType)
 	{
 		memset(buildinginfo, 0, 0x0F00 * sizeof(BUILDING_INFO));
+		ClearBuildingFoundations();
 
 		int i;
 		for (i = 0;i < rules.sections["BuildingTypes"].values.size();i++)
@@ -3846,23 +3841,11 @@ void CMapData::UpdateBuildingInfo(LPCSTR lpUnitType)
 				}
 			}
 
-			int w, h;
-			char d[6];
-			memcpy(d, art.sections[artname].values["Foundation"], 1);
-			d[1] = 0;
-			w = atoi(d);
-			if (w == 0) w = 1;
-			memcpy(d, (LPCTSTR)art.sections[artname].values["Foundation"] + 2, 1);
-			d[1] = 0;
-			h = atoi(d);
-			if (h == 0) h = 1;
-
 			int n = Map->GetUnitTypeID(type);
 
 			if (n >= 0 && n < 0x0F00)
 			{
-				buildinginfo[n].w = w;
-				buildinginfo[n].h = h;
+				UpdateBuildingFoundation(n, artname);
 
 				buildinginfo[n].bSnow = FALSE;
 				buildinginfo[n].bTemp = FALSE;
@@ -3933,23 +3916,11 @@ void CMapData::UpdateBuildingInfo(LPCSTR lpUnitType)
 				}
 			}
 
-			int w, h;
-			char d[6];
-			memcpy(d, art.sections[artname].values["Foundation"], 1);
-			d[1] = 0;
-			w = atoi(d);
-			if (w == 0) w = 1;
-			memcpy(d, (LPCTSTR)art.sections[artname].values["Foundation"] + 2, 1);
-			d[1] = 0;
-			h = atoi(d);
-			if (h == 0) h = 1;
-
 			int n = Map->GetUnitTypeID(type);
 
 			if (n >= 0 && n < 0x0F00)
 			{
-				buildinginfo[n].w = w;
-				buildinginfo[n].h = h;
+				UpdateBuildingFoundation(n, artname);
 				buildinginfo[n].bSnow = TRUE;
 				buildinginfo[n].bTemp = TRUE;
 				buildinginfo[n].bUrban = TRUE;
@@ -3994,23 +3965,11 @@ void CMapData::UpdateBuildingInfo(LPCSTR lpUnitType)
 			}
 		}
 
-		int w, h;
-		char d[6];
-		memcpy(d, art.sections[artname].values["Foundation"], 1);
-		d[1] = 0;
-		w = atoi(d);
-		if (w == 0) w = 1;
-		memcpy(d, (LPCTSTR)art.sections[artname].values["Foundation"] + 2, 1);
-		d[1] = 0;
-		h = atoi(d);
-		if (h == 0) h = 1;
-
 		int n = Map->GetUnitTypeID(type);
 
 		if (n >= 0 && n < 0x0F00)
 		{
-			buildinginfo[n].w = w;
-			buildinginfo[n].h = h;
+			UpdateBuildingFoundation(n, artname);
 			CString lpPicFile = GetUnitPictureFilename(type, 0);
 			buildinginfo[n].pic_count = 8;
 
@@ -6099,11 +6058,16 @@ void CMapData::Copy(int left, int top, int right, int bottom)
 	cd.dwType = 1;
 	cd.iWidth = right - left;
 	cd.iHeight = bottom - top;
-	cd.dwVersion = 0;
+	cd.dwVersion = m_copySelectionMask.empty() ? 0 : 1;
 	cd.dwReserved = 0;
 	if (editor_mode == ra2_mode) cd.bGame = 1; else cd.bGame = 0;
 
-	HGLOBAL hGlob = GlobalAlloc(GMEM_MOVEABLE | GMEM_DDESHARE, sizeof(CLIPBOARD_DATA) + cd.iWidth * cd.iHeight * sizeof(CLIPBOARD_MAPCOPY_ENTRY));
+	const size_t cellCount = static_cast<size_t>(cd.iWidth) * cd.iHeight;
+	const size_t maskSize = cd.dwVersion == 1 ? cellCount : 0;
+	HGLOBAL hGlob = GlobalAlloc(GMEM_MOVEABLE | GMEM_DDESHARE,
+		sizeof(CLIPBOARD_DATA) + cellCount * sizeof(CLIPBOARD_MAPCOPY_ENTRY) + maskSize);
+	if (!hGlob)
+		return;
 
 	last_succeeded_operation = 80200;
 
@@ -6112,6 +6076,7 @@ void CMapData::Copy(int left, int top, int right, int bottom)
 	if (!lpVoid)
 	{
 		MessageBox(0, "Failed to lock memory", "Error", 0);
+		GlobalFree(hGlob);
 		return;
 	}
 
@@ -6127,6 +6092,8 @@ void CMapData::Copy(int left, int top, int right, int bottom)
 	{
 		for (e = 0;e < cd.iHeight;e++)
 		{
+			const size_t sourceIndex = static_cast<size_t>(i) + static_cast<size_t>(e) * cd.iWidth;
+			if (!m_copySelectionMask.empty() && m_copySelectionMask[sourceIndex] == 0) continue;
 			if (i + left < 0 || e + top < 0 || i + left >= m_IsoSize || e + top >= m_IsoSize) continue;
 
 			int pos_r;
@@ -6174,6 +6141,11 @@ void CMapData::Copy(int left, int top, int right, int bottom)
 			data[pos_w].bTile = ground - k;
 		}
 	}
+	if (cd.dwVersion == 1)
+	{
+		BYTE* mask = reinterpret_cast<BYTE*>(data + cellCount);
+		memcpy(mask, m_copySelectionMask.data(), std::min(maskSize, m_copySelectionMask.size()));
+	}
 
 	last_succeeded_operation = 80202;
 
@@ -6185,11 +6157,39 @@ void CMapData::Copy(int left, int top, int right, int bottom)
 	if (!SetClipboardData(theApp.m_cf, hGlob))
 	{
 		MessageBox(0, "Failed to set clipboard data", "Error", 0);
-
+		GlobalFree(hGlob);
 	}
 
 	CloseClipboard();
 
+}
+
+void CMapData::CopySelection(const std::vector<MapCoords>& cells)
+{
+	if (cells.empty())
+		return;
+
+	int left = static_cast<int>(m_IsoSize);
+	int top = static_cast<int>(m_IsoSize);
+	int right = 0;
+	int bottom = 0;
+	for (const auto& cell : cells)
+	{
+		left = std::min(left, static_cast<int>(cell.x));
+		top = std::min(top, static_cast<int>(cell.y));
+		right = std::max(right, static_cast<int>(cell.x) + 1);
+		bottom = std::max(bottom, static_cast<int>(cell.y) + 1);
+	}
+	if (left < 0 || top < 0 || right > static_cast<int>(m_IsoSize) || bottom > static_cast<int>(m_IsoSize))
+		return;
+
+	const int width = right - left;
+	const int height = bottom - top;
+	m_copySelectionMask.assign(static_cast<size_t>(width) * height, 0);
+	for (const auto& cell : cells)
+		m_copySelectionMask[static_cast<size_t>(cell.x - left) + static_cast<size_t>(cell.y - top) * width] = 1;
+	Copy(left, top, right, bottom);
+	m_copySelectionMask.clear();
 }
 
 void CMapData::Paste(int x, int y, int z_mod)
@@ -6209,12 +6209,28 @@ void CMapData::Paste(int x, int y, int z_mod)
 
 	CLIPBOARD_DATA cd;
 	memcpy(&cd, lpVoid, sizeof(CLIPBOARD_DATA));
+	if (cd.dwVersion > 1 || cd.iWidth <= 0 || cd.iHeight <= 0)
+	{
+		GlobalUnlock(handle);
+		CloseClipboard();
+		return;
+	}
 
 
 	x -= cd.iWidth / 2;
 	y -= cd.iHeight / 2;
 
 	CLIPBOARD_MAPCOPY_ENTRY* data = (CLIPBOARD_MAPCOPY_ENTRY*)(((BYTE*)lpVoid) + sizeof(CLIPBOARD_DATA));
+	const size_t cellCount = static_cast<size_t>(cd.iWidth) * cd.iHeight;
+	const size_t requiredSize = sizeof(CLIPBOARD_DATA) + cellCount * sizeof(CLIPBOARD_MAPCOPY_ENTRY) +
+		(cd.dwVersion == 1 ? cellCount : 0);
+	if (cellCount > static_cast<size_t>(m_IsoSize) * m_IsoSize || GlobalSize(handle) < requiredSize)
+	{
+		GlobalUnlock(handle);
+		CloseClipboard();
+		return;
+	}
+	const BYTE* selectionMask = cd.dwVersion == 1 ? reinterpret_cast<const BYTE*>(data + cellCount) : nullptr;
 
 	last_succeeded_operation = 3002;
 
@@ -6229,11 +6245,13 @@ void CMapData::Paste(int x, int y, int z_mod)
 	{
 		for (e = 0;e < cd.iHeight;e++)
 		{
+			const size_t sourceIndex = static_cast<size_t>(i) + static_cast<size_t>(e) * cd.iWidth;
+			if (selectionMask && selectionMask[sourceIndex] == 0) continue;
 			if (x + i < 0 || y + e < 0 || x + i >= m_IsoSize || y + e >= m_IsoSize) continue;
 
 			FIELDDATA* fd = Map->GetFielddataAt(i + x + (y + e) * m_IsoSize);
 			int ground = fd->wGround;
-			if (ground = 0xFFFF) ground = 0;
+			if (ground == 0xFFFF) ground = 0;
 
 
 			int height = fd->bHeight;//-(*tiledata)[ground].tiles[fd->bSubTile].bZHeight;
@@ -6243,9 +6261,13 @@ void CMapData::Paste(int x, int y, int z_mod)
 
 		}
 	}
+	if (lowestheight == 255)
+	{
+		GlobalUnlock(handle);
+		CloseClipboard();
+		return;
+	}
 
-	int ground = GetFielddataAt(x + y * m_IsoSize)->wGround;
-	if (ground == 0xFFFF) ground = 0;
 	int startheight = lowestheight + z_mod;//-(*tiledata)[ground].tiles[GetFielddataAt(x+y*m_IsoSize)->bSubTile].bZHeight;
 
 	//char c[50];
@@ -6261,6 +6283,7 @@ void CMapData::Paste(int x, int y, int z_mod)
 		{
 			int pos_w, pos_r;
 			pos_r = i + e * cd.iWidth;
+			if (selectionMask && selectionMask[pos_r] == 0) continue;
 			pos_w = x + i + (y + e) * m_IsoSize;
 
 			if (x + i < 0 || y + e < 0 || x + i >= m_IsoSize || y + e >= m_IsoSize) continue;
