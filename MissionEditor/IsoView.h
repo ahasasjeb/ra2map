@@ -107,6 +107,8 @@ private:
 	BOOL m_bPanFastPath = FALSE;   // next DrawMap should use the incremental pan path
 	bool m_lastFrameValid = false; // a full/pan frame was rendered successfully before
 	ProjectedVec m_lastViewOffset; // view offset of the last rendered frame
+	bool m_resizePreview = false;  // present the cached frame while live-resizing
+	RECT m_lastPresentSourceRect = { 0, 0, 0, 0 };
 
 	
 
@@ -194,7 +196,7 @@ public:
 	void PlaceTile(const int x, const int y, const UINT nMouseFlags);
 	void ShowAllTileSets();
 	void HideTileSet(DWORD dwTileSet);
-	void FlipHighResBuffer();
+	void FlipHighResBuffer(const RECT* sourceRectOverride = nullptr);
 	void BlitBackbufferToHighRes();
 	void RenderUIOverlay();
 	bool InitializeVulkanRenderer();

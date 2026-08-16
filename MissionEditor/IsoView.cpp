@@ -843,9 +843,14 @@ void CIsoView::Dump(CDumpContext& dc) const
 
 void CIsoView::updateFontScaled()
 {
-	auto dc = CDC::FromHandle(::GetDC(NULL));
-	m_fontDefaultHeight = -MulDiv(12, dc->GetDeviceCaps(LOGPIXELSY), 72);
-	m_Font9Height = -MulDiv(9, dc->GetDeviceCaps(LOGPIXELSY), 72);
+	HDC screenDC = ::GetDC(NULL);
+	if (screenDC == NULL)
+		return;
+	const int dpiY = GetDeviceCaps(screenDC, LOGPIXELSY);
+	::ReleaseDC(NULL, screenDC);
+
+	m_fontDefaultHeight = -MulDiv(12, dpiY, 72);
+	m_Font9Height = -MulDiv(9, dpiY, 72);
 
 	if (dd)
 	{
@@ -2101,19 +2106,23 @@ const int valadded = 10000;
 
 void CIsoView::OnRButtonUp(UINT nFlags, CPoint point)
 {
-	if (rscroll)
+	const bool wasScrolling = rscroll != FALSE;
+	if (wasScrolling)
 	{
-		if (b_IsLoading) return;
-
 		ReleaseCapture();
 		KillTimer(11);
+		rscroll = FALSE;
 		m_bPanFastPath = FALSE;
 		ShowCursor(TRUE);
-		CMyViewFrame& dlg = *(CMyViewFrame*)owner;
-		dlg.m_minimap.RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW);
-
+		if (!b_IsLoading)
+		{
+			CMyViewFrame& dlg = *(CMyViewFrame*)owner;
+			dlg.m_minimap.RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW);
+		}
 	}
 
+	if (b_IsLoading)
+		return;
 
 	if (nFlags == 0 && point.x == 0 && point.y == 0)
 	{
@@ -2124,7 +2133,7 @@ void CIsoView::OnRButtonUp(UINT nFlags, CPoint point)
 
 	RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW);
 
-	if (!rscroll) m_drag = FALSE;
+	if (!wasScrolling) m_drag = FALSE;
 
 	const auto projCoords = GetProjectedCoordinatesFromClientCoordinates(point);
 	const MapCoords mapCoords = GetMapCoordinatesFromClientCoordinates(point, (nFlags & MK_CONTROL) == MK_CONTROL);
@@ -2133,7 +2142,7 @@ void CIsoView::OnRButtonUp(UINT nFlags, CPoint point)
 	const int y = mapCoords.y;
 
 	// context menu
-	if (AD.mode != 0 && !rscroll)
+	if (AD.mode != 0 && !wasScrolling)
 	{
 		bool ignoreClick = false;
 		if (AD.mode == ACTIONMODE_MAPTOOL)
@@ -2151,8 +2160,6 @@ void CIsoView::OnRButtonUp(UINT nFlags, CPoint point)
 		}
 		return;
 	}
-
-	rscroll = FALSE;
 
 	return;
 
@@ -3536,13 +3543,22 @@ void CIsoView::OnMove(int x, int y)
 	CView::OnMove(x, y);
 
 	if (lpds == NULL) return;
-	LPDIRECTDRAWCLIPPER ddc;
+	LPDIRECTDRAWCLIPPER ddc = nullptr;
 
-	lpds->GetClipper(&ddc);
-	ddc->SetHWnd(0, m_hWnd);
-	updateFontScaled();
+	if (lpds->GetClipper(&ddc) == DD_OK && ddc != nullptr)
+	{
+		ddc->SetHWnd(0, m_hWnd);
+		ddc->Release();
+	}
 
-	RedrawWindow();	
+	// Moving the top/left resize borders generates WM_MOVE together with WM_SIZE.
+	// Reuse the same cached-frame path so those borders do not accidentally force
+	// a full map render for every pointer step.
+	m_resizePreview = true;
+	KillTimer(VULKAN_RESIZE_TIMER_ID);
+	if (SetTimer(VULKAN_RESIZE_TIMER_ID, VULKAN_RESIZE_DEBOUNCE_MS, NULL) == 0)
+		m_resizePreview = false;
+	InvalidateRect(NULL, FALSE);
 }
 
 void CIsoView::OnSize(UINT nType, int cx, int cy)
@@ -3550,27 +3566,27 @@ void CIsoView::OnSize(UINT nType, int cx, int cy)
 	// CView::OnSize(nType, cx, cy);
 	if (lpds == NULL) return;
 
-	m_lastFrameValid = false;
+	LPDIRECTDRAWCLIPPER ddc = nullptr;
 
-	LPDIRECTDRAWCLIPPER ddc;
-
-	lpds->GetClipper(&ddc);
-	ddc->SetHWnd(0, m_hWnd);
-	updateFontScaled();
-
-	CMyViewFrame& dlg = *(CMyViewFrame*)owner;
-	dlg.m_minimap.RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW);
+	if (lpds->GetClipper(&ddc) == DD_OK && ddc != nullptr)
+	{
+		ddc->SetHWnd(0, m_hWnd);
+		ddc->Release();
+	}
 
 	UpdateScrollRanges();
 
 	GetWindowRect(&m_myRect);
 
-	// The legacy CPU surfaces cover the complete primary display; destroying
-	// them on every WM_SIZE discarded the last frame and produced an all-white
-	// window while a map was loading. Keep those pixels and coalesce the costly
-	// Vulkan swapchain rebuild until resizing pauses.
+	// Keep presenting the last complete frame during live resize. Re-rendering the
+	// map, recreating eight font surfaces and repainting the minimap for every
+	// intermediate WM_SIZE made the newly exposed client area visibly lag behind.
+	// The cached frame is stretched immediately; one accurate map/minimap redraw is
+	// coalesced after resizing pauses.
+	m_resizePreview = cx > 0 && cy > 0;
 	KillTimer(VULKAN_RESIZE_TIMER_ID);
-	SetTimer(VULKAN_RESIZE_TIMER_ID, VULKAN_RESIZE_DEBOUNCE_MS, NULL);
+	if (SetTimer(VULKAN_RESIZE_TIMER_ID, VULKAN_RESIZE_DEBOUNCE_MS, NULL) == 0)
+		m_resizePreview = false;
 	InvalidateRect(NULL, FALSE);
 }
 
@@ -3776,6 +3792,14 @@ inline PICDATA* GetOverlayPic(BYTE ovrl, BYTE ovrldata)
 
 void CIsoView::OnDraw(CDC* pDC)
 {
+	if (m_resizePreview && m_lastFrameValid &&
+		m_lastPresentSourceRect.right > m_lastPresentSourceRect.left &&
+		m_lastPresentSourceRect.bottom > m_lastPresentSourceRect.top)
+	{
+		FlipHighResBuffer(&m_lastPresentSourceRect);
+		return;
+	}
+
 	DrawMap();
 }
 
@@ -4912,7 +4936,7 @@ void CIsoView::BlitBackbufferToHighRes()
 	}
 }
 
-void CIsoView::FlipHighResBuffer()
+void CIsoView::FlipHighResBuffer(const RECT* sourceRectOverride)
 {
 	LPDIRECTDRAWSURFACE4 presentSurface = lpdsBack;
 	RECT sourceRect = GetScaledDisplayRect();
@@ -4921,6 +4945,8 @@ void CIsoView::FlipHighResBuffer()
 		presentSurface = lpdsBackHighRes;
 		GetWindowRect(&sourceRect);
 	}
+	if (sourceRectOverride != nullptr)
+		sourceRect = *sourceRectOverride;
 
 	InitializeVulkanRenderer();
 
@@ -4953,6 +4979,8 @@ void CIsoView::FlipHighResBuffer()
 			if (result == RS_OK)
 			{
 				m_vulkanPresentFailures = 0;
+				if (sourceRectOverride == nullptr)
+					m_lastPresentSourceRect = sourceRect;
 				return;
 			}
 
@@ -4970,21 +4998,12 @@ void CIsoView::FlipHighResBuffer()
 		}
 	}
 
-	if (m_viewScale != Vec2<CSProjected, float>(1.0f, 1.0f) && lpdsBackHighRes)
-	{
-		// This flip copies the high-res backbuffer to the front buffer
-		RECT dr;
-		GetWindowRect(&dr);
-		lpds->Blt(&dr, lpdsBackHighRes, &dr, DDBLT_WAIT, 0);
-	}
-	else
-	{
-		// copy scene backbuffer to the front buffer that will receive text/gdi rendering
-		RECT dr;
-		GetWindowRect(&dr);
-		auto cr = GetScaledDisplayRect();
-		lpds->Blt(&dr, lpdsBack, &cr, DDBLT_WAIT, 0);
-	}
+	// DirectDraw fallback: copy/stretch the same source rectangle used by Vulkan.
+	RECT destinationRect;
+	GetWindowRect(&destinationRect);
+	lpds->Blt(&destinationRect, presentSurface, &sourceRect, DDBLT_WAIT, 0);
+	if (sourceRectOverride == nullptr)
+		m_lastPresentSourceRect = sourceRect;
 }
 
 bool CIsoView::InitializeVulkanRenderer()
@@ -6280,21 +6299,35 @@ void CIsoView::OnTimer(UINT_PTR nIDEvent)
 	if (nIDEvent == VULKAN_RESIZE_TIMER_ID)
 	{
 		KillTimer(VULKAN_RESIZE_TIMER_ID);
+		m_resizePreview = false;
 		if (lpdsBack == NULL)
 			return;
 
 		if (b_IsLoading)
 		{
-			// Preserve and scale the most recent complete frame while the loader
-			// intentionally suppresses DrawMap().
-			BlitBackbufferToHighRes();
-			RenderUIOverlay();
-			FlipHighResBuffer();
+			// Keep the cached frame stretched to the final client size while the
+			// loader intentionally suppresses DrawMap().
+			if (m_lastFrameValid &&
+				m_lastPresentSourceRect.right > m_lastPresentSourceRect.left &&
+				m_lastPresentSourceRect.bottom > m_lastPresentSourceRect.top)
+			{
+				FlipHighResBuffer(&m_lastPresentSourceRect);
+			}
+			else
+			{
+				BlitBackbufferToHighRes();
+				RenderUIOverlay();
+				FlipHighResBuffer();
+			}
 		}
 		else
 		{
+			m_bPanFastPath = FALSE;
 			RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW);
 		}
+
+		CMyViewFrame& dlg = *(CMyViewFrame*)owner;
+		dlg.m_minimap.RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW);
 		return;
 	}
 	else if (nIDEvent == 11)
