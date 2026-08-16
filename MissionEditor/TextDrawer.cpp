@@ -184,6 +184,13 @@ TextDrawer::CachedString& TextDrawer::GetCachedString(const std::string& text)
         }
     }
 
+    // Cached strings are used for labels with four or more characters.  They
+    // inherit transparent pixels from the font surface, so they need their own
+    // source color key before they can be blitted back to the map.
+    FSunPackLib::SetColorKey(cached.main, CLR_INVALID);
+    if (cached.shadow)
+        FSunPackLib::SetColorKey(cached.shadow, CLR_INVALID);
+
     m_stringCache[text] = cached;
     return m_stringCache[text];
 }
