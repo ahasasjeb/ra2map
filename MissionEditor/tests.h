@@ -35,4 +35,5 @@ private:
     void test_codecs();
     void test_csf();
 	void test_waypoint_codec();
+	void test_snapshot_redraw_flag();
 };

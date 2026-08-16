@@ -40,7 +40,10 @@ struct SNAPSHOTDATA
 	int bottom;
 	int right;
 
-	BOOL* bRedrawTerrain;
+	// FIELDDATA::bRedrawTerrain is a one-bit flag.  Keeping it as a byte in a
+	// snapshot preserves its 0/1 value while avoiding the four-byte Win32 BOOL
+	// representation for every captured cell.
+	BYTE* bRedrawTerrain;
 	BYTE* overlay;
 	BYTE* overlaydata;
 	WORD* wGround;

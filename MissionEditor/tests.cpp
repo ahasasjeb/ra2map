@@ -28,6 +28,7 @@
 #include "MissionEditorPackLib.h"
 #include "RustCore.h"
 #include "WaypointCodec.h"
+#include "MapSnapshots.h"
 
 class TestError : public std::runtime_error
 {
@@ -94,6 +95,7 @@ int Tests::run()
 		[this]() { test_codecs(); },
 		[this]() { test_csf(); },
 		[this]() { test_waypoint_codec(); },
+		[this]() { test_snapshot_redraw_flag(); },
 	});
 	for (const auto f : test_functions)
 	{
@@ -323,6 +325,19 @@ void Tests::test_iso()
 	REPORT_TEST(d.GetAirAt(aircraftPosB) == -1);
 	REPORT_TEST(d.GetAirAt(aircraftPosD) == 1);
 	
+}
+
+void Tests::test_snapshot_redraw_flag()
+{
+	FIELDDATA fielddata[1];
+	fielddata[0].bRedrawTerrain = TRUE;
+
+	CMapSnapshots snapshots;
+	snapshots.TakeSnapshot(fielddata, 1, TRUE, 0, 0, 1, 1);
+	fielddata[0].bRedrawTerrain = FALSE;
+
+	TEST(snapshots.Undo(fielddata, 1, {}, {}));
+	REPORT_TEST(fielddata[0].bRedrawTerrain == TRUE);
 }
 
 void Tests::test_waypoint_codec()

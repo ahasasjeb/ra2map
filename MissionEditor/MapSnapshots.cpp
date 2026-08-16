@@ -157,7 +157,7 @@ void CMapSnapshots::TakeSnapshot(FIELDDATA* fielddata, DWORD isoSize, BOOL bEras
 	ss.wGround = new(WORD[size]);
 	ss.overlay = new(BYTE[size]);
 	ss.overlaydata = new(BYTE[size]);
-	ss.bRedrawTerrain = new(BOOL[size]);
+	ss.bRedrawTerrain = new(BYTE[size]);
 	ss.bRNDData = new(BYTE[size]);
 	int i;
 	for (i = 0;i < width;i++)

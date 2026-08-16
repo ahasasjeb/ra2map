@@ -6174,7 +6174,9 @@ bool CIsoView::RefreshObjectScene(const MapCoords& oldPos, const MapCoords& newP
 		return false;
 
 	m_previewHasSaved = FALSE;
-	m_previewSavedPixels.clear();
+	// Committing an object patches the cached scene, which invalidates the
+	// placement-preview base just like a full redraw does.
+	std::vector<BYTE>().swap(m_previewSavedPixels);
 	const size_t picsCountAtStart = pics.size();
 
 	const auto renderRegion = [&](RECT dirty, bool rebuildTerrain) -> bool
@@ -6867,7 +6869,10 @@ void CIsoView::DrawMap()
 	// a full map redraw replaces the whole scene, so the saved clean region of the fast
 	// placement preview is not valid anymore
 	m_previewHasSaved = FALSE;
-	m_previewSavedPixels.clear();
+	// A full redraw replaces the entire preview base. The saved pixels cannot
+	// be reused, so return a potentially large placement-preview buffer instead
+	// of retaining the peak sprite size for the rest of the editing session.
+	std::vector<BYTE>().swap(m_previewSavedPixels);
 
 	if (bNoDraw) return;
 

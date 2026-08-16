@@ -14,8 +14,8 @@ contains packaging and maintenance utilities. Generated output belongs in `build
 
 ## Build, Test, and Development Commands
 
-Use a Visual Studio Developer PowerShell with the Desktop C++ workload, MFC/ATL, and
-Rust installed. From the repository root:
+Use a Visual Studio Developer PowerShell with the Desktop C++ workload, MFC/ATL,
+the Visual Studio vcpkg component, and Rust installed. From the repository root:
 
 ```powershell
 msbuild MissionEditor.sln /p:Configuration="FinalAlertDebug YR" /p:Platform=x64 /m
@@ -34,6 +34,21 @@ cargo test --target x86_64-pc-windows-msvc
 `scripts\build_and_distribute.bat` rebuilds all release variants and creates archives;
 use it only when preparing a distribution.
 
+## Toolchain and Configuration Notes
+
+All supported solution configurations target `x64`. Use the exact names from
+`MissionEditor.sln`: `FinalSunDebug`, `FinalSunRelease`, `FinalAlertDebug`,
+`FinalAlertRelease`, `FinalAlertDebug YR`, `FinalAlertRelease YR`, and
+`Tests FinalAlertDebug YR`. Their runnable output directories are, respectively,
+`dist/FinalSun`, `dist/FinalAlert2`, and `dist/FinalAlert2YR`.
+
+`3rdParty/xcc/vcpkg.json` is a manifest consumed by MSBuild; allow vcpkg to restore
+its dependencies instead of committing `vcpkg_installed/` or `vcpkg_downloads/`.
+Building `MissionEditorPackLib` automatically invokes
+`cargo build --release --target x86_64-pc-windows-msvc`, even for a debug C++ build.
+Keep the Rust target installed and do not assume the editor consumes a debug Rust
+library.
+
 ## Coding Style & Naming Conventions
 
 Follow the surrounding code. C++ uses tabs for indentation, braces on the next line,
@@ -42,6 +57,7 @@ PascalCase types/functions, and `m_`-prefixed member fields (for example, `CTube
 declarations and definitions together. Rust uses `rustfmt`-style four-space indentation,
 `snake_case` functions, and explicit checked boundary handling at the C FFI boundary.
 No formatter or linter is enforced; avoid drive-by reformatting.
+Preserve the existing line endings when editing existing files.
 
 ## Testing Guidelines
 
