@@ -230,6 +230,66 @@ char const * TMissionsHelp[TMISSION_COUNT] = {
 	"A BwP move that will only search through buildings owned by this house.",
 };
 
+static int GetSelectedScriptMissionType(CComboBox& combo)
+{
+	const int selection=combo.GetCurSel();
+	if(selection==CB_ERR) return -1;
+	return (int)combo.GetItemData(selection);
+}
+
+static int FindScriptMissionType(CComboBox& combo, int type)
+{
+	for(int i=0;i<combo.GetCount();i++)
+	{
+		if((int)combo.GetItemData(i)==type)
+			return i;
+	}
+	return CB_ERR;
+}
+
+static bool GetScriptMissionRange(const CString& key, int& first, int& last)
+{
+	const int separator=key.Find('-');
+	if(separator<0)
+	{
+		first=atoi(key);
+		last=first;
+		return TRUE;
+	}
+
+	first=atoi(key.Left(separator));
+	last=atoi(key.Mid(separator+1));
+	return last>=first;
+}
+
+static const CString* FindScriptMissionInfo(int type)
+{
+	const CIniFileSection* section=g_data.GetSection("ScriptActions");
+	if(!section) return NULL;
+
+	for(const auto& entry : section->values)
+	{
+		int first;
+		int last;
+		if(GetScriptMissionRange(entry.first, first, last) && type>=first && type<=last)
+			return &entry.second;
+	}
+
+	return NULL;
+}
+
+static CString GetScriptMissionHelp(int type)
+{
+	if(type>=0 && type<TMISSION_COUNT)
+		return TMissionsHelp[type];
+
+	const CString* info=FindScriptMissionInfo(type);
+	if(info)
+		return GetParam(*info, 2);
+
+	return "Unsupported script action. Its value is preserved until a supported action is selected.";
+}
+
 
 char const *TargetProperties[TPROPERTY_COUNT] = {
 	"Least Threat",
@@ -384,10 +444,18 @@ void CScriptTypes::OnSelchangeAction()
 	TruncSpace(Scripttype);
 
 	itoa(m_Action.GetCurSel(), action, 10);
-	//m_Type.SetWindowText(GetParam(ini.sections[(LPCTSTR)Scripttype].values[action],0));
-	m_Type.SetCurSel(atoi(GetParam(ini.sections[(LPCTSTR)Scripttype].values[action], 0)));
-
-	OnSelchangeType();
+	const int type=atoi(GetParam(ini.sections[(LPCTSTR)Scripttype].values[action], 0));
+	const int typeSelection=FindScriptMissionType(m_Type, type);
+	m_Type.SetCurSel(typeSelection);
+	if(typeSelection!=CB_ERR)
+	{
+		OnSelchangeType();
+	}
+	else
+	{
+		m_DescriptionEx.SetWindowText(TranslateStringACP(GetScriptMissionHelp(type)));
+		m_Desc.SetWindowText("Parameter of action:");
+	}
 
 	m_Param.SetWindowText(GetParam(ini.sections[(LPCTSTR)Scripttype].values[action],1));
 
@@ -432,12 +500,22 @@ void CScriptTypes::OnEditchangeType()
 	//m_Type.GetWindowText(type);
 	//TruncSpace(type);
 	//MessageBox("beep");
-	int type=m_Type.GetCurSel();
+	const int type=GetSelectedScriptMissionType(m_Type);
+	if(type<0) return;
 	
 	int i;
 	char tmp[50];
 
-	switch(type)
+	const CString* scriptActionInfo=FindScriptMissionInfo(type);
+	if(scriptActionInfo)
+	{
+		const CString paramType=GetParam(*scriptActionInfo, 1);
+		const CString paramDescription=GetParam(g_data.sections["ParamTypes"].values[paramType], 0);
+		const CString listType=GetParam(g_data.sections["ParamTypes"].values[paramType], 1);
+		HandleParamList(m_Param, atoi(listType));
+		m_Desc.SetWindowText(TranslateStringACP(paramDescription));
+	}
+	else switch(type)
 	{
 	case 0:
 		ListTargets(m_Param);
@@ -516,7 +594,6 @@ void CScriptTypes::OnEditchangeType()
 					
 			break;
 		}
-
 	default:
 		m_Desc.SetWindowText("Parameter of action:");
 	}
@@ -533,14 +610,10 @@ void CScriptTypes::OnEditchangeType()
 
 void CScriptTypes::OnSelchangeType() 
 {
-	CString str;
-	if(m_Type.GetCurSel()>-1)
-	{
-		//m_Type.GetLBText(m_Type.GetCurSel(), str);
-		//m_Type.SetWindowText(str);
+	const int type=GetSelectedScriptMissionType(m_Type);
+	if(type<0) return;
 
-		m_DescriptionEx.SetWindowText(TMissionsHelp[m_Type.GetCurSel()]);
-	}
+	m_DescriptionEx.SetWindowText(TranslateStringACP(GetScriptMissionHelp(type)));
 
 	
 
@@ -730,19 +803,26 @@ BOOL CScriptTypes::OnInitDialog()
 	int i;
 	for(i=0;i<TMISSION_COUNT;i++)
 	{
-		CString p;
-		char c[50];
-		itoa(i,c,10);
-		
-		//p=c;
-
-		
-		//p+=" - ";
-		p+=TMissions[i];
-
 		if(strlen(TMissions[i])>0)
 		{
-			m_Type.AddString(p);
+			const int index=m_Type.AddString(TMissions[i]);
+			m_Type.SetItemData(index, i);
+		}
+	}
+
+	const CIniFileSection* scriptActions=g_data.GetSection("ScriptActions");
+	if(scriptActions) for(const auto& entry : scriptActions->values)
+	{
+		int first;
+		int last;
+		if(!GetScriptMissionRange(entry.first, first, last) || last-first>1000) continue;
+
+		for(i=first;i<=last;i++)
+		{
+			CString text;
+			text.Format("%d - %s", i, (LPCTSTR)TranslateStringACP(GetParam(entry.second, 0)));
+			const int index=m_Type.AddString(text);
+			m_Type.SetItemData(index, i);
 		}
 	}
 

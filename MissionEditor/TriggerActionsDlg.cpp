@@ -160,6 +160,7 @@ void CTriggerActionsDlg::OnEditchangeActiontype()
 #endif
 
 	CString desc=GetParam(eventdata,10);
+	desc=TranslateStringACP(desc);
 	desc.Replace("%1",",");
 	m_ActionDescription.SetWindowText(desc); 
 	
@@ -189,7 +190,7 @@ void CTriggerActionsDlg::OnEditchangeActiontype()
 		{
 			CString paramname=GetParam(g_data.sections["ParamTypes"].values[ptype[i]], 0);
 			
-			m_Parameter.SetItemData(m_Parameter.AddString(paramname), i);
+			m_Parameter.SetItemData(m_Parameter.AddString(TranslateStringACP(paramname)), i);
 		}
 		else if(atoi(ptype[i])<0)
 		{
@@ -514,7 +515,7 @@ void CTriggerActionsDlg::UpdateDialog()
 		if(g_data.sections["ActionsRA2"].FindName(eventid)>=0)
 			eventdata=g_data.sections["ActionsRA2"].values[eventid];
 #endif*/
-		CString text=eventid+" "+GetParam(eventdata,0);
+		CString text=eventid+" "+TranslateStringACP(GetParam(eventdata,0));
 		text.Replace("%1",",");
 
 #ifdef RA2_MODE

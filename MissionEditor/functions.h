@@ -105,6 +105,14 @@ void ListSpeechBubbleTypes(CComboBox& cb);
 void ListGlobals(CComboBox& cb);
 void ListRulesGlobals(CComboBox& cb);
 void ListTechtypes(CComboBox& cb);
+void ListVariableOperations(CComboBox& cb);
+void ListRadarModes(CComboBox& cb);
+void ListAttachEffectTypes(CComboBox& cb);
+void ListBannerTypes(CComboBox& cb);
+void ListAITargetTypes(CComboBox& cb);
+void ListMoveActionEndModes(CComboBox& cb);
+void ListOnlyTargetHouseEnemyModes(CComboBox& cb);
+void ListAIScriptLists(CComboBox& cb);
 
 
 // some easy-to-use functions

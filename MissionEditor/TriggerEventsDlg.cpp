@@ -298,6 +298,7 @@ void CTriggerEventsDlg::OnEditchangeEventtype()
 #endif
 
 	CString desc=GetParam(eventdata,5);
+	desc=TranslateStringACP(desc);
 	desc.Replace("%1",",");
 	m_EventDescription.SetWindowText(desc); 
 	
@@ -352,11 +353,12 @@ void CTriggerEventsDlg::OnEditchangeEventtype()
 		int add=0;
 		if(code==2) add=1;
 		
-			if(atoi(ptype[i])!=0 && atoi(ptype[i])>0 && atoi(ptype[i])!=47)
+			if(atoi(ptype[i])!=0 && atoi(ptype[i])>0 && atoi(ptype[i])!=47
+				&& !isTrue(GetParam(g_data.sections["ParamTypes"].values[ptype[i]], 3)))
 			{
 				CString paramname=GetParam(g_data.sections["ParamTypes"].values[ptype[i]], 0);				
 				
-				m_Parameter.SetItemData(m_Parameter.AddString(paramname), i+add);
+				m_Parameter.SetItemData(m_Parameter.AddString(TranslateStringACP(paramname)), i+add);
 			}
 		
 		
@@ -532,7 +534,7 @@ void CTriggerEventsDlg::UpdateDialog()
 			eventdata=g_data.sections["EventsRA2"].values[eventid];
 #endif*/
 
-		CString text=eventid+" "+GetParam(eventdata,0);
+		CString text=eventid+" "+TranslateStringACP(GetParam(eventdata,0));
 		text.Replace("%1",",");
 #ifdef RA2_MODE
 		// MW 07/18/01

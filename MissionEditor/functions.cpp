@@ -310,6 +310,33 @@ void HandleParamList(CComboBox &cb, int type)
 	case PARAMTYPE_TECHTYPES:
 		ListTechtypes(cb);
 		break;
+	case PARAMTYPE_VARIABLE_OPERATIONS:
+		ListVariableOperations(cb);
+		break;
+	case PARAMTYPE_RADAR_MODES:
+		ListRadarModes(cb);
+		break;
+	case PARAMTYPE_ATTACH_EFFECT_TYPES:
+		ListAttachEffectTypes(cb);
+		break;
+	case PARAMTYPE_BANNER_TYPES:
+		ListBannerTypes(cb);
+		break;
+	case PARAMTYPE_AI_TARGET_TYPES:
+		ListAITargetTypes(cb);
+		break;
+	case PARAMTYPE_TARGETS:
+		ListTargets(cb);
+		break;
+	case PARAMTYPE_MOVE_ACTION_END_MODES:
+		ListMoveActionEndModes(cb);
+		break;
+	case PARAMTYPE_ONLY_TARGET_HOUSE_ENEMY:
+		ListOnlyTargetHouseEnemyModes(cb);
+		break;
+	case PARAMTYPE_AI_SCRIPT_LISTS:
+		ListAIScriptLists(cb);
+		break;
 	}
 }
 
@@ -1589,23 +1616,112 @@ void ListWaypoints(CComboBox &cb)
 	if(sel>=0) cb.SetCurSel(sel);
 }
 
+static void ListDataSectionEntries(CComboBox& cb, const char* sectionName);
+
 void ListTargets(CComboBox &cb)
 {
-	int sel=cb.GetCurSel();
+	ListDataSectionEntries(cb, "TargetTypes");
+}
 
+void ListVariableOperations(CComboBox& cb)
+{
+	ListDataSectionEntries(cb, "VariableOperations");
+}
+
+void ListRadarModes(CComboBox& cb)
+{
+	ListDataSectionEntries(cb, "RadarModes");
+}
+
+static void ListDataSectionEntries(CComboBox& cb, const char* sectionName)
+{
+	const int selection=cb.GetCurSel();
 	while(cb.DeleteString(0)!=CB_ERR);
 
-	cb.AddString("1 - Not specified");
-	cb.AddString("2 - Buildings");
-	cb.AddString("3 - Harvesters");
-	cb.AddString("4 - Infantry");
-	cb.AddString("5 - Vehicles");
-	cb.AddString("6 - Factories");
-	cb.AddString("7 - Base defenses");
-	cb.AddString("9 - Power plants");
+	const CIniFileSection* section=g_data.GetSection(sectionName);
+	if(!section) return;
 
-	if(sel>=0) cb.SetCurSel(sel);
+	for(const auto& entry : section->values)
+	{
+		CString text=entry.first;
+		if(!entry.second.IsEmpty())
+		{
+			text+=" - ";
+			text+=TranslateStringACP(entry.second);
+		}
+		cb.AddString(text);
+	}
 
+	if(selection>=0 && selection<cb.GetCount()) cb.SetCurSel(selection);
+}
+
+static void ListRulesSectionEntries(CComboBox& cb, const char* sectionName)
+{
+	while(cb.DeleteString(0)!=CB_ERR);
+
+	const CIniFileSection* section=rules.GetSection(sectionName);
+	if(!section) return;
+
+	for(const auto& entry : section->values)
+	{
+		CString text=entry.first;
+		if(!entry.second.IsEmpty())
+		{
+			text+=" ";
+			text+=entry.second;
+		}
+		cb.AddString(text);
+	}
+}
+
+static void ListRulesSectionValues(CComboBox& cb, const char* sectionName)
+{
+	while(cb.DeleteString(0)!=CB_ERR);
+
+	const CIniFileSection* section=rules.GetSection(sectionName);
+	if(!section) return;
+
+	for(const auto& entry : section->values)
+	{
+		CString text=entry.second;
+		if(!entry.first.IsEmpty())
+		{
+			text+=" (";
+			text+=entry.first;
+			text+=")";
+		}
+		cb.AddString(text);
+	}
+}
+
+void ListAttachEffectTypes(CComboBox& cb)
+{
+	ListRulesSectionValues(cb, "AttachEffectTypes");
+}
+
+void ListBannerTypes(CComboBox& cb)
+{
+	ListRulesSectionValues(cb, "BannerTypes");
+}
+
+void ListAITargetTypes(CComboBox& cb)
+{
+	ListRulesSectionEntries(cb, "AITargetTypes");
+}
+
+void ListMoveActionEndModes(CComboBox& cb)
+{
+	ListDataSectionEntries(cb, "MoveActionEndModes");
+}
+
+void ListOnlyTargetHouseEnemyModes(CComboBox& cb)
+{
+	ListDataSectionEntries(cb, "OnlyTargetHouseEnemyModes");
+}
+
+void ListAIScriptLists(CComboBox& cb)
+{
+	ListRulesSectionEntries(cb, "AIScriptsList");
 }
 
 
