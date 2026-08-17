@@ -28,13 +28,11 @@
 #pragma once
 
 #include <functional>
+#include <vector>
 #include "FieldData.h"
 
 struct SNAPSHOTDATA
 {
-	SNAPSHOTDATA();
-	// frees all allocated field buffers and resets the pointers, safe to call multiple times
-	void Free();
 	int left;
 	int top;
 	int bottom;
@@ -43,15 +41,15 @@ struct SNAPSHOTDATA
 	// FIELDDATA::bRedrawTerrain is a one-bit flag.  Keeping it as a byte in a
 	// snapshot preserves its 0/1 value while avoiding the four-byte Win32 BOOL
 	// representation for every captured cell.
-	BYTE* bRedrawTerrain;
-	BYTE* overlay;
-	BYTE* overlaydata;
-	WORD* wGround;
-	WORD* bMapData;
-	BYTE* bSubTile;
-	BYTE* bHeight;
-	BYTE* bMapData2;
-	BYTE* bRNDData;
+	std::vector<BYTE> bRedrawTerrain;
+	std::vector<BYTE> overlay;
+	std::vector<BYTE> overlaydata;
+	std::vector<WORD> wGround;
+	std::vector<WORD> bMapData;
+	std::vector<BYTE> bSubTile;
+	std::vector<BYTE> bHeight;
+	std::vector<BYTE> bMapData2;
+	std::vector<BYTE> bRNDData;
 	//CIniFile mapfile;
 };
 
@@ -79,11 +77,11 @@ public:
 
 	bool CanUndo() const
 	{
-		return dwSnapShotCount > 0 && m_cursnapshot >= 0;
+		return !m_snapshots.empty() && m_cursnapshot >= 0;
 	}
 	bool CanRedo() const
 	{
-		return dwSnapShotCount > m_cursnapshot + 1 && dwSnapShotCount > 0;
+		return static_cast<std::size_t>(m_cursnapshot + 1) < m_snapshots.size();
 	}
 
 	// `onBeforeRestore(x, y)` runs while the cell still holds its current
@@ -103,7 +101,6 @@ private:
 		const std::function<void(int, int)>& onBeforeRestore,
 		const std::function<void(int, int)>& onAfterRestore);
 
-	SNAPSHOTDATA* m_snapshots;
-	DWORD dwSnapShotCount;
+	std::vector<SNAPSHOTDATA> m_snapshots;
 	int m_cursnapshot;
 };

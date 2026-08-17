@@ -338,6 +338,18 @@ void Tests::test_snapshot_redraw_flag()
 
 	TEST(snapshots.Undo(fielddata, 1, {}, {}));
 	REPORT_TEST(fielddata[0].bRedrawTerrain == TRUE);
+
+	// The history must stay bounded and discarding a redo branch must not
+	// retain buffers from the removed snapshots.
+	for (int i = 0; i < CMapSnapshots::MAX_SNAPSHOTS + 2; ++i)
+	{
+		fielddata[0].bHeight = static_cast<BYTE>(i);
+		snapshots.TakeSnapshot(fielddata, 1, TRUE, 0, 0, 1, 1);
+	}
+	TEST(snapshots.Undo(fielddata, 1, {}, {}));
+	fielddata[0].bHeight = 42;
+	snapshots.TakeSnapshot(fielddata, 1, TRUE, 0, 0, 1, 1);
+	REPORT_TEST(!snapshots.CanRedo());
 }
 
 void Tests::test_waypoint_codec()

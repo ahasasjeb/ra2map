@@ -33,6 +33,7 @@
 #include "FieldData.h"
 #include "MapSnapshots.h"
 #include "MapMinimap.h"
+#include <memory>
 
 
 extern TILEDATA** tiledata;
@@ -635,12 +636,12 @@ private:
 #endif
 	BYTE m_Overlay[OVERLAY_PACK_GRID_AREA]; // overlay byte values (extracted)
 	BYTE m_OverlayData[OVERLAY_PACK_GRID_AREA]; // overlay data byte values (extracted)
-	BYTE* m_mfd;	// map field data buffer
+	std::unique_ptr<BYTE[]> m_mfd;	// map field data buffer
 	DWORD dwIsoMapSize;
 	CIniFile m_mapfile;
 	RECT m_maprect;
 	RECT m_vismaprect;
-	FIELDDATA* fielddata;
+	std::unique_ptr<FIELDDATA[]> fielddata;
 	int fielddata_size;
 	// undo/redo history lives in its own class now (see MapSnapshots.h)
 	CMapSnapshots m_snapshots;

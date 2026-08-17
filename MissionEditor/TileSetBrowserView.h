@@ -27,6 +27,9 @@
 // TileSetBrowserView.h : Header-Datei
 //
 
+#include <atlcomcli.h>
+#include <vector>
+
 /////////////////////////////////////////////////////////////////////////////
 // Ansicht CTileSetBrowserView 
 
@@ -58,10 +61,10 @@ public:
 	int GetAddedHeight(DWORD dwID);
 	int m_bottom_needed;
 	void DrawIt();
-	LPDIRECTDRAWSURFACE4* m_lpDDS;
+	std::vector<CComPtr<IDirectDrawSurface4>> m_lpDDS;
 	void SetTileSet(DWORD dwTileSet, BOOL bOnlyRedraw=FALSE);
 	DWORD GetTileID(DWORD dwTileSet, DWORD dwType);
-	int m_currentTileSet;
+	int m_currentTileSet = 0;
 	// Rebuilds the cached tile surfaces after the DirectDraw objects were
 	// reinitialized (e.g. after a lost-surface recovery). The old surfaces
 	// belong to a lost device and must never be drawn from.
@@ -81,9 +84,9 @@ public:
 protected:
 	int m_CurrentMode;
 	LPDIRECTDRAWSURFACE4 RenderTile(DWORD dwID);
-	int m_tilecount;
-	int m_tile_height;
-	int m_tile_width;
+	int m_tilecount = 0;
+	int m_tile_height = 0;
+	int m_tile_width = 0;
 };
 
 /////////////////////////////////////////////////////////////////////////////

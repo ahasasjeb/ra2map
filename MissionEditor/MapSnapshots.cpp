@@ -21,38 +21,8 @@
 #include "stdafx.h"
 #include "MapSnapshots.h"
 
-SNAPSHOTDATA::SNAPSHOTDATA()
-{
-	memset(this, 0, sizeof(SNAPSHOTDATA));
-}
-
-void SNAPSHOTDATA::Free()
-{
-	if (bRedrawTerrain) delete[] bRedrawTerrain;
-	if (overlay) delete[] overlay;
-	if (overlaydata) delete[] overlaydata;
-	if (wGround) delete[] wGround;
-	if (bMapData) delete[] bMapData;
-	if (bSubTile) delete[] bSubTile;
-	if (bHeight) delete[] bHeight;
-	if (bMapData2) delete[] bMapData2;
-	if (bRNDData) delete[] bRNDData;
-
-	bRedrawTerrain = NULL;
-	overlay = NULL;
-	overlaydata = NULL;
-	wGround = NULL;
-	bMapData = NULL;
-	bSubTile = NULL;
-	bHeight = NULL;
-	bMapData2 = NULL;
-	bRNDData = NULL;
-}
-
 CMapSnapshots::CMapSnapshots()
 {
-	m_snapshots = NULL;
-	dwSnapShotCount = 0;
 	m_cursnapshot = -1;
 }
 
@@ -63,14 +33,7 @@ CMapSnapshots::~CMapSnapshots()
 
 void CMapSnapshots::Clear()
 {
-	for (DWORD i = 0; i < dwSnapShotCount; i++)
-	{
-		m_snapshots[i].Free();
-	}
-
-	if (m_snapshots) delete[] m_snapshots;
-	m_snapshots = NULL;
-	dwSnapShotCount = 0;
+	m_snapshots.clear();
 	m_cursnapshot = -1;
 }
 
@@ -86,8 +49,6 @@ This method is very fast, as long as you don´t copy the whole map all the time.
 */
 void CMapSnapshots::TakeSnapshot(FIELDDATA* fielddata, DWORD isoSize, BOOL bEraseFollowing, int left, int top, int right, int bottom)
 {
-	DWORD dwOldSnapShotCount = dwSnapShotCount;
-
 	if (left < 0) left = 0;
 	if (top < 0) top = 0;
 	if (right > (int)isoSize) right = (int)isoSize;
@@ -96,70 +57,40 @@ void CMapSnapshots::TakeSnapshot(FIELDDATA* fielddata, DWORD isoSize, BOOL bEras
 	if (right == 0) right = (int)isoSize;
 	if (bottom == 0) bottom = (int)isoSize;
 
-	int e;
 	if (bEraseFollowing)
 	{
-		for (e = dwSnapShotCount - 1;e > m_cursnapshot;e--)
-		{
-			m_snapshots[e].Free();
-		}
-		dwSnapShotCount = m_cursnapshot + 1;
+		m_snapshots.erase(m_snapshots.begin() + m_cursnapshot + 1, m_snapshots.end());
 	}
 
-
-	dwSnapShotCount += 1;
-	m_cursnapshot++;
-
-	if (dwSnapShotCount > MAX_SNAPSHOTS)
+	if (m_snapshots.size() == MAX_SNAPSHOTS)
 	{
-		dwSnapShotCount = MAX_SNAPSHOTS;
-		m_cursnapshot = MAX_SNAPSHOTS - 1;
-		int i;
-		m_snapshots[0].Free();
-		for (i = 1;i < (int)dwSnapShotCount;i++)
-		{
-			m_snapshots[i - 1] = m_snapshots[i];
-		}
-
-	}
-	else
-	{
-		SNAPSHOTDATA* b = new(SNAPSHOTDATA[dwSnapShotCount]);
-
-		if (m_snapshots)
-		{
-			memcpy(b, m_snapshots, sizeof(SNAPSHOTDATA) * (dwSnapShotCount - 1));
-			delete[] m_snapshots;
-		}
-
-		m_snapshots = b;
+		m_snapshots.erase(m_snapshots.begin());
 	}
 
-
-	m_cursnapshot = dwSnapShotCount - 1;
-
-
-	SNAPSHOTDATA ss = m_snapshots[dwSnapShotCount - 1];
+	m_snapshots.emplace_back();
+	m_cursnapshot = static_cast<int>(m_snapshots.size()) - 1;
+	SNAPSHOTDATA& ss = m_snapshots.back();
 	// ss.mapfile=m_mapfile;
 	int width, height;
 	width = right - left;
 	height = bottom - top;
 
-	int size = width * height;
+	const std::size_t size = static_cast<std::size_t>(width) * height;
 	ss.left = left;
 	ss.top = top;
 	ss.right = right;
 	ss.bottom = bottom;
-	ss.bHeight = new(BYTE[size]);
-	ss.bMapData = new(WORD[size]);
-	ss.bSubTile = new(BYTE[size]);
-	ss.bMapData2 = new(BYTE[size]);
-	ss.wGround = new(WORD[size]);
-	ss.overlay = new(BYTE[size]);
-	ss.overlaydata = new(BYTE[size]);
-	ss.bRedrawTerrain = new(BYTE[size]);
-	ss.bRNDData = new(BYTE[size]);
+	ss.bHeight.resize(size);
+	ss.bMapData.resize(size);
+	ss.bSubTile.resize(size);
+	ss.bMapData2.resize(size);
+	ss.wGround.resize(size);
+	ss.overlay.resize(size);
+	ss.overlaydata.resize(size);
+	ss.bRedrawTerrain.resize(size);
+	ss.bRNDData.resize(size);
 	int i;
+	int e;
 	for (i = 0;i < width;i++)
 	{
 		for (e = 0;e < height;e++)
@@ -178,8 +109,6 @@ void CMapSnapshots::TakeSnapshot(FIELDDATA* fielddata, DWORD isoSize, BOOL bEras
 			ss.bRNDData[pos_w] = fielddata[pos_r].bRNDImage;
 		}
 	}
-
-	m_snapshots[dwSnapShotCount - 1] = ss;
 
 }
 
@@ -228,10 +157,9 @@ bool CMapSnapshots::Undo(FIELDDATA* fielddata, DWORD isoSize,
 	const std::function<void(int, int)>& onBeforeRestore,
 	const std::function<void(int, int)>& onAfterRestore)
 {
-	if (dwSnapShotCount == 0) return false;
+	if (m_snapshots.empty()) return false;
 	if (m_cursnapshot < 0) return false;
 
-	//dwSnapShotCount--;
 	m_cursnapshot -= 1;
 
 	RestoreSnapshot(fielddata, isoSize, m_snapshots[m_cursnapshot + 1], onBeforeRestore, onAfterRestore);
@@ -247,11 +175,11 @@ bool CMapSnapshots::Redo(FIELDDATA* fielddata, DWORD isoSize,
 	const std::function<void(int, int)>& onBeforeRestore,
 	const std::function<void(int, int)>& onAfterRestore)
 {
-	if (dwSnapShotCount <= (DWORD)(m_cursnapshot + 1) || !dwSnapShotCount) return false;
+	if (!CanRedo()) return false;
 
-	m_cursnapshot += 1; // dwSnapShotCount-1;
+	m_cursnapshot += 1;
 
-	if (m_cursnapshot + 1 >= (int)dwSnapShotCount) m_cursnapshot = dwSnapShotCount - 2;
+	if (m_cursnapshot + 1 >= static_cast<int>(m_snapshots.size())) m_cursnapshot = static_cast<int>(m_snapshots.size()) - 2;
 
 	RestoreSnapshot(fielddata, isoSize, m_snapshots[m_cursnapshot + 1], onBeforeRestore, onAfterRestore);
 

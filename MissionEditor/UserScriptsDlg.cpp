@@ -28,6 +28,8 @@
 #include <fcntl.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <array>
+#include <vector>
 #include "variables.h"
 #include "functions.h"
 #include "inlines.h"
@@ -44,14 +46,13 @@ using namespace std;
 
 struct FunctionData
 {
-	CString* name;
-	CString* param;
-public:
-	void Init();
-	FunctionData();
-	int paramcount;
-	void AddParam();
-	~FunctionData();
+	CString name;
+	std::vector<CString> params;
+
+	void AddParam()
+	{
+		params.emplace_back();
+	}
 };
 
 struct JumpLineData
@@ -67,15 +68,15 @@ public:
 	char errortext[250];
 	int error;
 	int functioncount;
-	int GetFunction(int index, CString* name, CString *params[], int* paramcount);
-	int FindJumpLine(CString name);
+	int GetFunction(int index, CString* name, std::vector<CString>* params) const;
+	int FindJumpLine(const CString& name) const;
 	int LoadFile(const char* filename);
 	CUserScript();
-	virtual ~CUserScript();
+	~CUserScript() = default;
 
 private:
 	int AllocateFunction();
-	FunctionData* functiondata;
+	std::vector<FunctionData> functiondata;
 	map<CString, int> jumplinedata;
 
 
@@ -84,20 +85,13 @@ private:
 
 CUserScript::CUserScript()
 {
-	functioncount=0;
-	functiondata=NULL;
-
+	functioncount = 0;
 }
 
-CUserScript::~CUserScript()
-{
-	if(functiondata!=NULL) free( functiondata);
-}
-
-int CUserScript::FindJumpLine(CString name)
+int CUserScript::FindJumpLine(const CString& name) const
 {
 	if(jumplinedata.find(name)==jumplinedata.end()) return -1;
-	return jumplinedata[name];
+	return jumplinedata.at(name);
 }
 
 int CUserScript::LoadFile(const char *setupfile)
@@ -129,20 +123,20 @@ int CUserScript::LoadFile(const char *setupfile)
 	}
 
 	_lseek(file, 0, SEEK_SET);
-	unsigned char *data=new(unsigned char[filesize+5]);
+	std::vector<unsigned char> data(filesize + 5);
 	data[filesize]=0;
 	for (parsepos=0;parsepos<filesize;parsepos++)
 	{
-		_read(file, data+parsepos, 1);
+		_read(file, data.data() + parsepos, 1);
 	}
 	_close(file);
 		
     //MessageBox(0,(char*)data,"DEBUG: SETUPSCRIPT:/",0);
 
-	BYTE jumplinename[512];
+	std::array<BYTE, 512> jumplinename{};
 	// (the original memset had value/size swapped and was a no-op,
 	// leaving the buffer uninitialized for the first strcat)
-	memset(jumplinename, 0, sizeof(jumplinename));
+	jumplinename.fill(0);
 
 	//// MAIN STUFF HERE ////
 	for(parsepos=0;parsepos<filesize;parsepos++)
@@ -160,7 +154,7 @@ int CUserScript::LoadFile(const char *setupfile)
 				inNewOrder=TRUE;
 				inComment=FALSE;
 				inJumpLine=FALSE;
-				memset(jumplinename, 0, 512);
+				jumplinename.fill(0);
 				
 			}
 		}
@@ -186,7 +180,7 @@ int CUserScript::LoadFile(const char *setupfile)
 				inFunction=TRUE;
 				int pos=AllocateFunction();
 				//*functiondata[pos-1].name.append(data[parsepos]);
-				*functiondata[pos-1].name = (char)data[parsepos];
+				functiondata[pos-1].name = static_cast<char>(data[parsepos]);
 			}
 
 		}
@@ -202,13 +196,13 @@ int CUserScript::LoadFile(const char *setupfile)
 				if(data[parsepos+1]=='n' || data[parsepos+1]=='N')
 				{
 					data[parsepos]='\n';
-					functiondata[functioncount-1].param[functiondata[functioncount-1].paramcount-1]+=data[parsepos];
+					functiondata[functioncount-1].params.back() += data[parsepos];
 					parsepos++;
 				}
 				if(data[parsepos+1]=='r' || data[parsepos+1]=='R')
 				{
 					data[parsepos]='\r';
-					functiondata[functioncount-1].param[functiondata[functioncount-1].paramcount-1]+=data[parsepos];
+					functiondata[functioncount-1].params.back() += data[parsepos];
 					parsepos++;
 				}
 			}
@@ -224,7 +218,7 @@ int CUserScript::LoadFile(const char *setupfile)
 			{
 
 				// add character to param
-				functiondata[functioncount-1].param[functiondata[functioncount-1].paramcount-1]+=data[parsepos];
+				functiondata[functioncount-1].params.back() += data[parsepos];
 				if(data[parsepos]=='"' && data[parsepos+1]=='"') parsepos++; // ignore the next "
 
 
@@ -234,7 +228,7 @@ int CUserScript::LoadFile(const char *setupfile)
 		{
 			if(IsCharAlphaNumeric(data[parsepos])!=0)
 			{
-				*functiondata[functioncount-1].name+=data[parsepos];
+				functiondata[functioncount-1].name += data[parsepos];
 			}
 			else
 			{
@@ -250,7 +244,7 @@ int CUserScript::LoadFile(const char *setupfile)
 				// add a param!
 				inParam=TRUE;
 				functiondata[functioncount-1].AddParam();
-				functiondata[functioncount-1].param[functiondata[functioncount-1].paramcount-1]="";
+				functiondata[functioncount-1].params.back() = "";
 			}
 			if(data[parsepos]==')')
 			{
@@ -265,19 +259,19 @@ int CUserScript::LoadFile(const char *setupfile)
 			{
 				// guard the fixed 512-byte label buffer against
 				// overlong jump line labels in user scripts
-				if (strlen((char*)jumplinename) + 1 < sizeof(jumplinename))
+				if (strlen(reinterpret_cast<char*>(jumplinename.data())) + 1 < jumplinename.size())
 				{
 					char d[2];
 					d[0]=data[parsepos];
 					d[1]=0;
-					strcat((char*)jumplinename, d);
+					strcat(reinterpret_cast<char*>(jumplinename.data()), d);
 				}
 			}
 			else
 			{
-				jumplinedata[jumplinename]=functioncount;
+				jumplinedata[reinterpret_cast<char*>(jumplinename.data())]=functioncount;
 				//MessageBox(0,(char*)jumplinename,"",0);
-				memset(jumplinename, 0, 512);
+				jumplinename.fill(0);
 				inJumpLine=FALSE;
 				inNewOrder=TRUE;
 			}
@@ -292,121 +286,22 @@ int CUserScript::LoadFile(const char *setupfile)
 
 
 		
-	delete[] (data);
 	return 0;
 }
 
-int CUserScript::GetFunction(int index, CString *name, CString * params[], int* paramcount)
+int CUserScript::GetFunction(int index, CString* name, std::vector<CString>* params) const
 {
 	if(index<0 || index>=functioncount) return -1;
 
-	*name=*functiondata[index].name;
-	*paramcount=functiondata[index].paramcount;
-	
-	//if(params==NULL) return 0;
-	if (*paramcount>0)
-	{
-		*params=new(CString[*paramcount]);
-	}
-	else *params=0;
-	
-
-	int i;
-	for(i=0;i<*paramcount;i++)
-	{
-		//params[i]=new(CString);
-		CString* str=*params;
-		str[i]=functiondata[index].param[i];
-		//memcpy((void*)params[i], (void*) &functiondata[index].param[i], &function
-		//MessageBox(0,functiondata[index].param[i].data(),"",0);
-	}
-
-
+	*name = functiondata[index].name;
+	*params = functiondata[index].params;
 	return 0;
-}
-
-void FunctionData::AddParam()
-{
-	//CString* tmp=NULL;
-	//if(paramcount>0)
-	//{
-		
-		//tmp=new(CString[paramcount]);
-		//memcpy((void*)tmp, param, sizeof(CString)*paramcount);
-				
-		//delete[] (functiondata); //delete is bad-> CStrings would be deallocated!
-		//delete[](param);
-		//param=NULL;
-	//}
-	//param=(CString*)realloc(param, (paramcount+1)*sizeof(CString));
-	//param[paramcount]=CString();
-	//CString hack;
-	//memset(&param[paramcount], 0, sizeof(CString));
-	//memcpy(&param[paramcount], &hack, sizeof(CString));
-	//param[paramcount]="";
-	//param=new(CString[paramcount+1]);
-	//
-	//memcpy((void*) param, (void*) tmp, sizeof(CString)*paramcount);
-	
-	//name="";
-
-	CString* newparam=new(CString[paramcount+1]);
-	int i;
-	for(i=0;i<paramcount;i++)
-	{
-		newparam[i]=param[i];
-	}
-	newparam[paramcount]="";
-
-	delete[] param;
-
-	param=newparam;
-
-	paramcount++;
-	//delete[](tmp);
-	
-}
-
-
-FunctionData::FunctionData()
-{
-	paramcount=0;
-	param=NULL;
-	name=new(CString);
-}
-
-FunctionData::~FunctionData()
-{
-	if (param!=NULL) delete[] param;
-	paramcount=0;
-	delete (name);
 }
 
 int CUserScript::AllocateFunction()
 {
-	/*FunctionData* tmp=NULL;
-	if(functioncount>0)
-	{
-		
-		tmp=new(FunctionData[functioncount]);
-		memcpy((void*)tmp, functiondata, sizeof(FunctionData)*functioncount);
-		delete[] functiondata;
-		functiondata=NULL;
-	}
-
-	functiondata=new(FunctionData[functioncount+1]);
-	
-	memcpy((void*) functiondata, (void*) tmp, sizeof(FunctionData)*functioncount);
-	
-	functiondata[functioncount].name="";*/
-	functiondata=(FunctionData*)realloc(functiondata, sizeof(FunctionData)*(functioncount+1));
-	
-	functiondata[functioncount].Init();
-
-	*functiondata[functioncount].name="HUHU";
-
-	functioncount++;
-	//delete[] (tmp);
+	functiondata.emplace_back();
+	++functioncount;
 	return functioncount;
 }
 
@@ -414,14 +309,6 @@ void CUserScript::RaiseErr(int n, const char *str)
 {
 
 }
-
-void FunctionData::Init()
-{
-	paramcount=0;
-	param=NULL;
-	name=new(CString);
-}
-
 
 /////////////////////////////////////////////////////////////////////////////
 // Dialogfeld CUserScriptsDlg 
@@ -642,7 +529,7 @@ struct FUNC_INFO
 {
 	int type;
 	CString name;
-	CString* params;
+	std::vector<CString> params;
 	int paramcount;
 };
 
@@ -705,7 +592,8 @@ void CUserScriptsDlg::OnOK()
 		FUNC_INFO info;
 		CString& name=info.name;
 
-		s.GetFunction(i, &info.name, &info.params, &info.paramcount);
+		s.GetFunction(i, &info.name, &info.params);
+		info.paramcount = static_cast<int>(info.params.size());
 
 		
 		
@@ -3242,12 +3130,6 @@ nextline_no_update:
 
 		delete[] params;	
 		
-	}
-
-	for(i=0;i<functions.size();i++)
-	{
-		delete[] functions[i].params;
-		functions[i].params=NULL;
 	}
 
 	m_Report=report;

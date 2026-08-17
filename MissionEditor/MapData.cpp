@@ -204,12 +204,12 @@ CMapData::CMapData()
 {
 	m_noAutoObjectUpdate = FALSE;
 	m_money = 0;
-	fielddata = NULL;
+	fielddata.reset();
 	fielddata_size = 0;
 	m_IsoSize = 0;
 	isInitialized = FALSE;
 	tiledata = NULL;
-	m_mfd = NULL;
+	m_mfd.reset();
 	dwIsoMapSize = 0;
 
 	// the minimap DIB initializes itself (CMapMinimap)
@@ -223,10 +223,8 @@ CMapData::~CMapData()
 	// MW : Do not delete tiledata here!
 	//if(*tiledata!=NULL) delete[] *tiledata;
 	tiledata = NULL;
-	if (m_mfd != NULL) delete[] m_mfd;
-	m_mfd = NULL;
-	if (fielddata != NULL) delete[] fielddata;
-	fielddata = NULL;
+	m_mfd.reset();
+	fielddata.reset();
 	fielddata_size = 0;
 
 	m_snapshots.Clear();
@@ -534,10 +532,10 @@ void CMapData::LoadMap(const std::string& file)
 	errstream << "LoadMap() frees memory\n";
 	errstream.flush();
 
-	if (fielddata != NULL) delete[] fielddata;
+	fielddata.reset();
 	m_snapshots.Clear();
 
-	fielddata = NULL;
+	fielddata.reset();
 	fielddata_size = 0;
 
 	m_tubes.clear();
@@ -881,7 +879,7 @@ void CMapData::LoadMap(const std::string& file)
 	errstream << "LoadMap() allocates fielddata\n";
 	errstream.flush();
 
-	fielddata = new(FIELDDATA[(GetIsoSize() + 1) * (GetIsoSize() + 1)]);
+	fielddata = std::make_unique<FIELDDATA[]>((GetIsoSize() + 1) * (GetIsoSize() + 1));
 	fielddata_size = (GetIsoSize() + 1) * (GetIsoSize() + 1);
 
 	errstream << "LoadMap() unpacks data\n";
@@ -990,8 +988,7 @@ void CMapData::Unpack()
 	delete[] lpMapPack;
 
 
-	if (m_mfd != NULL) delete[] m_mfd;
-	m_mfd = NULL;
+	m_mfd.reset();
 	dwIsoMapSize = 0;
 
 	if (IsoMapPck.GetLength() > 0)
@@ -1011,15 +1008,14 @@ void CMapData::Unpack()
 
 		if (MapSizeBytes > 0)
 		{
-			m_mfd = new(BYTE[MapSizeBytes]);
+			m_mfd = std::make_unique<BYTE[]>(MapSizeBytes);
 			dwIsoMapSize = MapSizeBytes / MAPFIELDDATA_SIZE;
 
-			if (FSunPackLib::DecodeIsoMapPack5(hexC.data(), hexlen, (BYTE*)m_mfd, MapSizeBytes, d.m_Progress.m_hWnd, TRUE) != MapSizeBytes)
+			if (FSunPackLib::DecodeIsoMapPack5(hexC.data(), hexlen, m_mfd.get(), MapSizeBytes, d.m_Progress.m_hWnd, TRUE) != MapSizeBytes)
 			{
 				// malformed pack: leave the field buffer empty instead of
 				// corrupting the heap (the old code overflowed here)
-				delete[] m_mfd;
-				m_mfd = NULL;
+				m_mfd.reset();
 				dwIsoMapSize = 0;
 			}
 		}
@@ -1195,7 +1191,7 @@ void CMapData::Pack(BOOL bCreatePreview, BOOL bCompression)
 	errstream.flush();
 
 
-	hexpackedLen = FSunPackLib::EncodeIsoMapPack5(m_mfd, dwIsoMapSize * MAPFIELDDATA_SIZE, &hexpacked);
+	hexpackedLen = FSunPackLib::EncodeIsoMapPack5(m_mfd.get(), dwIsoMapSize * MAPFIELDDATA_SIZE, &hexpacked);
 
 
 	errstream << "done" << endl;
@@ -3567,10 +3563,10 @@ void CMapData::UpdateMapFieldData(BOOL bSave)
 
 		// this code here must be improved to produce smaller maps. Just ignore the data outside the visible rect!
 
-		if (m_mfd) delete[] m_mfd;
+		m_mfd.reset();
 		dwIsoMapSize = m_IsoSize * m_IsoSize + 15;
-		m_mfd = new(BYTE[(dwIsoMapSize + m_IsoSize * m_IsoSize) * MAPFIELDDATA_SIZE]);
-		memset(m_mfd, 0, dwIsoMapSize * MAPFIELDDATA_SIZE);
+		m_mfd = std::make_unique<BYTE[]>((dwIsoMapSize + m_IsoSize * m_IsoSize) * MAPFIELDDATA_SIZE);
+		memset(m_mfd.get(), 0, dwIsoMapSize * MAPFIELDDATA_SIZE);
 
 
 
@@ -4175,7 +4171,7 @@ MAPFIELDDATA* CMapData::GetMappackPointer(DWORD dwPos)
 
 void CMapData::CreateMap(DWORD dwWidth, DWORD dwHeight, LPCTSTR lpTerrainType, DWORD dwGroundHeight)
 {
-	if (fielddata != NULL) delete[] fielddata;
+	fielddata.reset();
 	int i;
 	m_snapshots.Clear();
 
@@ -4183,7 +4179,7 @@ void CMapData::CreateMap(DWORD dwWidth, DWORD dwHeight, LPCTSTR lpTerrainType, D
 
 
 
-	fielddata = NULL;
+	fielddata.reset();
 	fielddata_size = 0;
 
 
@@ -4535,18 +4531,17 @@ void CMapData::CreateMap(DWORD dwWidth, DWORD dwHeight, LPCTSTR lpTerrainType, D
 	ClearOverlayData();
 
 	isInitialized = TRUE;
-	if (fielddata != NULL) delete[] fielddata;
+	fielddata.reset();
 
 	errstream << "CreateMap() allocates memory\n";
 	errstream.flush();
-	fielddata = new(FIELDDATA[(GetIsoSize() + 1) * (GetIsoSize() + 1)]); // +1 because of some unpacking problems
+	fielddata = std::make_unique<FIELDDATA[]>((GetIsoSize() + 1) * (GetIsoSize() + 1)); // +1 because of some unpacking problems
 	fielddata_size = (GetIsoSize() + 1) * (GetIsoSize() + 1);
 	dwIsoMapSize = 0;
 
 	errstream << "CreateMap() frees m_mfd\n";
 	errstream.flush();
-	if (m_mfd != NULL) delete[] m_mfd;
-	m_mfd = NULL;
+	m_mfd.reset();
 
 	errstream << "CreateMap() loads from ini\n";
 	errstream.flush();
@@ -4943,7 +4938,7 @@ the user hits undo. The history ring itself lives in CMapSnapshots now
 */
 void CMapData::TakeSnapshot(BOOL bEraseFollowing, int left, int top, int right, int bottom)
 {
-	m_snapshots.TakeSnapshot(fielddata, m_IsoSize, bEraseFollowing, left, top, right, bottom);
+	m_snapshots.TakeSnapshot(fielddata.get(), m_IsoSize, bEraseFollowing, left, top, right, bottom);
 }
 
 /*
@@ -4953,7 +4948,7 @@ Very fast
 void CMapData::Undo()
 {
 	const bool mp = IsMultiplayer();
-	m_snapshots.Undo(fielddata, m_IsoSize,
+	m_snapshots.Undo(fielddata.get(), m_IsoSize,
 		[this](int x, int y) {
 			FIELDDATA& fd = fielddata[x + y * (int)m_IsoSize];
 			RemoveOvrlMoney(fd.overlay, fd.overlaydata);
@@ -4983,7 +4978,7 @@ Very fast.
 void CMapData::Redo()
 {
 	const bool mp = IsMultiplayer();
-	m_snapshots.Redo(fielddata, m_IsoSize,
+	m_snapshots.Redo(fielddata.get(), m_IsoSize,
 		[this](int x, int y) {
 			FIELDDATA& fd = fielddata[x + y * (int)m_IsoSize];
 			RemoveOvrlMoney(fd.overlay, fd.overlaydata);
@@ -6736,7 +6731,7 @@ void CMapData::ResizeMap(int iLeft, int iTop, DWORD dwNewWidth, DWORD dwNewHeigh
 	for (i = 0;i < ct_count;i++) DeleteCelltag(0);
 
 
-	FIELDDATA* old_fd = fielddata;
+	auto old_fd = std::move(fielddata);
 	int ow = GetWidth();
 	int oh = GetHeight();
 	int os = GetIsoSize();
@@ -6751,7 +6746,7 @@ void CMapData::ResizeMap(int iLeft, int iTop, DWORD dwNewWidth, DWORD dwNewHeigh
 	m_snapshots.Clear();
 
 
-	fielddata = NULL;
+	fielddata.reset();
 	fielddata_size = 0;
 
 
@@ -6784,14 +6779,13 @@ void CMapData::ResizeMap(int iLeft, int iTop, DWORD dwNewWidth, DWORD dwNewHeigh
 
 	errstream << "ResizeMap() allocates memory\n";
 	errstream.flush();
-	fielddata = new(FIELDDATA[(GetIsoSize() + 1) * (GetIsoSize() + 1)]); // +1 because of some unpacking problems
+	fielddata = std::make_unique<FIELDDATA[]>((GetIsoSize() + 1) * (GetIsoSize() + 1)); // +1 because of some unpacking problems
 	fielddata_size = (GetIsoSize() + 1) * (GetIsoSize() + 1);
 	dwIsoMapSize = 0; // our iso mappack is empty now, as we didn´t load from a file
 
 	errstream << "ResizeMap() frees m_mfd\n";
 	errstream.flush();
-	if (m_mfd != NULL) delete[] m_mfd;
-	m_mfd = NULL;
+	m_mfd.reset();
 
 
 	// x_move and y_move specify the movement for each field, related to the old position
@@ -7062,7 +7056,7 @@ void CMapData::ResizeMap(int iLeft, int iTop, DWORD dwNewWidth, DWORD dwNewHeigh
 	dlg->SetRange(0, m_IsoSize * m_IsoSize);
 	dlg->ShowWindow(SW_SHOW);
 
-	if (old_fd) delete[] old_fd;
+	old_fd.reset();
 
 	errstream << "Init minimap" << endl;
 	errstream.flush();

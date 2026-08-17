@@ -3673,7 +3673,7 @@ BOOL CLoading::InitMixFiles()
 			HMIXFILE mix = FSunPackLib::XCC_OpenMix(path, NULL);
 			if (mix != NULL)
 			{
-				m_hExtraMixes.push_back(mix);
+				m_hExtraMixes.emplace_back(mix);
 				errstream << "ExtraMix loaded: " << static_cast<LPCTSTR>(path) << endl;
 			}
 			else
@@ -3719,7 +3719,7 @@ BOOL CLoading::InitMixFiles()
 	m_hUbn=FSunPackLib::XCC_OpenMix("ubn.mix", m_hTibSun);
 	m_hLun=FSunPackLib::XCC_OpenMix("lun.mix", m_hTibSun);
 	m_hDes=FSunPackLib::XCC_OpenMix("des.mix", m_hTibSun);
-	if(!m_hMarble) FSunPackLib::XCC_OpenMix("marble.mix", m_hTibSun);
+	if(!m_hMarble) m_hMarble=FSunPackLib::XCC_OpenMix("marble.mix", m_hTibSun);
 
 	if(m_hMarble) theApp.m_Options.bSupportMarbleMadness=TRUE;
 
@@ -4100,65 +4100,41 @@ CLoading::~CLoading()
 
 void CLoading::Unload()
 {
-	for (HMIXFILE extraMix : m_hExtraMixes)
-		FSunPackLib::XCC_CloseMix(extraMix);
 	m_hExtraMixes.clear();
 
-	FSunPackLib::XCC_CloseMix(m_hCache);
-	FSunPackLib::XCC_CloseMix(m_hConquer);
-	FSunPackLib::XCC_CloseMix(m_hIsoSnow);
-	FSunPackLib::XCC_CloseMix(m_hIsoTemp);
-	FSunPackLib::XCC_CloseMix(m_hIsoUrb);
-	FSunPackLib::XCC_CloseMix(m_hIsoGen);
-	FSunPackLib::XCC_CloseMix(m_hLocal);
-	FSunPackLib::XCC_CloseMix(m_hTemperat);
-	FSunPackLib::XCC_CloseMix(m_hSnow);
-	FSunPackLib::XCC_CloseMix(m_hUrban);
-	FSunPackLib::XCC_CloseMix(m_hTibSun);
-	FSunPackLib::XCC_CloseMix(m_hSno);
-	FSunPackLib::XCC_CloseMix(m_hTem);
-	FSunPackLib::XCC_CloseMix(m_hUrb);
-	FSunPackLib::XCC_CloseMix(m_hBuildings);
+	m_hLanguage.reset();
+	m_hLangMD.reset();
+	m_hMarble.reset();
+	m_hDes.reset();
+	m_hLun.reset();
+	m_hUbn.reset();
+	m_hUrb.reset();
+	m_hSno.reset();
+	m_hTem.reset();
+	m_hBuildings.reset();
+	m_hCache.reset();
+	m_hConquer.reset();
+	m_hIsoUbn.reset();
+	m_hIsoDes.reset();
+	m_hIsoLun.reset();
+	m_hIsoUrb.reset();
+	m_hIsoGen.reset();
+	m_hIsoTemp.reset();
+	m_hIsoSnow.reset();
+	m_hDesert.reset();
+	m_hLunar.reset();
+	m_hUrbanN.reset();
+	m_hUrban.reset();
+	m_hSnow.reset();
+	m_hTemperat.reset();
+	m_hLocal.reset();
 
+	for (auto& expansion : m_hExpand)
+		expansion.reset();
+	for (auto& cache : m_hECache)
+		cache.reset();
 
-	m_hCache = NULL;
-	m_hConquer = NULL;
-	m_hIsoSnow = NULL;
-	m_hIsoTemp = NULL;
-	m_hIsoUrb = NULL;
-	m_hLocal = NULL;
-	m_hTemperat = NULL;
-	m_hSnow = NULL;
-	m_hUrban = NULL;
-	m_hTibSun = NULL;
-	m_hBuildings = NULL;
-	m_hIsoGen = NULL;
-
-
-	int i = 0;
-	for (i = 0;i < 100; i++)
-	{
-		FSunPackLib::XCC_CloseMix(m_hExpand[i].hExpand);
-		FSunPackLib::XCC_CloseMix(m_hExpand[i].hConquer);
-		FSunPackLib::XCC_CloseMix(m_hExpand[i].hECache);
-		FSunPackLib::XCC_CloseMix(m_hExpand[i].hIsoSnow);
-		FSunPackLib::XCC_CloseMix(m_hExpand[i].hIsoTemp);
-		FSunPackLib::XCC_CloseMix(m_hExpand[i].hIsoUrb);
-		FSunPackLib::XCC_CloseMix(m_hExpand[i].hIsoGen);
-		FSunPackLib::XCC_CloseMix(m_hExpand[i].hTemperat);
-		FSunPackLib::XCC_CloseMix(m_hExpand[i].hSnow);
-		FSunPackLib::XCC_CloseMix(m_hExpand[i].hUrban);
-		FSunPackLib::XCC_CloseMix(m_hExpand[i].hSno);
-		FSunPackLib::XCC_CloseMix(m_hExpand[i].hTem);
-		FSunPackLib::XCC_CloseMix(m_hExpand[i].hUrb);
-		FSunPackLib::XCC_CloseMix(m_hExpand[i].hBuildings);
-		m_hExpand[i].hExpand = NULL;
-	}
-
-	for (i = 0;i < 100; i++)
-	{
-		FSunPackLib::XCC_CloseMix(m_hECache[i]);
-	}
+	m_hTibSun.reset();
 
 	MEMORYSTATUS ms;
 	ms.dwLength = sizeof(MEMORYSTATUS);
@@ -4194,7 +4170,7 @@ HMIXFILE CLoading::FindFileInMix(LPCTSTR lpFilename, TheaterChar* pTheaterChar)
 
 	for(i=100;i>=0; i--)
 	{
-		EXPANDMIX cuExp=m_hExpand[i];
+		const EXPANDMIX& cuExp=m_hExpand[i];
 
 		if(cuExp.hExpand!=NULL)
 		{			

@@ -44,24 +44,13 @@ IMPLEMENT_DYNCREATE(CTileSetBrowserView, CScrollView)
 
 CTileSetBrowserView::CTileSetBrowserView()
 {
-	m_lpDDS = NULL;
 	m_bottom_needed = 1000;
 	m_CurrentMode = 0;
 }
 
 CTileSetBrowserView::~CTileSetBrowserView()
 {
-	if (m_lpDDS)
-	{
-		int i;
-		for (i = 0;i < m_tilecount;i++)
-		{
-			if (m_lpDDS[i]) m_lpDDS[i]->Release();
-		}
-		delete[] m_lpDDS;
-	}
-	m_lpDDS = NULL;
-
+	m_lpDDS.clear();
 }
 
 
@@ -498,22 +487,12 @@ void CTileSetBrowserView::SetTileSet(DWORD dwTileSet, BOOL bOnlyRedraw)
 	m_tile_width += 6;
 	m_tile_height += 6;
 
-	if (m_lpDDS)
-	{
-		int i;
-		for (i = 0;i < m_tilecount;i++)
-		{
-			if (m_lpDDS[i]) m_lpDDS[i]->Release();
-		}
-		delete[] m_lpDDS;
-	}
-
 	m_tilecount = max;
-
-	m_lpDDS = new(LPDIRECTDRAWSURFACE4[m_tilecount]);
+	m_lpDDS.clear();
+	m_lpDDS.resize(m_tilecount);
 	for (i = 0;i < m_tilecount;i++)
 	{
-		m_lpDDS[i] = RenderTile(dwStartID + i);
+		m_lpDDS[i].Attach(RenderTile(dwStartID + i));
 	}
 
 	RECT r;
@@ -537,13 +516,13 @@ void CTileSetBrowserView::ReInitializeTileSurfaces()
 	// The DirectDraw objects were recreated (lost-surface recovery); all
 	// previously cached tile surfaces belong to the old/lost device and
 	// must be re-rendered before they are drawn again.
-	if (m_lpDDS && m_CurrentMode == 1)
+	if (!m_lpDDS.empty() && m_CurrentMode == 1)
 	{
 		DWORD dwStartID = GetTileID(m_currentTileSet, 0);
 		for (int i = 0;i < m_tilecount;i++)
 		{
-			if (m_lpDDS[i]) m_lpDDS[i]->Release();
-			m_lpDDS[i] = RenderTile(dwStartID + i);
+			m_lpDDS[i].Release();
+			m_lpDDS[i].Attach(RenderTile(dwStartID + i));
 		}
 	}
 

@@ -23,8 +23,10 @@
 
 #include "FinalSunDlg.h"	
 #include "MissionEditorPackLib.h"
+#include <array>
 #include <memory>
 #include <optional>
+#include <utility>
 #include <vector>
 
 #if _MSC_VER > 1000
@@ -35,39 +37,115 @@
 
 class VoxelNormalTables;
 
+class MixHandle
+{
+public:
+	MixHandle() = default;
+	MixHandle(HMIXFILE handle) noexcept : m_handle(handle) {}
+	~MixHandle()
+	{
+		reset();
+	}
+
+	MixHandle(const MixHandle&) = delete;
+	MixHandle& operator=(const MixHandle&) = delete;
+
+	MixHandle(MixHandle&& other) noexcept : m_handle(std::exchange(other.m_handle, 0)) {}
+	MixHandle& operator=(MixHandle&& other) noexcept
+	{
+		if (this != &other)
+			reset(std::exchange(other.m_handle, 0));
+		return *this;
+	}
+
+	MixHandle& operator=(HMIXFILE handle) noexcept
+	{
+		reset(handle);
+		return *this;
+	}
+
+	operator HMIXFILE() const noexcept
+	{
+		return m_handle;
+	}
+
+	void reset(HMIXFILE handle = 0) noexcept
+	{
+		if (m_handle != 0 && m_handle != handle)
+			FSunPackLib::XCC_CloseMix(m_handle);
+		m_handle = handle;
+	}
+
+private:
+	HMIXFILE m_handle = 0;
+};
+
 struct EXPANDMIX
 {
-	HMIXFILE hExpand; // NULL if expansion mix does not exist
-	HMIXFILE hECache; // NULL if no ECache
-	HMIXFILE hConquer; // NULL if no Conquer
-	HMIXFILE hLocal;
-	HMIXFILE hIsoSnow; // NULL if no IsoSnow
-	HMIXFILE hIsoTemp; // NULL if no IsoTemp
-	HMIXFILE hIsoUrb;
-	HMIXFILE hIsoGen;
-	HMIXFILE hIsoLun;
-	HMIXFILE hIsoDes;
-	HMIXFILE hIsoUbn;
-	HMIXFILE hIsoGenMd;
-	HMIXFILE hIsoLunMd;
-	HMIXFILE hIsoDesMd;
-	HMIXFILE hIsoUbnMd;
-	HMIXFILE hTemperat; // NULL if no Temperat
-	HMIXFILE hSnow;
-	HMIXFILE hUrban;
-	HMIXFILE hLunar;
-	HMIXFILE hUrbanN;
-	HMIXFILE hDesert;
-	HMIXFILE hGeneric;
-	HMIXFILE hTem;
-	HMIXFILE hSno;
-	HMIXFILE hUrb;
-	HMIXFILE hLun;
-	HMIXFILE hDes;
-	HMIXFILE hUbn;
-	HMIXFILE hBuildings;
-	HMIXFILE hMarble;
-	EXPANDMIX() {memset(this, 0, sizeof(EXPANDMIX));};
+	MixHandle hExpand; // 0 if expansion mix does not exist
+	MixHandle hECache; // 0 if no ECache
+	MixHandle hConquer; // 0 if no Conquer
+	MixHandle hLocal;
+	MixHandle hIsoSnow; // 0 if no IsoSnow
+	MixHandle hIsoTemp; // 0 if no IsoTemp
+	MixHandle hIsoUrb;
+	MixHandle hIsoGen;
+	MixHandle hIsoLun;
+	MixHandle hIsoDes;
+	MixHandle hIsoUbn;
+	MixHandle hIsoGenMd;
+	MixHandle hIsoLunMd;
+	MixHandle hIsoDesMd;
+	MixHandle hIsoUbnMd;
+	MixHandle hTemperat; // 0 if no Temperat
+	MixHandle hSnow;
+	MixHandle hUrban;
+	MixHandle hLunar;
+	MixHandle hUrbanN;
+	MixHandle hDesert;
+	MixHandle hGeneric;
+	MixHandle hTem;
+	MixHandle hSno;
+	MixHandle hUrb;
+	MixHandle hLun;
+	MixHandle hDes;
+	MixHandle hUbn;
+	MixHandle hBuildings;
+	MixHandle hMarble;
+
+	void reset() noexcept
+	{
+		hMarble.reset();
+		hBuildings.reset();
+		hUbn.reset();
+		hDes.reset();
+		hLun.reset();
+		hUrb.reset();
+		hSno.reset();
+		hTem.reset();
+		hGeneric.reset();
+		hDesert.reset();
+		hUrbanN.reset();
+		hLunar.reset();
+		hUrban.reset();
+		hSnow.reset();
+		hTemperat.reset();
+		hIsoUbnMd.reset();
+		hIsoDesMd.reset();
+		hIsoLunMd.reset();
+		hIsoGenMd.reset();
+		hIsoUbn.reset();
+		hIsoDes.reset();
+		hIsoLun.reset();
+		hIsoGen.reset();
+		hIsoUrb.reset();
+		hIsoTemp.reset();
+		hIsoSnow.reset();
+		hLocal.reset();
+		hConquer.reset();
+		hECache.reset();
+		hExpand.reset();
+	}
 };
 
 class CFinalSunDlg;
@@ -180,36 +258,36 @@ private:
 	HTSPALETTE m_hPalUnitUbn;
 
 	HMIXFILE FindFileInMix(LPCTSTR lpFilename, TheaterChar* pTheaterChar=NULL);
-	HMIXFILE m_hLocal;
-	HMIXFILE m_hSno;
-	HMIXFILE m_hTem;
-	HMIXFILE m_hUrb;
-	HMIXFILE m_hLun;
-	HMIXFILE m_hDes;
-	HMIXFILE m_hUbn;
-	HMIXFILE m_hTibSun;
-	HMIXFILE m_hBuildings;
-	EXPANDMIX m_hExpand[101]; // 1 added for ra2md.mix
-	HMIXFILE m_hECache[100];
-	std::vector<HMIXFILE> m_hExtraMixes;
-	HMIXFILE m_hIsoSnow;
-	HMIXFILE m_hIsoTemp;
-	HMIXFILE m_hIsoUrb;
-	HMIXFILE m_hIsoGen;
-	HMIXFILE m_hIsoLun;
-	HMIXFILE m_hIsoDes;
-	HMIXFILE m_hIsoUbn;
-	HMIXFILE m_hTemperat;
-	HMIXFILE m_hSnow;
-	HMIXFILE m_hUrban;
-	HMIXFILE m_hUrbanN;
-	HMIXFILE m_hLunar;
-	HMIXFILE m_hDesert;
-	HMIXFILE m_hCache;
-	HMIXFILE m_hConquer;
-	HMIXFILE m_hLanguage;
-	HMIXFILE m_hLangMD;
-	HMIXFILE m_hMarble;
+	MixHandle m_hLocal;
+	MixHandle m_hSno;
+	MixHandle m_hTem;
+	MixHandle m_hUrb;
+	MixHandle m_hLun;
+	MixHandle m_hDes;
+	MixHandle m_hUbn;
+	MixHandle m_hTibSun;
+	MixHandle m_hBuildings;
+	std::array<EXPANDMIX, 101> m_hExpand; // 1 added for ra2md.mix
+	std::array<MixHandle, 100> m_hECache;
+	std::vector<MixHandle> m_hExtraMixes;
+	MixHandle m_hIsoSnow;
+	MixHandle m_hIsoTemp;
+	MixHandle m_hIsoUrb;
+	MixHandle m_hIsoGen;
+	MixHandle m_hIsoLun;
+	MixHandle m_hIsoDes;
+	MixHandle m_hIsoUbn;
+	MixHandle m_hTemperat;
+	MixHandle m_hSnow;
+	MixHandle m_hUrban;
+	MixHandle m_hUrbanN;
+	MixHandle m_hLunar;
+	MixHandle m_hDesert;
+	MixHandle m_hCache;
+	MixHandle m_hConquer;
+	MixHandle m_hLanguage;
+	MixHandle m_hLangMD;
+	MixHandle m_hMarble;
 	BOOL loaded;
 
 	std::unique_ptr<VoxelNormalTables> m_voxelNormalTables;
