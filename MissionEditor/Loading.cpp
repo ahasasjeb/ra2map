@@ -3751,6 +3751,25 @@ BOOL CLoading::InitMixFiles()
 	if(mental_omega_mode)
 	{
 		errstream << "Mental Omega mode enabled: using *mo.ini / expandmo*.mix" << endl;
+
+		// FA2Ext reads the editor-specific [Sides] section from the Mental
+		// Omega Map Editor directory. It contains the display names for the
+		// additional building/object-browser factions (indices 3 and above).
+		// Import only this section so the bundled FAData.ini remains the source
+		// of truth for every unrelated editor setting.
+		const CString moDataCandidates[] = {
+			(CString)TSPath + "\\Map Editor\\FAData.ini",
+			(CString)TSPath + "\\FAData.ini"
+		};
+		for(const CString& moDataPath : moDataCandidates)
+		{
+			if(DoesFileExist(moDataPath))
+			{
+				g_data.InsertFile(moDataPath, "Sides", TRUE);
+				errstream << "Mental Omega side labels loaded from " << (LPCTSTR)moDataPath << endl;
+				break;
+			}
+		}
 		errstream.flush();
 	}
 
@@ -6282,31 +6301,6 @@ void CLoading::PrepareHouses()
 			sides[p].orig_n=rules.sections["Sides"].GetValueOrigPos(i); // mw fix instead of =i
 			t++;
 			p++;
-		}
-	}
-
-	// Mental Omega / FA2Ext compatibility: append additional sides from
-	// FAData.ini [Sides] (e.g. Epsilon, Foehn, etc.) that are not already
-	// provided by rules.ini. This mirrors the ObjectBrowserControl_Redraw_Sides
-	// hook that FA2Ext.dll installs in the stock FA2 v1.02 editor.
-	if(g_data.sections.find("Sides") != g_data.sections.end())
-	{
-		auto& faSides = g_data.sections["Sides"];
-		for(i=0; i<(int)faSides.values.size(); i++)
-		{
-			int orig = faSides.GetValueOrigPos(i);
-			// skip if this side index was already provided by rules.ini
-			bool already = false;
-			for(int e=0; e<p; e++) { if(sides[e].orig_n == orig) { already = true; break; } }
-			if(already) continue;
-			int t=0;
-			while(GetParam(*faSides.GetValue(i), t).GetLength()>0)
-			{
-				sides[p].name=GetParam(*faSides.GetValue(i), t);
-				sides[p].orig_n=orig;
-				t++;
-				p++;
-			}
 		}
 	}
 

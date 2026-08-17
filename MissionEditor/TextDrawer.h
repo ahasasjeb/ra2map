@@ -55,6 +55,7 @@ private:
     int m_fontSizeInPixels;
     COLORREF m_col;
     COLORREF m_shadowCol;
+    COLORREF m_bkCol;
 
     // Cache of fully rendered strings to avoid per-character blits every frame
     std::map<std::string, CachedString> m_stringCache;

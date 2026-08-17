@@ -55,6 +55,7 @@ static char THIS_FILE[] = __FILE__;
 #include <format>
 #include <chrono>
 #include <algorithm>
+#include <array>
 #include "TextDrawer.h"
 #include "RustCore.h"
 #include "BuildingFoundation.h"
@@ -7146,14 +7147,23 @@ void CIsoView::DrawMap()
 			m_texts_to_render.push_back({ systemStats.c_str(), r.left + 10, r.top + 10 + (-m_fontDefaultHeight) * 3 / 2, RGB(0,0,0), true });
 		}
 
-		auto moneyStr = std::format("Credits on map: {0}", Map->GetMoneyOnMap());
-		m_texts_to_render.push_back({ moneyStr.c_str(), r.left + 10, r.top + 10, RGB(0,0,0), true });
+		CString money;
+		money.Format("%d", Map->GetMoneyOnMap());
+		CString moneyStr = TranslateStringVariables(1, GetLanguageStringACP("CreditsOnMap"), money);
+		m_texts_to_render.push_back({ static_cast<LPCSTR>(moneyStr), r.left + 10, r.top + 10, RGB(0,0,0), true });
 	}
 
 	if (rscroll && (GetAsyncKeyState(VK_RBUTTON) & 0x8000) != 0)
 	{
 		const auto& sc = pics["SCROLLCURSOR"];
-		Blit((LPDIRECTDRAWSURFACE4)sc.pic, rclick_x * m_viewScale.x + r.left - sc.wWidth / 2, rclick_y * m_viewScale.y + r.top - sc.wHeight / 2);
+		const int cursorX = rclick_x * m_viewScale.x + r.left - sc.wWidth / 2;
+		const int cursorY = rclick_y * m_viewScale.y + r.top - sc.wHeight / 2;
+		const std::array<ProjectedCoords, 1> cursorPositions = { ProjectedCoords(cursorX + 1, cursorY + 1) };
+		if (!CompositeColorKeySurface(lpdsBack, (LPDIRECTDRAWSURFACE4)sc.pic, cursorPositions, 0,
+			[](const ProjectedCoords& position) { return position; }))
+		{
+			Blit((LPDIRECTDRAWSURFACE4)sc.pic, cursorX, cursorY);
+		}
 	}
 
 	BlitBackbufferToHighRes(); // lpdsBackHighRes contains the same graphic, but scaled to the whole window
@@ -8264,7 +8274,14 @@ bool CIsoView::DrawMapPan(int left, int right, int top, int bottom, DWORD MM_hei
 	if (rscroll && (GetAsyncKeyState(VK_RBUTTON) & 0x8000) != 0)
 	{
 		const auto& sc = pics["SCROLLCURSOR"];
-		Blit((LPDIRECTDRAWSURFACE4)sc.pic, rclick_x * m_viewScale.x + r.left - sc.wWidth / 2, rclick_y * m_viewScale.y + r.top - sc.wHeight / 2);
+		const int cursorX = rclick_x * m_viewScale.x + r.left - sc.wWidth / 2;
+		const int cursorY = rclick_y * m_viewScale.y + r.top - sc.wHeight / 2;
+		const std::array<ProjectedCoords, 1> cursorPositions = { ProjectedCoords(cursorX + 1, cursorY + 1) };
+		if (!CompositeColorKeySurface(lpdsBack, (LPDIRECTDRAWSURFACE4)sc.pic, cursorPositions, 0,
+			[](const ProjectedCoords& position) { return position; }))
+		{
+			Blit((LPDIRECTDRAWSURFACE4)sc.pic, cursorX, cursorY);
+		}
 	}
 
 	BlitBackbufferToHighRes();

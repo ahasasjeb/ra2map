@@ -302,6 +302,7 @@ BOOL CFinalSunDlg::OnInitDialog()
 	m_clifftoolbar.SetBarStyle(m_terraintoolbar.GetBarStyle());
 
 	success = success && m_settingsbar.Create(this, IDD_TOOLSETTINGS, CBRS_TOP, 6000);
+	m_settingsbar.Localize();
 	
 	REBARBANDINFO rbi = { 0 };
 	rbi.cbSize= sizeof(REBARBANDINFO);

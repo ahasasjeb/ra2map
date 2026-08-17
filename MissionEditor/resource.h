@@ -440,7 +440,10 @@
 #define IDC_LADDONNEEDED                1365
 #define IDC_TILESET                     1366
 #define IDC_OVERLAY                     1367
+#define IDC_TERRAIN_LABEL               1368
+#define IDC_OVERLAY_LABEL               1369
 #define IDC_IMPORT                      1370
+#define IDC_BRUSHSIZE_LABEL             1371
 #define IDC_WIDTH                       1373
 #define IDC_HEIGHT                      1374
 #define IDC_BRUSHSIZE                   1377

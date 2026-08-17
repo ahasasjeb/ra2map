@@ -34,6 +34,7 @@ class CToolSettingsBar : public CDialogBar
 {
 // Konstruktion
 public:
+	void Localize();
 	CToolSettingsBar(CWnd* pParent = NULL);   // Standardkonstruktor
 
 // Dialogfelddaten

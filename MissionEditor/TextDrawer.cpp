@@ -22,10 +22,43 @@
 #include "stdafx.h"
 #include "TextDrawer.h"
 #include <afxwin.h>
+#include <algorithm>
 #include "Vec2.h"
 #include "MissionEditorPackLib.h"
 
-TextDrawer::TextDrawer(IDirectDraw4* pDirectDraw, int fontSizeInPoints, COLORREF col, COLORREF shadowCol): m_fontSizeInPoints(fontSizeInPoints), m_col(col), m_shadowCol(shadowCol)
+namespace
+{
+    bool RequiresGdiText(const std::string& text)
+    {
+        return std::any_of(text.begin(), text.end(), [](unsigned char c)
+        {
+            return c != '\n' && (c < 32 || c > 126);
+        });
+    }
+
+    bool FillSurface(IDirectDrawSurface4* surface, COLORREF color)
+    {
+        if (!surface)
+            return false;
+
+        DDPIXELFORMAT pixelFormat = {};
+        pixelFormat.dwSize = sizeof(pixelFormat);
+        if (surface->GetPixelFormat(&pixelFormat) != DD_OK)
+            return false;
+
+        FSunPackLib::ColorConverter converter(pixelFormat);
+        DDBLTFX fx = {};
+        fx.dwSize = sizeof(fx);
+        fx.dwFillColor = converter.GetColor(color);
+        return surface->Blt(nullptr, nullptr, nullptr, DDBLT_COLORFILL | DDBLT_WAIT, &fx) == DD_OK;
+    }
+}
+
+TextDrawer::TextDrawer(IDirectDraw4* pDirectDraw, int fontSizeInPoints, COLORREF col, COLORREF shadowCol):
+    m_fontSizeInPoints(fontSizeInPoints),
+    m_col(col),
+    m_shadowCol(shadowCol),
+    m_bkCol(col == RGB(10, 10, 10) ? RGB(11, 11, 11) : RGB(10, 10, 10))
 {
     auto dc = CDC::FromHandle(::GetDC(NULL));
     auto fontSizeInPixels = -MulDiv(fontSizeInPoints, dc->GetDeviceCaps(LOGPIXELSY), 72);
@@ -53,8 +86,6 @@ TextDrawer::TextDrawer(IDirectDraw4* pDirectDraw, int fontSizeInPoints, COLORREF
 
     m_charExtent.set(extent.cx / s.size(), extent.cy);
 
-    auto bkcol = col == RGB(10, 10, 10) ? RGB(11, 11, 11) : RGB(10, 10, 10);
-
     auto pSurface = CComPtr<IDirectDrawSurface4>();
     if (pDirectDraw->CreateSurface(&desc, &pSurface, nullptr) != DD_OK)
         return;
@@ -64,7 +95,7 @@ TextDrawer::TextDrawer(IDirectDraw4* pDirectDraw, int fontSizeInPoints, COLORREF
     if (pSurface->Lock(NULL, &desc, DDLOCK_SURFACEMEMORYPTR | DDLOCK_WAIT | DDLOCK_NOSYSLOCK, NULL) == DD_OK)
     {
         FSunPackLib::ColorConverter c(desc.ddpfPixelFormat);
-        std::int32_t backcolor = c.GetColor(bkcol);
+        std::int32_t backcolor = c.GetColor(m_bkCol);
         auto bytes_per_pixel = (desc.ddpfPixelFormat.dwRGBBitCount + 7) / 8;
         BYTE* const pImage = static_cast<BYTE*>(desc.lpSurface);
         for (int i=0; i < desc.dwWidth; ++i)
@@ -160,36 +191,75 @@ TextDrawer::CachedString& TextDrawer::GetCachedString(const std::string& text)
         }
     }
 
-    const int cw = m_charExtent.x;
-    const int ch = m_charExtent.y;
-    const int lineOffset = ch / 4;
-    int curx = 0;
-    int cury = 0;
-    for (const auto c : text)
+    // DirectDraw does not guarantee the contents of a newly created surface.
+    // Clear every cached string to one known color before drawing glyphs, then
+    // use that same color as the source key. Otherwise the uninitialized area
+    // appears as an opaque black rectangle around longer labels.
+    if (!FillSurface(cached.main, m_bkCol) || (cached.shadow && !FillSurface(cached.shadow, m_bkCol)))
     {
-        if (c == '\n')
+        m_stringCache[text] = cached;
+        return m_stringCache[text];
+    }
+
+    if (RequiresGdiText(text))
+    {
+        auto drawText = [&](IDirectDrawSurface4* surface, COLORREF color)
         {
-            curx = 0;
-            cury += ch + lineOffset;
-        }
-        else if (c >= 32 && c <= 126)
+            if (!surface)
+                return;
+
+            HDC hDC = nullptr;
+            if (surface->GetDC(&hDC) != DD_OK)
+                return;
+
+            CFont font;
+            font.CreateFont(m_fontSizeInPixels, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+                DEFAULT_CHARSET, OUT_OUTLINE_PRECIS, CLIP_DEFAULT_PRECIS,
+                NONANTIALIASED_QUALITY, VARIABLE_PITCH, "Microsoft YaHei UI");
+            HGDIOBJ oldFont = SelectObject(hDC, font);
+            SetBkMode(hDC, TRANSPARENT);
+            SetTextColor(hDC, color);
+            RECT rect{ 0, 0, cached.w, cached.h };
+            DrawTextA(hDC, text.c_str(), static_cast<int>(text.size()), &rect,
+                DT_LEFT | DT_TOP | DT_NOPREFIX);
+            SelectObject(hDC, oldFont);
+            surface->ReleaseDC(hDC);
+        };
+
+        drawText(cached.main, m_col);
+        drawText(cached.shadow, m_shadowCol);
+    }
+    else
+    {
+
+        const int cw = m_charExtent.x;
+        const int ch = m_charExtent.y;
+        const int lineOffset = ch / 4;
+        int curx = 0;
+        int cury = 0;
+        for (const auto c : text)
         {
-            const auto i = c - 32;
-            RECT sMain{ i * cw, 0, i * cw + cw, ch };
-            RECT sShadow{ i * cw, ch, i * cw + cw, ch + ch };
-            cached.main->BltFast(curx, cury, m_fontSurface, &sMain, DDBLTFAST_SRCCOLORKEY | DDBLTFAST_WAIT);
-            if (cached.shadow)
-                cached.shadow->BltFast(curx, cury, m_fontSurface, &sShadow, DDBLTFAST_SRCCOLORKEY | DDBLTFAST_WAIT);
-            curx += cw;
+            if (c == '\n')
+            {
+                curx = 0;
+                cury += ch + lineOffset;
+            }
+            else if (c >= 32 && c <= 126)
+            {
+                const auto i = c - 32;
+                RECT sMain{ i * cw, 0, i * cw + cw, ch };
+                RECT sShadow{ i * cw, ch, i * cw + cw, ch + ch };
+                cached.main->BltFast(curx, cury, m_fontSurface, &sMain, DDBLTFAST_SRCCOLORKEY | DDBLTFAST_WAIT);
+                if (cached.shadow)
+                    cached.shadow->BltFast(curx, cury, m_fontSurface, &sShadow, DDBLTFAST_SRCCOLORKEY | DDBLTFAST_WAIT);
+                curx += cw;
+            }
         }
     }
 
-    // Cached strings are used for labels with four or more characters.  They
-    // inherit transparent pixels from the font surface, so they need their own
-    // source color key before they can be blitted back to the map.
-    FSunPackLib::SetColorKey(cached.main, CLR_INVALID);
+    FSunPackLib::SetColorKey(cached.main, m_bkCol);
     if (cached.shadow)
-        FSunPackLib::SetColorKey(cached.shadow, CLR_INVALID);
+        FSunPackLib::SetColorKey(cached.shadow, m_bkCol);
 
     m_stringCache[text] = cached;
     return m_stringCache[text];
@@ -210,6 +280,50 @@ void TextDrawer::RenderText(IDirectDrawSurface4* target, int x, int y, const std
     if (centered)
     {
         cur -= GetExtent(text) / 2;
+    }
+
+    // Some DirectDraw drivers ignore the source color key when a cached GDI
+    // string is copied with BltFast, leaving an opaque rectangle behind. Draw
+    // localized strings directly onto the destination surface instead. These
+    // strings are rare (currently the fixed map-credit label), so this avoids
+    // the driver bug without slowing down the many ASCII object labels.
+    if (RequiresGdiText(text))
+    {
+        HDC hDC = nullptr;
+        if (target->GetDC(&hDC) == DD_OK)
+        {
+            CFont font;
+            font.CreateFont(m_fontSizeInPixels, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+                DEFAULT_CHARSET, OUT_OUTLINE_PRECIS, CLIP_DEFAULT_PRECIS,
+                NONANTIALIASED_QUALITY, VARIABLE_PITCH, "Microsoft YaHei UI");
+            HGDIOBJ oldFont = SelectObject(hDC, font);
+            SetBkMode(hDC, TRANSPARENT);
+
+            auto drawAt = [&](int drawX, int drawY, COLORREF color)
+            {
+                RECT rect{ drawX, drawY, drawX, drawY };
+                SetTextColor(hDC, color);
+                DrawTextA(hDC, text.c_str(), static_cast<int>(text.size()), &rect,
+                    DT_LEFT | DT_TOP | DT_NOPREFIX | DT_NOCLIP);
+            };
+
+            if (m_shadowCol != CLR_INVALID)
+            {
+                drawAt(cur.x - shadowOffset, cur.y - shadowOffset, m_shadowCol);
+                drawAt(cur.x, cur.y - shadowOffset, m_shadowCol);
+                drawAt(cur.x + shadowOffset, cur.y - shadowOffset, m_shadowCol);
+                drawAt(cur.x - shadowOffset, cur.y, m_shadowCol);
+                drawAt(cur.x + shadowOffset, cur.y, m_shadowCol);
+                drawAt(cur.x - shadowOffset, cur.y + shadowOffset, m_shadowCol);
+                drawAt(cur.x, cur.y + shadowOffset, m_shadowCol);
+                drawAt(cur.x + shadowOffset, cur.y + shadowOffset, m_shadowCol);
+            }
+            drawAt(cur.x, cur.y, m_col);
+
+            SelectObject(hDC, oldFont);
+            target->ReleaseDC(hDC);
+            return;
+        }
     }
 
     if (m_stringCache.count(text) != 0 || text.size() >= 4)
@@ -260,6 +374,25 @@ void TextDrawer::RenderText(IDirectDrawSurface4* target, int x, int y, const std
 
 ProjectedVec TextDrawer::GetExtent(const std::string& text) const
 {
+    if (RequiresGdiText(text))
+    {
+        HDC hDC = ::GetDC(nullptr);
+        if (hDC)
+        {
+            CFont font;
+            font.CreateFont(m_fontSizeInPixels, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+                DEFAULT_CHARSET, OUT_OUTLINE_PRECIS, CLIP_DEFAULT_PRECIS,
+                NONANTIALIASED_QUALITY, VARIABLE_PITCH, "Microsoft YaHei UI");
+            HGDIOBJ oldFont = SelectObject(hDC, font);
+            RECT rect{ 0, 0, 0, 0 };
+            DrawTextA(hDC, text.c_str(), static_cast<int>(text.size()), &rect,
+                DT_LEFT | DT_TOP | DT_NOPREFIX | DT_CALCRECT);
+            SelectObject(hDC, oldFont);
+            ::ReleaseDC(nullptr, hDC);
+            return ProjectedVec(rect.right - rect.left, rect.bottom - rect.top);
+        }
+    }
+
     ProjectedVec cur(0, 0);
     const int lineOffset = m_charExtent.y / 4;
     const int cw = m_charExtent.x;

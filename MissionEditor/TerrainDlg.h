@@ -36,6 +36,7 @@ class CTerrainDlg : public CDialogBar
 public:
 	DWORD GetTileID(DWORD dwTileSet, int iTile);
 	void Update();
+	void Localize();
 	CTerrainDlg(CWnd* pParent = NULL);   // Standardkonstruktor
 
 // Dialogfelddaten

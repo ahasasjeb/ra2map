@@ -16,6 +16,7 @@ const RS_ERR_BAD_ARG: i32 = -1;
 const RS_ERR_PANIC: i32 = -3;
 const RS_ERR_VULKAN_UNAVAILABLE: i32 = -10;
 const RS_ERR_VULKAN_RUNTIME: i32 = -11;
+const MAX_FRAMES_IN_FLIGHT: usize = 2;
 
 thread_local! {
     static LAST_ERROR: RefCell<String> = const { RefCell::new(String::new()) };
@@ -48,6 +49,28 @@ impl Default for StagingBuffer {
     }
 }
 
+struct FrameResources {
+    command_buffer: vk::CommandBuffer,
+    image_available: vk::Semaphore,
+    upload_complete: vk::Semaphore,
+    fence: vk::Fence,
+    staging: StagingBuffer,
+    source_x_offsets: Vec<isize>,
+}
+
+impl FrameResources {
+    fn new(command_buffer: vk::CommandBuffer) -> Self {
+        Self {
+            command_buffer,
+            image_available: vk::Semaphore::null(),
+            upload_complete: vk::Semaphore::null(),
+            fence: vk::Fence::null(),
+            staging: StagingBuffer::default(),
+            source_x_offsets: Vec::new(),
+        }
+    }
+}
+
 struct VulkanRenderer {
     _entry: Entry,
     instance: ash::Instance,
@@ -67,11 +90,8 @@ struct VulkanRenderer {
     vsync: bool,
     swapchain_dirty: bool,
     command_pool: vk::CommandPool,
-    command_buffer: vk::CommandBuffer,
-    image_available: vk::Semaphore,
-    upload_complete: vk::Semaphore,
-    frame_fence: vk::Fence,
-    staging: StagingBuffer,
+    frames: Vec<FrameResources>,
+    current_frame: usize,
 }
 
 impl VulkanRenderer {
@@ -171,11 +191,8 @@ impl VulkanRenderer {
             vsync: true,
             swapchain_dirty: true,
             command_pool: vk::CommandPool::null(),
-            command_buffer: vk::CommandBuffer::null(),
-            image_available: vk::Semaphore::null(),
-            upload_complete: vk::Semaphore::null(),
-            frame_fence: vk::Fence::null(),
-            staging: StagingBuffer::default(),
+            frames: Vec::new(),
+            current_frame: 0,
         };
         renderer.create_command_resources()?;
         renderer.create_sync_resources()?;
@@ -246,21 +263,26 @@ impl VulkanRenderer {
         let allocate_info = vk::CommandBufferAllocateInfo::default()
             .command_pool(self.command_pool)
             .level(vk::CommandBufferLevel::PRIMARY)
-            .command_buffer_count(1);
-        self.command_buffer = unsafe { self.device.allocate_command_buffers(&allocate_info) }
-            .map_err(|error| format!("vkAllocateCommandBuffers failed: {error:?}"))?[0];
+            .command_buffer_count(MAX_FRAMES_IN_FLIGHT as u32);
+        self.frames = unsafe { self.device.allocate_command_buffers(&allocate_info) }
+            .map_err(|error| format!("vkAllocateCommandBuffers failed: {error:?}"))?
+            .into_iter()
+            .map(FrameResources::new)
+            .collect();
         Ok(())
     }
 
     unsafe fn create_sync_resources(&mut self) -> Result<(), String> {
         let semaphore_info = vk::SemaphoreCreateInfo::default();
-        self.image_available = unsafe { self.device.create_semaphore(&semaphore_info, None) }
-            .map_err(|error| format!("vkCreateSemaphore failed: {error:?}"))?;
-        self.upload_complete = unsafe { self.device.create_semaphore(&semaphore_info, None) }
-            .map_err(|error| format!("vkCreateSemaphore failed: {error:?}"))?;
         let fence_info = vk::FenceCreateInfo::default().flags(vk::FenceCreateFlags::SIGNALED);
-        self.frame_fence = unsafe { self.device.create_fence(&fence_info, None) }
-            .map_err(|error| format!("vkCreateFence failed: {error:?}"))?;
+        for frame in &mut self.frames {
+            frame.image_available = unsafe { self.device.create_semaphore(&semaphore_info, None) }
+                .map_err(|error| format!("vkCreateSemaphore failed: {error:?}"))?;
+            frame.upload_complete = unsafe { self.device.create_semaphore(&semaphore_info, None) }
+                .map_err(|error| format!("vkCreateSemaphore failed: {error:?}"))?;
+            frame.fence = unsafe { self.device.create_fence(&fence_info, None) }
+                .map_err(|error| format!("vkCreateFence failed: {error:?}"))?;
+        }
         Ok(())
     }
 
@@ -469,12 +491,12 @@ impl VulkanRenderer {
         // Window drags can generate dozens of sizes. Keep the mapped upload
         // allocation when it is already large enough instead of churning a
         // Win32 address-space mapping for every swapchain recreation.
-        if self.staging.len < staging_len {
-            let growth_target = self
-                .staging
-                .len
-                .saturating_add(self.staging.len / 2)
-                .max(staging_len);
+        for frame_index in 0..self.frames.len() {
+            let old_len = self.frames[frame_index].staging.len;
+            if old_len >= staging_len {
+                continue;
+            }
+            let growth_target = old_len.saturating_add(old_len / 2).max(staging_len);
             let new_staging = match unsafe { self.create_staging_buffer(growth_target) } {
                 Ok(staging) => staging,
                 Err(error) => {
@@ -482,7 +504,8 @@ impl VulkanRenderer {
                     return Err(error);
                 }
             };
-            let mut old_staging = std::mem::replace(&mut self.staging, new_staging);
+            let mut old_staging =
+                std::mem::replace(&mut self.frames[frame_index].staging, new_staging);
             unsafe { self.free_staging_buffer(&mut old_staging) };
         }
         if self.swapchain != vk::SwapchainKHR::null() {
@@ -502,17 +525,18 @@ impl VulkanRenderer {
         };
         self.vsync = vsync;
         self.swapchain_dirty = false;
+        self.current_frame = 0;
         Ok(())
     }
 
-    unsafe fn recover_signaled_fence(&mut self) {
+    unsafe fn recover_signaled_fence(&mut self, frame_index: usize) {
         let _ = unsafe { self.device.device_wait_idle() };
-        if self.frame_fence != vk::Fence::null() {
-            unsafe { self.device.destroy_fence(self.frame_fence, None) };
+        let frame = &mut self.frames[frame_index];
+        if frame.fence != vk::Fence::null() {
+            unsafe { self.device.destroy_fence(frame.fence, None) };
         }
         let info = vk::FenceCreateInfo::default().flags(vk::FenceCreateFlags::SIGNALED);
-        self.frame_fence =
-            unsafe { self.device.create_fence(&info, None) }.unwrap_or(vk::Fence::null());
+        frame.fence = unsafe { self.device.create_fence(&info, None) }.unwrap_or(vk::Fence::null());
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -548,17 +572,19 @@ impl VulkanRenderer {
         {
             unsafe { self.recreate_swapchain(target_width, target_height, vsync) }?;
         }
-        unsafe {
-            self.device
-                .wait_for_fences(&[self.frame_fence], true, u64::MAX)
-        }
-        .map_err(|error| format!("vkWaitForFences failed: {error:?}"))?;
+        let frame_index = self.current_frame;
+        let frame_fence = self.frames[frame_index].fence;
+        let image_available = self.frames[frame_index].image_available;
+        let upload_complete = self.frames[frame_index].upload_complete;
+        let command_buffer = self.frames[frame_index].command_buffer;
+        unsafe { self.device.wait_for_fences(&[frame_fence], true, u64::MAX) }
+            .map_err(|error| format!("vkWaitForFences failed: {error:?}"))?;
 
         let acquire = unsafe {
             self.swapchain_loader.acquire_next_image(
                 self.swapchain,
                 u64::MAX,
-                self.image_available,
+                image_available,
                 vk::Fence::null(),
             )
         };
@@ -570,7 +596,7 @@ impl VulkanRenderer {
                     self.swapchain_loader.acquire_next_image(
                         self.swapchain,
                         u64::MAX,
-                        self.image_available,
+                        image_available,
                         vk::Fence::null(),
                     )
                 }
@@ -579,8 +605,9 @@ impl VulkanRenderer {
             Err(error) => return Err(format!("vkAcquireNextImageKHR failed: {error:?}")),
         };
 
-        let destination =
-            unsafe { slice::from_raw_parts_mut(self.staging.mapped, self.staging.len) };
+        let staging_mapped = self.frames[frame_index].staging.mapped;
+        let staging_len = self.frames[frame_index].staging.len;
+        let destination = unsafe { slice::from_raw_parts_mut(staging_mapped, staging_len) };
         write_scaled_pixels(
             destination,
             self.swapchain_extent.width as usize,
@@ -598,22 +625,21 @@ impl VulkanRenderer {
             src_top,
             src_width,
             src_height,
+            &mut self.frames[frame_index].source_x_offsets,
         )?;
 
-        unsafe { self.device.reset_fences(&[self.frame_fence]) }
+        unsafe { self.device.reset_fences(&[frame_fence]) }
             .map_err(|error| format!("vkResetFences failed: {error:?}"))?;
         unsafe {
-            self.device.reset_command_buffer(
-                self.command_buffer,
-                vk::CommandBufferResetFlags::RELEASE_RESOURCES,
-            )
+            self.device
+                .reset_command_buffer(command_buffer, vk::CommandBufferResetFlags::empty())
         }
         .map_err(|error| format!("vkResetCommandBuffer failed: {error:?}"))?;
         let begin_info = vk::CommandBufferBeginInfo::default()
             .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
         unsafe {
             self.device
-                .begin_command_buffer(self.command_buffer, &begin_info)
+                .begin_command_buffer(command_buffer, &begin_info)
         }
         .map_err(|error| format!("vkBeginCommandBuffer failed: {error:?}"))?;
 
@@ -638,7 +664,7 @@ impl VulkanRenderer {
             .dst_access_mask(vk::AccessFlags::TRANSFER_WRITE);
         unsafe {
             self.device.cmd_pipeline_barrier(
-                self.command_buffer,
+                command_buffer,
                 vk::PipelineStageFlags::TOP_OF_PIPE,
                 vk::PipelineStageFlags::TRANSFER,
                 vk::DependencyFlags::empty(),
@@ -663,8 +689,8 @@ impl VulkanRenderer {
             });
         unsafe {
             self.device.cmd_copy_buffer_to_image(
-                self.command_buffer,
-                self.staging.buffer,
+                command_buffer,
+                self.frames[frame_index].staging.buffer,
                 self.swapchain_images[image_index as usize],
                 vk::ImageLayout::TRANSFER_DST_OPTIMAL,
                 &[copy_region],
@@ -686,7 +712,7 @@ impl VulkanRenderer {
             .dst_access_mask(vk::AccessFlags::empty());
         unsafe {
             self.device.cmd_pipeline_barrier(
-                self.command_buffer,
+                command_buffer,
                 vk::PipelineStageFlags::TRANSFER,
                 vk::PipelineStageFlags::BOTTOM_OF_PIPE,
                 vk::DependencyFlags::empty(),
@@ -695,13 +721,13 @@ impl VulkanRenderer {
                 &[to_present],
             )
         };
-        unsafe { self.device.end_command_buffer(self.command_buffer) }
+        unsafe { self.device.end_command_buffer(command_buffer) }
             .map_err(|error| format!("vkEndCommandBuffer failed: {error:?}"))?;
 
-        let wait_semaphores = [self.image_available];
+        let wait_semaphores = [image_available];
         let wait_stages = [vk::PipelineStageFlags::TRANSFER];
-        let command_buffers = [self.command_buffer];
-        let signal_semaphores = [self.upload_complete];
+        let command_buffers = [command_buffer];
+        let signal_semaphores = [upload_complete];
         let submit_info = [vk::SubmitInfo::default()
             .wait_semaphores(&wait_semaphores)
             .wait_dst_stage_mask(&wait_stages)
@@ -709,11 +735,12 @@ impl VulkanRenderer {
             .signal_semaphores(&signal_semaphores)];
         if let Err(error) = unsafe {
             self.device
-                .queue_submit(self.queue, &submit_info, self.frame_fence)
+                .queue_submit(self.queue, &submit_info, frame_fence)
         } {
-            unsafe { self.recover_signaled_fence() };
+            unsafe { self.recover_signaled_fence(frame_index) };
             return Err(format!("vkQueueSubmit failed: {error:?}"));
         }
+        self.current_frame = (frame_index + 1) % self.frames.len();
         self.image_initialized[image_index as usize] = true;
         let swapchains = [self.swapchain];
         let image_indices = [image_index];
@@ -742,16 +769,17 @@ impl Drop for VulkanRenderer {
     fn drop(&mut self) {
         unsafe {
             let _ = self.device.device_wait_idle();
-            let mut staging = std::mem::take(&mut self.staging);
-            self.free_staging_buffer(&mut staging);
-            if self.frame_fence != vk::Fence::null() {
-                self.device.destroy_fence(self.frame_fence, None);
-            }
-            if self.upload_complete != vk::Semaphore::null() {
-                self.device.destroy_semaphore(self.upload_complete, None);
-            }
-            if self.image_available != vk::Semaphore::null() {
-                self.device.destroy_semaphore(self.image_available, None);
+            for mut frame in std::mem::take(&mut self.frames) {
+                self.free_staging_buffer(&mut frame.staging);
+                if frame.fence != vk::Fence::null() {
+                    self.device.destroy_fence(frame.fence, None);
+                }
+                if frame.upload_complete != vk::Semaphore::null() {
+                    self.device.destroy_semaphore(frame.upload_complete, None);
+                }
+                if frame.image_available != vk::Semaphore::null() {
+                    self.device.destroy_semaphore(frame.image_available, None);
+                }
             }
             if self.command_pool != vk::CommandPool::null() {
                 self.device.destroy_command_pool(self.command_pool, None);
@@ -818,6 +846,7 @@ fn write_scaled_pixels(
     source_top: i32,
     source_rect_width: usize,
     source_rect_height: usize,
+    source_x_offsets: &mut Vec<isize>,
 ) -> Result<(), String> {
     let required = destination_width
         .checked_mul(destination_height)
@@ -900,19 +929,16 @@ fn write_scaled_pixels(
         return Ok(());
     }
 
-    let source_x_offsets: Vec<isize> = (0..destination_width)
-        .map(|destination_x| {
-            i64::from(source_left)
-                + (destination_x as i64 * source_rect_width as i64 / destination_width as i64)
-        })
-        .map(|source_x| {
-            if source_x < 0 || source_x >= source_width as i64 {
-                -1
-            } else {
-                (source_x as usize * bytes_per_pixel) as isize
-            }
-        })
-        .collect();
+    source_x_offsets.clear();
+    source_x_offsets.extend((0..destination_width).map(|destination_x| {
+        let source_x = i64::from(source_left)
+            + (destination_x as i64 * source_rect_width as i64 / destination_width as i64);
+        if source_x < 0 || source_x >= source_width as i64 {
+            -1
+        } else {
+            (source_x as usize * bytes_per_pixel) as isize
+        }
+    }));
 
     if source_is_bgrx8888 {
         for destination_y in 0..destination_height {
@@ -1221,6 +1247,7 @@ mod tests {
             0,
             2,
             2,
+            &mut Vec::new(),
         )
         .unwrap();
         assert_eq!(destination, [30, 20, 10, 255]);
@@ -1250,6 +1277,7 @@ mod tests {
             0,
             2,
             2,
+            &mut Vec::new(),
         )
         .unwrap();
         assert_eq!(
@@ -1279,6 +1307,7 @@ mod tests {
             -1,
             1,
             1,
+            &mut Vec::new(),
         )
         .unwrap();
         assert_eq!(destination, [255, 255, 255, 255]);

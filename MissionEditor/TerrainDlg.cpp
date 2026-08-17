@@ -82,8 +82,15 @@ void CTerrainDlg::OnCancel()
 BOOL CTerrainDlg::OnInitDialog()
 {
 	//CDialogBar::OnInitDialog();
+	Localize();
 
 	return FALSE;
+}
+
+void CTerrainDlg::Localize()
+{
+	SetDlgItemText(IDC_TERRAIN_LABEL, GetLanguageStringACP("TerrainGroundLabel"));
+	SetDlgItemText(IDC_OVERLAY_LABEL, GetLanguageStringACP("OverlaySpecialLabel"));
 }
 
 void CTerrainDlg::PostNcDestroy()

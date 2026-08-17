@@ -32,6 +32,8 @@
 #include "inlines.h"
 #include "rtpdlg.h"
 #include "TubeTool.h"
+#include <set>
+#include <vector>
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -540,6 +542,203 @@ __inline HTREEITEM TV_InsertItemW(HWND hWnd, WCHAR* lpString, int len, HTREEITEM
 	return res;
 }
 
+namespace
+{
+	struct SideTreeNodes
+	{
+		std::map<int, HTREEITEM> bySideIndex;
+		HTREEITEM other = NULL;
+	};
+
+	bool TryParseSideIndex(CString text, int& result)
+	{
+		text.Trim();
+		if(text.IsEmpty())
+			return false;
+
+		char* end = NULL;
+		const long parsed = strtol(text, &end, 10);
+		if(end == (LPCSTR)text || *end != '\0' || parsed < 0 || parsed > 63)
+			return false;
+
+		result = static_cast<int>(parsed);
+		return true;
+	}
+
+	CString NormalizeSideLabelEncoding(const CString& text)
+	{
+		const char* bytes = text;
+		const int byteCount = text.GetLength();
+		if(byteCount == 0 || MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS,
+			bytes, byteCount, NULL, 0) > 0)
+			return text;
+
+		// The Chinese Mental Omega FAData.ini shipped with FA2Ext uses CP936,
+		// while this editor runs its narrow Windows APIs in UTF-8 mode.
+		const int wideCount = MultiByteToWideChar(936, 0, bytes, byteCount, NULL, 0);
+		if(wideCount <= 0)
+			return text;
+
+		std::wstring wide(wideCount, L'\0');
+		if(MultiByteToWideChar(936, 0, bytes, byteCount, wide.data(), wideCount) == 0)
+			return text;
+
+		const int utf8Count = WideCharToMultiByte(CP_UTF8, 0, wide.data(), wideCount,
+			NULL, 0, NULL, NULL);
+		if(utf8Count <= 0)
+			return text;
+
+		std::string utf8(utf8Count, '\0');
+		if(WideCharToMultiByte(CP_UTF8, 0, wide.data(), wideCount,
+			utf8.data(), utf8Count, NULL, NULL) == 0)
+			return text;
+		return CString(utf8.c_str());
+	}
+
+	SideTreeNodes CreateSideTreeNodes(CTreeCtrl& tree, HTREEITEM root)
+	{
+		SideTreeNodes result;
+		std::map<int, CString> labels;
+
+		for(const auto& sideEntry : sides)
+		{
+			const SIDEINFO& side = sideEntry.second;
+			if(labels.find(side.orig_n) == labels.end())
+				labels[side.orig_n] = side.name;
+		}
+
+		// FA2Ext treats FAData.ini [Sides] as display metadata. The key is the
+		// side index, the first value is the tree caption and the optional
+		// second value marks a Yuri/expansion-only entry. It is not an Owner
+		// list and therefore must not be appended to the global `sides` table.
+		if(const CIniFileSection* configuredSides = g_data.GetSection("Sides"))
+		{
+			for(const auto& configuredSide : configuredSides->values)
+			{
+				int sideIndex = -1;
+				if(!TryParseSideIndex(configuredSide.first, sideIndex))
+					continue;
+
+				const bool expansionOnly = atoi(GetParam(configuredSide.second, 1)) != 0;
+				if(expansionOnly && !yuri_mode)
+					continue;
+
+				CString label = NormalizeSideLabelEncoding(GetParam(configuredSide.second, 0));
+				label.Trim();
+				if(!label.IsEmpty())
+					labels[sideIndex] = label;
+			}
+		}
+
+#ifdef RA2_MODE
+		if(labels.find(0) != labels.end()) labels[0] = GetLanguageStringACP("Allied");
+		if(labels.find(1) != labels.end()) labels[1] = GetLanguageStringACP("Soviet");
+		if(labels.find(2) != labels.end()) labels[2] = GetLanguageStringACP("Yuri");
+#endif
+
+		for(const auto& label : labels)
+		{
+			result.bySideIndex[label.first] = tree.InsertItem(
+				TVIF_PARAM | TVIF_TEXT, label.second, 0, 0, 0, 0, -1, root, TVI_LAST);
+		}
+		result.other = tree.InsertItem(TVIF_PARAM | TVIF_TEXT,
+			GetLanguageStringACP("Other"), 0, 0, 0, 0, -1, root, TVI_LAST);
+		return result;
+	}
+
+	bool OwnerContainsSide(const CString& ownerList, const CString& sideName)
+	{
+		for(int i = 0; ; i++)
+		{
+			CString owner = GetParam(ownerList, i);
+			owner.Trim();
+			if(owner.IsEmpty())
+				break;
+			if(owner.CompareNoCase(sideName) == 0)
+				return true;
+		}
+		return false;
+	}
+
+	std::vector<HTREEITEM> FindSideParents(const SideTreeNodes& nodes, const CString& owners, int planningSide)
+	{
+		std::vector<HTREEITEM> parents;
+		std::set<int> addedSideIndices;
+
+		for(const auto& sideEntry : sides)
+		{
+			const SIDEINFO& side = sideEntry.second;
+			if(planningSide >= 0 && planningSide != side.orig_n)
+				continue;
+
+			const auto node = nodes.bySideIndex.find(side.orig_n);
+			if(node == nodes.bySideIndex.end() || addedSideIndices.find(side.orig_n) != addedSideIndices.end())
+				continue;
+
+			if(OwnerContainsSide(owners, side.name) ||
+				(side.orig_n == 2 && owners.CompareNoCase("YuriCountry") == 0))
+			{
+				parents.push_back(node->second);
+				addedSideIndices.insert(side.orig_n);
+			}
+		}
+
+		if(parents.empty())
+			parents.push_back(nodes.other);
+		return parents;
+	}
+
+	CString GetObjectOwner(const CIniFile& mapIni, const CString& type)
+	{
+		CString owner;
+		if(const CIniFileSection* section = rules.GetSection(type))
+			owner = section->GetValueByName("Owner");
+		if(const CIniFileSection* section = mapIni.GetSection(type))
+		{
+			const CString mapOwner = section->GetValueByName("Owner");
+			if(!mapOwner.IsEmpty())
+				owner = mapOwner;
+		}
+		return owner;
+	}
+
+	int GetObjectPlanningSide(const CIniFile& mapIni, const CString& type)
+	{
+		CString value;
+		if(const CIniFileSection* section = rules.GetSection(type))
+			value = section->GetValueByName("AIBasePlanningSide");
+		if(const CIniFileSection* section = g_data.GetSection(type))
+		{
+			const CString configuredValue = section->GetValueByName("AIBasePlanningSide");
+			if(!configuredValue.IsEmpty())
+				value = configuredValue;
+		}
+		if(const CIniFileSection* section = mapIni.GetSection(type))
+		{
+			const CString mapValue = section->GetValueByName("AIBasePlanningSide");
+			if(!mapValue.IsEmpty())
+				value = mapValue;
+		}
+		return value.IsEmpty() ? -1 : atoi(value);
+	}
+
+	void InsertSideObject(CTreeCtrl& tree, const SideTreeNodes& nodes, WCHAR* text,
+		int param, const CString& owners, int planningSide)
+	{
+		if(!text)
+			return;
+		for(HTREEITEM parent : FindSideParents(nodes, owners, planningSide))
+			TV_InsertItemW(tree.m_hWnd, text, wcslen(text), TVI_LAST, parent, param);
+	}
+
+	void InsertSideObject(CTreeCtrl& tree, const SideTreeNodes& nodes, const CString& text,
+		int param, const CString& owners, int planningSide)
+	{
+		for(HTREEITEM parent : FindSideParents(nodes, owners, planningSide))
+			tree.InsertItem(TVIF_PARAM | TVIF_TEXT, text, 0, 0, 0, 0, param, parent, TVI_LAST);
+	}
+}
+
 void CViewObjects::UpdateDialog()
 {
 	OutputDebugString("Objectbrowser redrawn\n");
@@ -615,42 +814,10 @@ void CViewObjects::UpdateDialog()
 #endif
 
 
-	HTREEITEM structhouses[64];
-#ifdef RA2_MODE
-	HTREEITEM hAllied=tree.InsertItem(TVIF_PARAM | TVIF_TEXT, GetLanguageStringACP("Allied"), 0, 0,0,0,-1,rootitems[3], TVI_LAST);
-	HTREEITEM hSoviet=tree.InsertItem(TVIF_PARAM | TVIF_TEXT, GetLanguageStringACP("Soviet"), 0, 0,0,0,-1,rootitems[3], TVI_LAST);
-	HTREEITEM hYuri=NULL;
-	if(yuri_mode)
-	{
-		hYuri=tree.InsertItem(TVIF_PARAM | TVIF_TEXT, GetLanguageStringACP("Yuri"), 0, 0, 0, 0, -1, rootitems[3], TVI_LAST);  
-	}
-
-	for(i=0;i<sides.size();i++)
-	{
-		if(sides[i].orig_n==0)
-			structhouses[i]=hAllied;
-		else if(yuri_mode && sides[i].orig_n==2)
-			structhouses[i]=hYuri;
-		else if(sides[i].orig_n==1)
-			structhouses[i]=hSoviet;
-		else
-		{
-			// Mental Omega / FA2Ext extended sides (orig_n >= 3): create a
-			// dedicated tree node named after the side, mirroring the
-			// ObjectBrowserControl_Redraw_Sides hook in FA2Ext.dll.
-			structhouses[i]=tree.InsertItem(TVIF_PARAM | TVIF_TEXT, sides[i].name, 0, 0, 0, 0, -1, rootitems[3], TVI_LAST);
-		}
-		
-	}
-	
-	structhouses[sides.size()]=tree.InsertItem(TVIF_PARAM | TVIF_TEXT, GetLanguageStringACP("Other"), 0, 0,0,0,-1,rootitems[3], TVI_LAST);
-#else
-	for(i=0;i<sides.size();i++)
-	{
-		structhouses[i]=tree.InsertItem(TVIF_PARAM | TVIF_TEXT, sides[i].name, 0,0,0,0, -1, rootitems[3], TVI_LAST );
-	}
-	structhouses[sides.size()]=tree.InsertItem(TVIF_PARAM | TVIF_TEXT, "Other", 0,0,0,0, -1, rootitems[3], TVI_LAST );
-#endif
+	const SideTreeNodes infantrySideNodes = CreateSideTreeNodes(tree, rootitems[0]);
+	const SideTreeNodes vehicleSideNodes = CreateSideTreeNodes(tree, rootitems[1]);
+	const SideTreeNodes aircraftSideNodes = CreateSideTreeNodes(tree, rootitems[2]);
+	const SideTreeNodes buildingSideNodes = CreateSideTreeNodes(tree, rootitems[3]);
 
 
 	if(!theApp.m_Options.bEasy)
@@ -942,7 +1109,8 @@ void CViewObjects::UpdateDialog()
 		//addedString+=" (";
 		//addedString+=unitname+")";
 
-		TV_InsertItemW(tree.m_hWnd, addedString, wcslen(addedString), TVI_LAST, rootitems[0], valadded*1+i);
+		InsertSideObject(tree, infantrySideNodes, addedString, valadded*1+i,
+			GetObjectOwner(ini, unitname), GetObjectPlanningSide(ini, unitname));
 		
 		//tree.InsertItem(TVIF_PARAM | TVIF_TEXT, addedString, 0,0,0,0, valadded*1+i, rootitems[0], TVI_LAST );
 		lv=i;
@@ -953,12 +1121,13 @@ void CViewObjects::UpdateDialog()
 	{
 		if(ini.sections["InfantryTypes"].GetValue(i)->GetLength()==0) continue;
 
-		if(strlen(ini.sections[*ini.sections["InfantryTypes"].GetValue(i)].values["Name"])>0)
-			tree.InsertItem(TVIF_PARAM | TVIF_TEXT, ini.sections[*ini.sections["InfantryTypes"].GetValue(i)].values["Name"], 0,0,0,0, valadded*1+rules.sections["InfantryTypes"].values.size()+i, rootitems[0], TVI_LAST );
-		else
-			tree.InsertItem(TVIF_PARAM | TVIF_TEXT, (*ini.sections["InfantryTypes"].GetValue(i)+" NOTDEFINED"), 0,0,0,0, valadded*1+rules.sections["InfantryTypes"].values.size()+i, rootitems[0], TVI_LAST );
-
-
+		const CString unitname = *ini.sections["InfantryTypes"].GetValue(i);
+		CString addedString = ini.sections[unitname].GetValueByName("Name");
+		if(addedString.IsEmpty())
+			addedString = unitname + " NOTDEFINED";
+		InsertSideObject(tree, infantrySideNodes, addedString,
+			valadded*1+rules.sections["InfantryTypes"].values.size()+i,
+			GetObjectOwner(ini, unitname), GetObjectPlanningSide(ini, unitname));
 	}
 
 	CString theater=Map->GetTheater();
@@ -1001,21 +1170,6 @@ void CViewObjects::UpdateDialog()
 
 
 
-		CString owner=rules.sections[unitname].values["Owner"];
-		int baseplanningside=-1;
-#ifdef RA2_MODE
-		baseplanningside=-1;
-#endif
-		if(rules.sections[unitname].values.find("AIBasePlanningSide")!=rules.sections[unitname].values.end())
-		{
-			baseplanningside=atoi(rules.sections[unitname].values["AIBasePlanningSide"]);
-		}
-		if(g_data.sections.find(unitname)!=g_data.sections.end() && g_data.sections[unitname].values.find("AIBasePlanningSide")!=g_data.sections[unitname].values.end())
-		{
-			baseplanningside=atoi(g_data.sections[unitname].values["AIBasePlanningSide"]);
-		}
-
-
 		int id=Map->GetBuildingID(unitname);
 		if(id<0 /*|| (buildinginfo[id].pic[0].bTerrain!=0 && buildinginfo[id].pic[0].bTerrain!=needed_terrain)*/)
 			continue;
@@ -1024,52 +1178,13 @@ void CViewObjects::UpdateDialog()
 		if(theater==THEATER1 && !buildinginfo[id].bSnow)  { /*MessageBox("Ignored", unitname,0);*/ continue;}
 		if(theater==THEATER2 && !buildinginfo[id].bUrban)  { /*MessageBox("Ignored", unitname,0);*/ continue;}
 
-		// check if mapfile contains other value for owner
-		if(ini.sections.find(unitname)!=ini.sections.end())
-		{
-			if(ini.sections[unitname].values.find("Owner")!=ini.sections[unitname].values.end())
-				owner=ini.sections[unitname].values["Owner"];
-		}
-
 		//addedString=TranslateStringACP(addedString);
 
 		//addedString+=" (";
 		//addedString+=unitname+")";
 
-		BOOL addedfor[16]={FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE};
-
-		// MW fixed below for YR... uhhh...
-		int e;
-		BOOL bAdded=FALSE;
-		for(e=0;e<sides.size();e++)
-		{
-			//MessageBox(sides[e].name);
-			
-			if(isIncluded(owner,sides[e].name))
-			{
-
-#ifdef RA2_MODE
-				if(!addedfor[sides[e].orig_n])
-#endif
-				if(baseplanningside==-1 || baseplanningside==sides[e].orig_n)
-				{
-					
-					//tree.InsertItem(TVIF_PARAM | TVIF_TEXT, addedString, 0,0,0,0, valadded*2+i, structhouses[e], TVI_LAST );
-					TV_InsertItemW(tree.m_hWnd, addedString, wcslen(addedString), TVI_LAST, structhouses[e], valadded*2+i);
-					bAdded=TRUE;
-					addedfor[sides[e].orig_n]=TRUE;
-
-				}
-			}
-			
-			
-		}
-		
-		if(bAdded==FALSE)
-		{
-			//tree.InsertItem(TVIF_PARAM | TVIF_TEXT, addedString, 0,0,0,0, valadded*2+i, structhouses[e+1], TVI_LAST );
-			TV_InsertItemW(tree.m_hWnd, addedString, wcslen(addedString), TVI_LAST, structhouses[sides.size()], valadded*2+i);
-		}
+		InsertSideObject(tree, buildingSideNodes, addedString, valadded*2+i,
+			GetObjectOwner(ini, unitname), GetObjectPlanningSide(ini, unitname));
 
 		lv=i;
 	}
@@ -1079,57 +1194,16 @@ void CViewObjects::UpdateDialog()
 	{
 		if(ini.sections["BuildingTypes"].GetValue(i)->GetLength()==0) continue;
 
-		int id=Map->GetBuildingID(*ini.sections["BuildingTypes"].GetValue(i));
+		const CString unitname = *ini.sections["BuildingTypes"].GetValue(i);
+		int id=Map->GetBuildingID(unitname);
 		if(id<0 || (buildinginfo[id].pic[0].bTerrain!=TheaterChar::None && buildinginfo[id].pic[0].bTerrain!=needed_terrain))
 			continue;
 
-		int e=2;
-		CString owner;
-		BOOL bAdded=FALSE;
-		owner=ini.sections[*ini.sections["BuildingTypes"].GetValue(i)].values["Owner"];
-		owner.MakeUpper();
-		if(strlen(ini.sections[*ini.sections["BuildingTypes"].GetValue(i)].values["Name"])>0)
-		{
-			CString addedString=ini.sections[*ini.sections["BuildingTypes"].GetValue(i)].values["Name"];
-			int e;
-			for(e=0;e<sides.size();e++)
-			{
-				if(isIncluded(owner, sides[e].name))
-				{
-					tree.InsertItem(TVIF_PARAM | TVIF_TEXT, addedString, 0,0,0,0, valadded*2+i, structhouses[e], TVI_LAST );
-					bAdded=TRUE;
-				}
-				else if(e==sides.size()-1 && bAdded==FALSE)
-				{
-					tree.InsertItem(TVIF_PARAM | TVIF_TEXT, addedString, 0,0,0,0, valadded*2+i, structhouses[e+1], TVI_LAST );
-				}
-			}
-		}		
-		else
-		{
-			CString addedString=(*ini.sections["BuildingTypes"].GetValue(i)+" UNDEFINED");
-			BOOL addedfor[16]={FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE};
-
-			int e;
-			for(e=0;e<sides.size();e++)
-			{
-#ifdef RA2_MODE
-				if(!addedfor[sides[e].orig_n])
-#endif
-				if(isIncluded(owner, sides[e].name) || (yuri_mode && e==2 && owner=="YuriCountry"))
-				{
-					tree.InsertItem(TVIF_PARAM | TVIF_TEXT, addedString, 0,0,0,0, valadded*2+i, structhouses[e], TVI_LAST );
-					bAdded=TRUE;
-					addedfor[sides[e].orig_n]=TRUE;
-
-				}
-				else if(e==sides.size()-1 && bAdded==FALSE)
-				{
-					tree.InsertItem(TVIF_PARAM | TVIF_TEXT, addedString, 0,0,0,0, valadded*2+i, structhouses[e+1], TVI_LAST );
-				}
-			}	
-		}
-
+		CString addedString = ini.sections[unitname].GetValueByName("Name");
+		if(addedString.IsEmpty())
+			addedString = unitname + " UNDEFINED";
+		InsertSideObject(tree, buildingSideNodes, addedString, valadded*2+i,
+			GetObjectOwner(ini, unitname), GetObjectPlanningSide(ini, unitname));
 	}
 
 
@@ -1165,7 +1239,8 @@ void CViewObjects::UpdateDialog()
 		//addedString+=" (";
 		//addedString+=unitname+")";
 
-		TV_InsertItemW(tree.m_hWnd, addedString, wcslen(addedString), TVI_LAST, rootitems[2], valadded*3+i);
+		InsertSideObject(tree, aircraftSideNodes, addedString, valadded*3+i,
+			GetObjectOwner(ini, unitname), GetObjectPlanningSide(ini, unitname));
 		
 		//tree.InsertItem(TVIF_PARAM | TVIF_TEXT, addedString, 0,0,0,0, valadded*3+i, rootitems[2], TVI_LAST );
 		lv=i;
@@ -1176,12 +1251,13 @@ void CViewObjects::UpdateDialog()
 	{
 		if(ini.sections["AircraftTypes"].GetValue(i)->GetLength()==0) continue;
 
-		if(strlen(ini.sections[*ini.sections["AircraftTypes"].GetValue(i)].values["Name"])>0)
-			tree.InsertItem(TVIF_PARAM | TVIF_TEXT, ini.sections[*ini.sections["AircraftTypes"].GetValue(i)].values["Name"], 0,0,0,0, valadded*3+i+rules.sections["AircraftTypes"].values.size(), rootitems[2], TVI_LAST );
-		else
-			tree.InsertItem(TVIF_PARAM | TVIF_TEXT, (*ini.sections["AircraftTypes"].GetValue(i)+" NOTDEFINED"), 0,0,0,0, valadded*3+i+rules.sections["AircraftTypes"].values.size(), rootitems[2], TVI_LAST );
-
-
+		const CString unitname = *ini.sections["AircraftTypes"].GetValue(i);
+		CString addedString = ini.sections[unitname].GetValueByName("Name");
+		if(addedString.IsEmpty())
+			addedString = unitname + " NOTDEFINED";
+		InsertSideObject(tree, aircraftSideNodes, addedString,
+			valadded*3+i+rules.sections["AircraftTypes"].values.size(),
+			GetObjectOwner(ini, unitname), GetObjectPlanningSide(ini, unitname));
 	}
 
 	
@@ -1216,7 +1292,8 @@ void CViewObjects::UpdateDialog()
 		//addedString+=" (";
 		//addedString+=unitname+")";
 
-		TV_InsertItemW(tree.m_hWnd, addedString, wcslen(addedString), TVI_LAST, rootitems[1], valadded*4+i);
+		InsertSideObject(tree, vehicleSideNodes, addedString, valadded*4+i,
+			GetObjectOwner(ini, unitname), GetObjectPlanningSide(ini, unitname));
 		
 		//tree.InsertItem(TVIF_PARAM | TVIF_TEXT, addedString, 0,0,0,0, valadded*4+i, rootitems[1], TVI_LAST );
 		lv=i;
@@ -1227,12 +1304,13 @@ void CViewObjects::UpdateDialog()
 	{
 		if(ini.sections["VehicleTypes"].GetValue(i)->GetLength()==0) continue;
 
-		if(strlen(ini.sections[*ini.sections["VehicleTypes"].GetValue(i)].values["Name"])>0)
-			tree.InsertItem(TVIF_PARAM | TVIF_TEXT, ini.sections[*ini.sections["VehicleTypes"].GetValue(i)].values["Name"], 0,0,0,0, valadded*4+i+rules.sections["VehicleTypes"].values.size(), rootitems[1], TVI_LAST );
-		else
-			tree.InsertItem(TVIF_PARAM | TVIF_TEXT, (*ini.sections["VehicleTypes"].GetValue(i)+" NOTDEFINED"), 0,0,0,0, valadded*4+i+rules.sections["VehicleTypes"].values.size(), rootitems[1], TVI_LAST );
-
-
+		const CString unitname = *ini.sections["VehicleTypes"].GetValue(i);
+		CString addedString = ini.sections[unitname].GetValueByName("Name");
+		if(addedString.IsEmpty())
+			addedString = unitname + " NOTDEFINED";
+		InsertSideObject(tree, vehicleSideNodes, addedString,
+			valadded*4+i+rules.sections["VehicleTypes"].values.size(),
+			GetObjectOwner(ini, unitname), GetObjectPlanningSide(ini, unitname));
 	}
 
 

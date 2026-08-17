@@ -27,6 +27,7 @@
 #include "FinalSunDlg.h"
 #include "mapdata.h"
 #include "variables.h"
+#include "functions.h"
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -128,10 +129,16 @@ BOOL CToolSettingsBar::OnInitDialog()
 	m_BrushSize=0;
 	UpdateData(FALSE);
 
+	Localize();
 	((CComboBox*)GetDlgItem(IDC_BRUSHSIZE))->SetCurSel(0);
 	
 	return TRUE;  // return TRUE unless you set the focus to a control
 	              // EXCEPTION: OCX-Eigenschaftenseiten sollten FALSE zurückgeben
+}
+
+void CToolSettingsBar::Localize()
+{
+	SetDlgItemText(IDC_BRUSHSIZE_LABEL, GetLanguageStringACP("BrushSizeLabel"));
 }
 
 void CToolSettingsBar::OnShowWindow(BOOL bShow, UINT nStatus) 
