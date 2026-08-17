@@ -58,13 +58,8 @@ public:
 	CFloatEdit	m_Float2;
 	CFloatEdit	m_Float1;
 	CMyComboBox	m_AITriggerType;
-	CString	m_Flag3;
 	CString	m_Flag4;
 	CString	m_Name;
-	CString	m_Flag6;
-	CString	m_Flag7;
-	CString	m_Flag8;
-	CString	m_Flag9;
 	BOOL	m_Enabled;
 	int		m_Condition;
 	int		m_Number;
@@ -73,7 +68,6 @@ public:
 	BOOL	m_Hard;
 	BOOL	m_BaseDefense;
 	BOOL	m_Skirmish;
-	CString	m_Flag5;
 	CString	m_MultiSide;
 	//}}AFX_DATA
 
@@ -102,13 +96,7 @@ protected:
 	afx_msg void OnChangeFloat1();
 	afx_msg void OnChangeFloat2();
 	afx_msg void OnChangeFloat3();
-	afx_msg void OnChangeFlag3();
 	afx_msg void OnChangeFlag4();
-	afx_msg void OnChangeFlag5();
-	afx_msg void OnChangeFlag6();
-	afx_msg void OnChangeFlag7();
-	afx_msg void OnChangeFlag8();
-	afx_msg void OnChangeFlag9();
 	afx_msg void OnEnabled();
 	afx_msg void OnAdd();
 	afx_msg void OnDelete();

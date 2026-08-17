@@ -271,18 +271,14 @@ CIsoView::CIsoView()
 	line.bottom = 0;
 	m_menu.LoadMenu(IDR_MAPVIEW);
 	m_drag = FALSE;
-	// _map=NULL;
 	AD.reset();
 	m_BrushSize_x = 1;
 	m_BrushSize_y = 1;
 	rscroll = FALSE;
 	m_zooming = false;
-	bThreadPainting = TRUE;
 	m_viewScale = Vec2<CSProjected, float>(1.0f, 1.0f);
 	m_viewScaleControl = 1.0f;
 	updateFontScaled();
-	//m_paintthread=new(CIsoPaintThread);
-	//m_paintthread->CreateThread();
 
 }
 
@@ -290,9 +286,6 @@ CIsoView::~CIsoView()
 {
 	rs_vulkan_destroy(m_vulkanRenderer);
 	m_vulkanRenderer = nullptr;
-	// if(_map!=NULL) delete[] _map;
-	// _map=NULL;
-	//delete m_paintthread;
 	bNoThreadDraw = TRUE;
 }
 

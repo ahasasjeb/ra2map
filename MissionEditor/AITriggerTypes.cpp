@@ -59,13 +59,8 @@ IMPLEMENT_DYNCREATE(CAITriggerTypes, CDialog)
 CAITriggerTypes::CAITriggerTypes() : CDialog(CAITriggerTypes::IDD)
 {
 	//{{AFX_DATA_INIT(CAITriggerTypes)
-	m_Flag3 = _T("");
 	m_Flag4 = _T("");
 	m_Name = _T("");
-	m_Flag6 = _T("");
-	m_Flag7 = _T("");
-	m_Flag8 = _T("");
-	m_Flag9 = _T("");
 	m_Enabled = FALSE;
 	m_Condition = -1;
 	m_Number = 0;
@@ -74,7 +69,6 @@ CAITriggerTypes::CAITriggerTypes() : CDialog(CAITriggerTypes::IDD)
 	m_Hard = FALSE;
 	m_BaseDefense = FALSE;
 	m_Skirmish = FALSE;
-	m_Flag5 = _T("");
 	m_MultiSide = _T("");
 	//}}AFX_DATA_INIT
 }
@@ -334,10 +328,8 @@ void CAITriggerTypes::OnSelchangeAitriggertype()
 	m_Float1.SetWindowText(aitt.float1);
 	m_Float2.SetWindowText(aitt.float2);
 	m_Float3.SetWindowText(aitt.float3);
-	//m_Flag3=aitt.skirmish;
 	m_Skirmish=isTrue(aitt.skirmish);
 	m_Flag4=aitt.flag4;
-	//m_Flag5=aitt.multihouse;
 	m_MultiSide=aitt.multihouse;
 	m_BaseDefense=isTrue(aitt.basedefense);
 	m_TeamType2.SetWindowText(aitt.teamtype2);
@@ -481,12 +473,6 @@ void CAITriggerTypes::OnChangeFloat3()
 	SetAITriggerParam(value, 9);
 }
 
-void CAITriggerTypes::OnChangeFlag3() 
-{
-	
-
-}
-
 void CAITriggerTypes::OnChangeFlag4() 
 {
 	UpdateData();
@@ -496,42 +482,6 @@ void CAITriggerTypes::OnChangeFlag4()
 
 	SetAITriggerParam(value, 11);
 
-}
-
-void CAITriggerTypes::OnChangeFlag5() 
-{
-	
-
-}
-
-void CAITriggerTypes::OnChangeFlag6() 
-{
-	
-}
-
-void CAITriggerTypes::OnChangeFlag7() 
-{
-	
-}
-
-void CAITriggerTypes::OnChangeFlag8() 
-{
-	UpdateData();
-
-	CString value;
-	value=m_Flag8;
-
-	SetAITriggerParam(value, 16);
-}
-
-void CAITriggerTypes::OnChangeFlag9() 
-{
-	UpdateData();
-
-	CString value;
-	value=m_Flag9;
-
-	SetAITriggerParam(value, 17);
 }
 
 void CAITriggerTypes::OnEnabled() 

@@ -126,9 +126,6 @@
     <ClCompile Include="MapModifier.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="MapOpenDialog.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="MapValidator.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -154,9 +151,6 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="MyViewFrame.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="NewMap.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="NewMapCreateDlg.cpp">
@@ -409,9 +403,6 @@
     <ClInclude Include="MapModifier.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="MapOpenDialog.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="MapValidator.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -437,9 +428,6 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="MyViewFrame.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="NewMap.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="NewMapCreateDlg.h">
@@ -595,15 +583,6 @@
       <Filter>Resource Files</Filter>
     </Image>
     <Image Include="res\FinalSun.ico">
-      <Filter>Resource Files</Filter>
-    </Image>
-    <Image Include="res\ico00003.ico">
-      <Filter>Resource Files</Filter>
-    </Image>
-    <Image Include="res\idr_main.ico">
-      <Filter>Resource Files</Filter>
-    </Image>
-    <Image Include="res\mv_probl.bmp">
       <Filter>Resource Files</Filter>
     </Image>
     <Image Include="res\terrainb.bmp">

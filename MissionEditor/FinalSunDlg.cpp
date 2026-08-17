@@ -29,8 +29,6 @@
 #include "tsoptions.h"
 #include "info.h"
 #include "loading.h"
-#include "MapOpenDialog.h"
-//#include "NewMap->h"
 #include "newmapcreatedlg.h"
 #include "newmapcreatenewdlg.h"
 #include "newmapimportdlg.h"
@@ -497,7 +495,6 @@ void CFinalSunDlg::OnOptionsTiberiansunoptions()
 void CFinalSunDlg::OnFileOpenmap() 
 {
 	
-	//CMapOpenDialog dlg(TRUE, NULL, NULL,  OFN_HIDEREADONLY | OFN_OVERWRITEPROMPT | OFN_FILEMUSTEXIST, "TS maps|*.mpr;*.map|TS multi maps|*.mpr|TS single maps|*.map|");
 	CString r=GetLanguageStringACP("SAVEDLG_FILETYPES");
 	if(yuri_mode)
 	{

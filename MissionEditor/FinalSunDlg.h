@@ -89,7 +89,6 @@ public:
 
 	CHouses m_houses;
 
-	CSplitterWnd m_splitter_view;
 	CMyViewFrame m_view;
 	CSpecialFlags m_specialflags;
 	CLighting m_lighting;

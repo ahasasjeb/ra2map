@@ -81,13 +81,11 @@ extern map<int, int> tilesets_start;
 
 extern RGBTRIPLE palIso[256];
 extern RGBTRIPLE palUnit[256];
-extern RGBTRIPLE palStd[256];
 extern RGBTRIPLE palTheater[256];
 extern RGBTRIPLE palLib[256];
 
 extern int iPalIso[256];
 extern int iPalUnit[256];
-extern int iPalStd[256];
 extern int iPalTheater[256];
 extern int iPalLib[256];
 extern int bpp;
@@ -119,7 +117,6 @@ extern ofstream errstream;
 // application path
 extern char AppPath[MAX_PATH + 1];
 extern const std::string u8AppDataPath;
-extern const std::wstring u16AppDataPath;
 extern char TSPath[MAX_PATH + 1];
 
 extern bool bAllowAccessBehindCliffs;
@@ -140,7 +137,6 @@ extern map<CString, XCString> CCStrings;
 extern int cliffset;
 extern int cliffset_start;
 extern int rampset;
-extern int rampsmoothset;
 extern int slopesetpiecesset;
 extern int waterset;
 extern int shoreset;

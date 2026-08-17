@@ -282,7 +282,6 @@
     <ClCompile Include="MapMinimap.cpp" />
     <ClCompile Include="MapLoadingDlg.cpp" />
     <ClCompile Include="MapModifier.cpp" />
-    <ClCompile Include="MapOpenDialog.cpp" />
     <ClCompile Include="MapValidator.cpp" />
     <ClCompile Include="MiniMap.cpp" />
     <ClCompile Include="MMXSavingOptionsDlg.cpp" />
@@ -292,7 +291,6 @@
 	<ClCompile Include="TheaterConfiguration.cpp" />
     <ClCompile Include="MyComboBox.cpp" />
     <ClCompile Include="MyViewFrame.cpp" />
-    <ClCompile Include="NewMap.cpp" />
     <ClCompile Include="NewMapCreateDlg.cpp" />
     <ClCompile Include="NewMapCreateNewDlg.cpp" />
     <ClCompile Include="NewMapImportDlg.cpp" />
@@ -399,7 +397,6 @@
     <ClInclude Include="MapMinimap.h" />
     <ClInclude Include="MapLoadingDlg.h" />
     <ClInclude Include="MapModifier.h" />
-    <ClInclude Include="MapOpenDialog.h" />
     <ClInclude Include="MapTool.h" />
     <ClInclude Include="MapValidator.h" />
     <ClInclude Include="MiniMap.h" />
@@ -410,7 +407,6 @@
 	<ClInclude Include="TheaterConfiguration.h" />
     <ClInclude Include="MyComboBox.h" />
     <ClInclude Include="MyViewFrame.h" />
-    <ClInclude Include="NewMap.h" />
     <ClInclude Include="NewMapCreateDlg.h" />
     <ClInclude Include="NewMapCreateNewDlg.h" />
     <ClInclude Include="NewMapImportDlg.h" />
@@ -467,9 +463,6 @@
     <Image Include="res\FinalAlert2.ico" />
     <Image Include="res\FinalAlert2YR.ico" />
     <Image Include="res\FinalSun.ico" />
-    <Image Include="res\ico00003.ico" />
-    <Image Include="res\idr_main.ico" />
-    <Image Include="res\mv_probl.bmp" />
     <Image Include="res\scrollcursor_ra2.bmp" />
     <Image Include="res\scrollcursor_ts.bmp" />
     <Image Include="res\terrainb.bmp" />

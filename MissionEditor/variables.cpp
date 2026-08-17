@@ -86,13 +86,11 @@ map<int, int> tilesets_start;
 // Palettes:
 RGBTRIPLE palIso[256];
 RGBTRIPLE palUnit[256];
-RGBTRIPLE palStd[256];
 RGBTRIPLE palTheater[256];
 RGBTRIPLE palLib[256];
 
 int iPalIso[256];
 int iPalUnit[256];
-int iPalStd[256];
 int iPalTheater[256];
 int iPalLib[256];
 
@@ -167,7 +165,6 @@ static const std::string GetAppDataPath()
 /* Application specific global variables */
 char AppPath[MAX_PATH + 1] = { 0 };
 const std::string u8AppDataPath = GetAppDataPath();
-const std::wstring u16AppDataPath = utf8ToUtf16(u8AppDataPath);
 char TSPath[MAX_PATH + 1] = { 0 };
 CString currentMapFile;
 BOOL bOptionsStartup=FALSE;
@@ -197,7 +194,6 @@ map<CString, XCString> AllStrings;
 int cliffset;
 int cliffset_start;
 int rampset;
-int rampsmoothset;
 int slopesetpiecesset;
 int tunnelset;
 int tracktunnelset;

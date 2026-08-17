@@ -46,16 +46,10 @@ pub const RS_ERR_BAD_ARG: i32 = -1;
 pub const RS_ERR_SMALL_BUFFER: i32 = -2;
 /// A panic was caught inside the Rust core (should never happen).
 pub const RS_ERR_PANIC: i32 = -3;
-/// Section count exceeds the supported maximum.
-pub const RS_ERR_TOO_MANY_SECTIONS: i32 = -4;
 
 /// Maximum supported VXL section count (arbitrary but far above any real
 /// model; guards against corrupt headers driving huge loops).
 const MAX_SECTIONS: usize = 1024;
-
-/// Maximum sane render target dimension; guards against corrupt bounds
-/// data producing enormous allocations on the C++ side.
-pub const RS_MAX_RENDER_TARGET_DIM: i32 = 4096;
 
 // ---------------------------------------------------------------------------
 // Math types (mirrors MissionEditorPackLib/Vec3.h semantics exactly)

@@ -458,7 +458,6 @@ void CMapData::UpdateIniFile(DWORD dwFlags)
 
 		slopesetpiecesset = atoi((*tiles).sections["General"].values["SlopeSetPieces"]);
 		rampset = atoi((*tiles).sections["General"].values["RampBase"]);
-		rampsmoothset = atoi((*tiles).sections["General"].values["RampSmooth"]);
 		cliffset = atoi((*tiles).sections["General"].values["CliffSet"]);
 		cliffset_start = GetTileID(cliffset, 0);
 		waterset = atoi((*tiles).sections["General"].values["WaterSet"]);

@@ -167,8 +167,6 @@ BOOL CFinalSunApp::InitInstance()
 	}
 #endif
 
-	ParseCommandLine();
-
 	// Load application data
 	std::string datafile = AppPath;
 #ifdef TS_MODE
@@ -393,22 +391,6 @@ BOOL CFinalSunApp::InitInstance()
 	// Map and dialog closed, do further work if required	
 
 	return FALSE;
-}
-
-void CFinalSunApp::ParseCommandLine()
-{
-#if 0 // Removed as it can conflict with Steam game arguments! -LF 23.02.2024
-	char data[MAX_PATH + 30];
-
-	strcpy(data, theApp.m_lpCmdLine);
-	if (strlen(data) == 0)
-	{
-		currentMapFile.Empty();
-		return;
-	}
-
-	currentMapFile = data;
-#endif
 }
 
 int CFinalSunApp::Run()

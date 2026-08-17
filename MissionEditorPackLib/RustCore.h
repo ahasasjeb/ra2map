@@ -38,7 +38,6 @@
 #define RS_ERR_BAD_ARG (-1)
 #define RS_ERR_SMALL_BUFFER (-2)
 #define RS_ERR_PANIC (-3)
-#define RS_ERR_TOO_MANY_SECTIONS (-4)
 #define RS_ERR_VULKAN_UNAVAILABLE (-10)
 #define RS_ERR_VULKAN_RUNTIME (-11)
 

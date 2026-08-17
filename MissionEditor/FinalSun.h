@@ -118,7 +118,6 @@ public:
 	public:
 	UINT m_cf;
 	HACCEL m_hAccel;
-	void ParseCommandLine();
 
 private:
 	std::string m_u8LogFileName;

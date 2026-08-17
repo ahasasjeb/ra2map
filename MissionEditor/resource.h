@@ -16,12 +16,9 @@
 #define IDD_IMPORTINI                   147
 #define IDD_LIGHTNING                   148
 #define IDD_LIGHTING                    148
-#define IDD_WAYPOINTS                   151
 #define IDD_INFO                        152
 #define IDD_SPECIALFLAGS                153
-#define IDD_TREES                       155
 #define IDR_RULESPATCH                  157
-#define IDB_DBG                         159
 #define IDD_POS                         160
 #define IDD_VIEW                        161
 #define IDR_MAPVIEW                     162
@@ -51,8 +48,6 @@
 #define IDD_AITRIGGERTYPESENABLE        203
 #define IDR_AI                          204
 #define IDD_AITRIGGERTYPES              205
-#define IDD_MYOPENDIALOG                211
-#define IDD_NEWMAP                      212
 #define IDD_SINGLEPLAYER                217
 #define IDD_MAPVALIDATOR                219
 #define IDB_MV_ICONS                    220

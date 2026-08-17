@@ -80,8 +80,6 @@ public:
 	int m_FlattenLastX;
 	int m_FlattenLastY;
 	int m_TileChangeCount;
-	BOOL bThreadPainting;
-
 private:
 	ProjectedVec m_viewOffset;
 	Vec2<CSProjected, float> m_viewScale;  // this is used for display and may e.g. be locked to zoom steps
@@ -397,7 +395,6 @@ public:
 	rs_vulkan_renderer* m_vulkanRenderer;
 	int m_vulkanPresentFailures;
 	bool m_vulkanDisabled;
-	HGLRC m_hglrc;
 	void HandleProperties(int n, int type);
 	void UpdateDialog(BOOL bRepos=TRUE);
 	CMenu m_menu;
@@ -421,7 +418,6 @@ private:
 	
 	
 	// mapdata* _map;
-	COLORREF m_linecolor;
 	RECT line;
 	int m_type;
 	int m_id;

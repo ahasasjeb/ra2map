@@ -242,15 +242,6 @@ inline void ToPhys3d(int* x, int* y, int mapZ)
 	*y = r.y;
 }
 
-[[deprecated("Instead use CMapData::ToMapCoords3d")]]
-inline void ToIso3d(int* x, int* y, int mapZ)
-{
-	auto r = Map->ToMapCoords3d(ProjectedCoords(*x, *y), mapZ);
-	*x = r.x;
-	*y = r.y;
-}
-
-
 inline BOOL isSame(CString expr1, CString expr2)
 {
 	expr1.MakeLower();

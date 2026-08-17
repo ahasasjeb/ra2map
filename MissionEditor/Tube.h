@@ -117,7 +117,6 @@ public:
     auto getStartX() const { return m_startX; }
     auto getStartY() const { return m_startY; }
     MapCoords getStartCoords() const { return MapCoords(m_startX, m_startY); }
-    auto getInitialDirection() const { return m_direction; }
     ETubeDirection getLastDirection() const;
     auto getEndX() const { return m_endX; }
     auto getEndY() const { return m_endY; }
