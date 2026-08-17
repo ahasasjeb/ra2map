@@ -320,9 +320,13 @@ void CRTPDlg::OnPaint()
 	dc.FillRect(&pr,&f);
 	f.Detach();
 
-	auto clientDC = m_Preview.GetWindowDC();
-	StretchDIBits(clientDC->GetSafeHdc(), 20, 30,curwidth, curheight,
-		0, 0, curwidth, curheight, colors, &biinfo, DIB_RGB_COLORS, SRCCOPY);
+	CDC* clientDC = m_Preview.GetWindowDC();
+	if (clientDC)
+	{
+		StretchDIBits(clientDC->GetSafeHdc(), 20, 30,curwidth, curheight,
+			0, 0, curwidth, curheight, colors, &biinfo, DIB_RGB_COLORS, SRCCOPY);
+		m_Preview.ReleaseDC(clientDC);
+	}
 
 	delete[] colors;
 	

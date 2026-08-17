@@ -610,11 +610,15 @@ struct RA2STRINGENTRY
 	}
 	RA2STRINGENTRY& operator=(RA2STRINGENTRY& ref)
 	{
+		if (this == &ref) return *this;
+
 		if(value) delete[] value;
 		if(id) delete[] id;
+		if(value_asc) delete[] value_asc;
 		value=NULL;
 		value_size=0;
 		id=NULL;
+		id_size=0;
 		value_asc=0;
 		value_asc_size=0;
 		

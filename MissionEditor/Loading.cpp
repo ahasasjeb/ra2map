@@ -1660,7 +1660,7 @@ BOOL CLoading::LoadUnitGraphic(LPCTSTR lpUnittype)
 			
 			// create an array of pointers to directdraw surfaces
 			lpT=new(BYTE*[maxPics]);
-			memset(lpT, 0, sizeof(BYTE)*maxPics);
+			memset(lpT, 0, sizeof(BYTE*)*maxPics);
 			std::vector<std::vector<BYTE>> lighting(maxPics);
 			std::vector<SHPIMAGEHEADER> shp_image_headers(maxPics);
 			
@@ -5330,7 +5330,7 @@ void CLoading::LoadOverlayGraphic(LPCTSTR lpOvrlName_, int iOvrlNum)
 				
 			// create an array of pointers to directdraw surfaces
 			lpT=new(BYTE*[maxPics]);
-			memset(lpT, 0, sizeof(BYTE)*maxPics);
+			memset(lpT, 0, sizeof(BYTE*)*maxPics);
 
 			// if tiberium, change color
 			BOOL bIsBlueTib=FALSE;
@@ -6343,8 +6343,8 @@ void CLoading::LoadStrings()
 	errstream << "LoadStrings() executing" << endl;
 	errstream.flush();
 
-	BYTE *lpData=NULL;
-	DWORD dwSize;
+	std::vector<BYTE> lpData;
+	DWORD dwSize = 0;
 	if(DoesFileExist((std::string(TSPath) + "\\" + file).c_str()))
 	{
 		std::ifstream f(std::string(TSPath) + "\\" + file, ios::binary);
@@ -6354,17 +6354,17 @@ void CLoading::LoadStrings()
 			auto size = f.tellg();
 			if (size > 0)
 			{
-				lpData = new(BYTE[size]);
-				dwSize = size;
+				lpData.resize(static_cast<size_t>(size));
+				dwSize = static_cast<DWORD>(lpData.size());
 				f.seekg(0, std::ios::beg);
-				f.read(reinterpret_cast<char*>(lpData), dwSize);
+				f.read(reinterpret_cast<char*>(lpData.data()), dwSize);
 			}
 		}
 	}
 	errstream << "LoadStrings() loading from mix" << endl;
 	errstream.flush();
 
-	if(!lpData)
+	if(lpData.empty())
 	{
 		HMIXFILE hMix=FindFileInMix(file.c_str());
 		//HMIXFILE hMix=m_hLanguage;
@@ -6379,15 +6379,15 @@ void CLoading::LoadStrings()
 					auto size = f.tellg();
 					if (size > 0)
 					{
-						lpData = new(BYTE[size]);
-						dwSize = size;
+						lpData.resize(static_cast<size_t>(size));
+						dwSize = static_cast<DWORD>(lpData.size());
 						f.seekg(0, std::ios::beg);
-						f.read(reinterpret_cast<char*>(lpData), dwSize);
+						f.read(reinterpret_cast<char*>(lpData.data()), dwSize);
 					}
 				}
 			}
 			
-			if (!lpData)
+			if (lpData.empty())
 			{
 				MessageBox(GetLanguageStringACP("LanguageFileMissing"),TranslateStringACP("Error"));
 				return;
@@ -6401,9 +6401,6 @@ void CLoading::LoadStrings()
 		
 	}
 
-	BYTE* orig=static_cast<BYTE*>(lpData);
-	(void)orig;
-
 	// The CSF string table parsing lives in the memory-safe Rust core now.
 	// The old code walked the file with a raw pointer, trusted every
 	// length field and allocated `new BYTE[dwCharCount+1]` before copying
@@ -6413,7 +6410,7 @@ void CLoading::LoadStrings()
 	{
 		size_t entry_count = 0, ids_len = 0, values_len = 0, values_asc_len = 0;
 		int truncated = 0;
-		int res = rs_csf_parse(lpData, dwSize,
+		int res = rs_csf_parse(lpData.data(), dwSize,
 			NULL, 0, &entry_count,
 			NULL, 0, &ids_len,
 			NULL, 0, &values_len,
@@ -6424,7 +6421,7 @@ void CLoading::LoadStrings()
 
 		std::vector<rs_csf_entry> entries(entry_count);
 		std::vector<BYTE> ids(ids_len), values(values_len), values_asc(values_asc_len);
-		res = rs_csf_parse(lpData, dwSize,
+		res = rs_csf_parse(lpData.data(), dwSize,
 			entries.data(), entries.size(), &entry_count,
 			ids.data(), ids.size(), &ids_len,
 			values.data(), values.size(), &values_len,

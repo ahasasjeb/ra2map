@@ -581,10 +581,10 @@ namespace FSunPackLib
 			int size = mixfiles[hOwner - 1].get_size(id);
 			if (size == 0)
 				OutputDebugString("NULL size");
-			BYTE* b = new(BYTE[size]);
+			std::vector<BYTE> b(size);
 			mixfiles[hOwner - 1].seek(mixfiles[hOwner - 1].get_offset(id));
-			mixfiles[hOwner - 1].read(b, size);
-			cur_shp.load(Cvirtual_binary(b, size));
+			mixfiles[hOwner - 1].read(b.data(), size);
+			cur_shp.load(Cvirtual_binary(b.data(), b.size()));
 		}
 
 		return TRUE;
@@ -818,8 +818,11 @@ namespace FSunPackLib
 					}
 					else
 					{
-						HDC hDC;
-						while (pdds[pic]->GetDC(&hDC) == DDERR_WASSTILLDRAWING);
+						HDC hDC = NULL;
+						HRESULT getDCResult;
+						while ((getDCResult = pdds[pic]->GetDC(&hDC)) == DDERR_WASSTILLDRAWING);
+						if (getDCResult == DD_OK)
+						{
 						{
 							int i, e;
 							for (i = 0; i < head.cx; i++)
@@ -848,6 +851,7 @@ namespace FSunPackLib
 						}
 
 						pdds[pic]->ReleaseDC(hDC);
+						}
 
 					}
 
@@ -1055,6 +1059,7 @@ namespace FSunPackLib
 		int pic;
 		for (pic = 0;pic < iCount;pic++)
 		{
+			pdds[pic] = NULL;
 			int cx, cy;
 			int z = pic + iStart;
 
@@ -1234,8 +1239,11 @@ namespace FSunPackLib
 							image = new byte[cx * cy];
 							tmp_ts_draw(cur_tmp, image, iStart + pic);
 						}
-						HDC hDC;
-						while (pdds[pic]->GetDC(&hDC) == DDERR_WASSTILLDRAWING) {};
+						HDC hDC = NULL;
+						HRESULT getDCResult;
+						while ((getDCResult = pdds[pic]->GetDC(&hDC)) == DDERR_WASSTILLDRAWING) {};
+						if (getDCResult == DD_OK)
+						{
 
 							for (i = 0; i < cx; i++)
 							{
@@ -1258,6 +1266,7 @@ namespace FSunPackLib
 
 							pdds[pic]->ReleaseDC(hDC);
 							SetColorKey(pdds[pic], RGB(245, 245, 245));
+						}
 
 						}
 					}
@@ -1282,6 +1291,7 @@ namespace FSunPackLib
 		int pic;
 		for (pic = 0;pic < iCount;pic++)
 		{
+			lpTileArray[pic] = NULL;
 			int cx, cy;
 			int z = pic + iStart;
 
@@ -1752,8 +1762,11 @@ namespace FSunPackLib
 
 		if (bUseGDI)
 		{
-			HDC hDC;
-			while (pdds[0]->GetDC(&hDC) == DDERR_WASSTILLDRAWING);
+			HDC hDC = NULL;
+			HRESULT getDCResult;
+			while ((getDCResult = pdds[0]->GetDC(&hDC)) == DDERR_WASSTILLDRAWING);
+			if (getDCResult == DD_OK)
+			{
 
 
 			last_succeeded_operation = 7;
@@ -1787,6 +1800,7 @@ namespace FSunPackLib
 
 			SetPixel(hDC, 0, 0, RGB(245, 245, 245));
 			pdds[0]->ReleaseDC(hDC);
+			}
 
 		}
 
