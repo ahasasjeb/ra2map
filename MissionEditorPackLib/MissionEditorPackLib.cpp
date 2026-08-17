@@ -1221,13 +1221,21 @@ namespace FSunPackLib
 							pdds[pic]->SetColorKey(DDCKEY_SRCBLT, &ddck);
 						}
 
-						if (!bFastLoaded) // use GDI
+					if (!bFastLoaded) // use GDI
+					{
+						int i, e;
+						// Reuse the buffer the fast path already allocated and
+						// drew into. Only allocate when the fast path never ran
+						// (image == NULL). The previous unconditional new[]
+						// overwrote `image` and leaked the fast-path allocation
+						// whenever the fallback was taken.
+						if (!image)
 						{
-							int i, e;
 							image = new byte[cx * cy];
 							tmp_ts_draw(cur_tmp, image, iStart + pic);
-							HDC hDC;
-							while (pdds[pic]->GetDC(&hDC) == DDERR_WASSTILLDRAWING) {};
+						}
+						HDC hDC;
+						while (pdds[pic]->GetDC(&hDC) == DDERR_WASSTILLDRAWING) {};
 
 							for (i = 0; i < cx; i++)
 							{
@@ -1646,7 +1654,14 @@ namespace FSunPackLib
 
 
 		if (pdd->CreateSurface(&ddsd, &pdds[0], NULL) != DD_OK)
+		{
+			// The three rendering buffers were allocated above; surface
+			// creation failed, so free them instead of leaking all three.
+			delete[] image;
+			delete[] image_s;
+			delete[] image_z;
 			return NULL;
+		}
 
 		ddsd.dwFlags = DDSD_PITCH;
 		pdds[0]->GetSurfaceDesc(&ddsd);

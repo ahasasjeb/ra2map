@@ -1600,7 +1600,15 @@ void CFinalSunDlg::OnFileRuntiberiansun()  // or RA2
 		NULL,
 		&si,
 		&pi);
-	
+
+	// CreateProcess returns open handles to the new process and its primary
+	// thread on success; close both so we don't leak two kernel handles every
+	// time the game is launched.
+	if (success)
+	{
+		CloseHandle(pi.hProcess);
+		CloseHandle(pi.hThread);
+	}
 }
 
 
@@ -2157,6 +2165,10 @@ void CFinalSunDlg::UpdateStrings()
 
 	// now attach this my_menu to the window
 	SetMenu(my_menu);
+	// The window now owns the HMENU. Detach it from the wrapper and delete
+	// the wrapper so the C++ object does not leak on every UpdateStrings call.
+	my_menu->Detach();
+	delete my_menu;
 
 	
 	// update the tabs

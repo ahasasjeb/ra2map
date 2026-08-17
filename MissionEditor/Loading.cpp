@@ -3470,6 +3470,8 @@ BOOL CLoading::LoadUnitGraphic(LPCTSTR lpUnittype)
 
 			if(!FSunPackLib::SetCurrentVXL(filename, hMix))
 			{
+				if(lpTurret) lpTurret->Release();
+				if(lpBarrel) lpBarrel->Release();
 				return FALSE;
 			}
 
@@ -3481,6 +3483,8 @@ BOOL CLoading::LoadUnitGraphic(LPCTSTR lpUnittype)
 			FSunPackLib::LoadVXLImageInSurface(*m_voxelNormalTables, lightDirection, v.dd, 0, 1, r_x, r_y, r_z, &lpT, m_hPalUnitTemp,&xcenter, &ycenter,0,&xcenter_zmax,&ycenter_zmax)
 			)
 			{
+				if(lpTurret) lpTurret->Release();
+				if(lpBarrel) lpBarrel->Release();
 				return FALSE;
 			}
 
@@ -4735,20 +4739,19 @@ BOOL CLoading::LoadTile(LPCSTR lpFilename, HMIXFILE hOwner, HTSPALETTE hPalette,
 				else
 				{
 
-					TILEDATA* lpTmp=NULL;
-					if((*tiledata)[dwID].bReplacementCount)
-					{
-						lpTmp=new(TILEDATA[(*tiledata)[dwID].bReplacementCount]);
-						memcpy(lpTmp, (*tiledata)[dwID].lpReplacements, sizeof(TILEDATA)* (*tiledata)[dwID].bReplacementCount);
-					}
-					
-					(*tiledata)[dwID].lpReplacements=new(TILEDATA[(*tiledata)[dwID].bReplacementCount+1]);
-
-					if((*tiledata)[dwID].bReplacementCount)
-					{
-						memcpy((*tiledata)[dwID].lpReplacements, lpTmp, sizeof(TILEDATA)*(*tiledata)[dwID].bReplacementCount);
-						delete[] lpTmp;
-					}
+				// Grow the replacements array by one slot. Keep a pointer to
+				// the old array, allocate the new one, copy the existing
+				// entries, then free the old array. The previous code copied
+				// into a temporary buffer and never freed the original member
+				// array, leaking it every time a replacement TMP was loaded.
+				TILEDATA* const lpOldReplacements = (*tiledata)[dwID].lpReplacements;
+				const int nOldReplacementCount = (*tiledata)[dwID].bReplacementCount;
+				(*tiledata)[dwID].lpReplacements = new TILEDATA[nOldReplacementCount + 1];
+				if (nOldReplacementCount)
+				{
+					memcpy((*tiledata)[dwID].lpReplacements, lpOldReplacements, sizeof(TILEDATA) * nOldReplacementCount);
+					delete[] lpOldReplacements;
+				}
 
 					td=&(*tiledata)[dwID].lpReplacements[(*tiledata)[dwID].bReplacementCount];
 					(*tiledata)[dwID].bReplacementCount++;
@@ -4947,20 +4950,19 @@ BOOL CLoading::LoadTile(LPCSTR lpFilename, HMIXFILE hOwner, HTSPALETTE hPalette,
 				else
 				{
 
-					TILEDATA* lpTmp=NULL;
-					if((*tiledata)[dwID].bReplacementCount)
-					{
-						lpTmp=new(TILEDATA[(*tiledata)[dwID].bReplacementCount]);
-						memcpy(lpTmp, (*tiledata)[dwID].lpReplacements, sizeof(TILEDATA)* (*tiledata)[dwID].bReplacementCount);
-					}
-					
-					(*tiledata)[dwID].lpReplacements=new(TILEDATA[(*tiledata)[dwID].bReplacementCount+1]);
-
-					if((*tiledata)[dwID].bReplacementCount)
-					{
-						memcpy((*tiledata)[dwID].lpReplacements, lpTmp, sizeof(TILEDATA)*(*tiledata)[dwID].bReplacementCount);
-						delete[] lpTmp;
-					}
+				// Grow the replacements array by one slot. Keep a pointer to
+				// the old array, allocate the new one, copy the existing
+				// entries, then free the old array. The previous code copied
+				// into a temporary buffer and never freed the original member
+				// array, leaking it every time a replacement TMP was loaded.
+				TILEDATA* const lpOldReplacements = (*tiledata)[dwID].lpReplacements;
+				const int nOldReplacementCount = (*tiledata)[dwID].bReplacementCount;
+				(*tiledata)[dwID].lpReplacements = new TILEDATA[nOldReplacementCount + 1];
+				if (nOldReplacementCount)
+				{
+					memcpy((*tiledata)[dwID].lpReplacements, lpOldReplacements, sizeof(TILEDATA) * nOldReplacementCount);
+					delete[] lpOldReplacements;
+				}
 
 					td=&(*tiledata)[dwID].lpReplacements[(*tiledata)[dwID].bReplacementCount];
 					(*tiledata)[dwID].bReplacementCount++;
@@ -6051,8 +6053,12 @@ BOOL CLoading::InitDirectDraw()
 	errstream.flush();
 
 	v.lpds->SetClipper(ddc);
-	
+
 	ddc->SetHWnd(0, v.m_hWnd);
+	// Release the reference we obtained from CreateClipper. SetClipper added
+	// the surface's own reference, so the clipper survives until the surface
+	// is released. Without this the caller-owned reference leaks.
+	ddc->Release();
 	v.InitializeVulkanRenderer();
 
 	return TRUE;
@@ -6079,9 +6085,10 @@ void CLoading::OnPaint()
 	dest.left=10;
 	dest.right=r1.right-r1.left+10;
 
-	CFont f;
-	f.CreatePointFont(90, "Tahoma");
-	dc.SelectObject(&f);
+	// The font created below was selected into the DC but no text was ever
+	// drawn, so the original font was never restored. When `f` is destroyed
+	// while still selected into `dc`, GDI refuses to delete it and the HFONT
+	// leaks on every repaint. Since nothing uses the font, just remove it.
 
 }
 

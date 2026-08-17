@@ -134,6 +134,14 @@ static const std::string GetAppDataPath()
     if (!setlocale(LC_CTYPE, ".65001"))
         setlocale(LC_CTYPE, "");
     CoInitializeEx(NULL, COINIT_MULTITHREADED);
+    // Every successful CoInitializeEx (including S_FALSE, "already
+    // initialized") must be paired with a CoUninitialize. This function runs
+    // during global initialization and never uninitialized COM, leaving the
+    // reference count elevated for the whole process. Release it on return.
+    struct CoInitGuard
+    {
+        ~CoInitGuard() { CoUninitialize(); }
+    } coInitGuard;
     CComPtr<IKnownFolderManager> manager;
     CComPtr<IKnownFolder> local_app_data;
     CComHeapPtr<WCHAR> local_app_data_folder;

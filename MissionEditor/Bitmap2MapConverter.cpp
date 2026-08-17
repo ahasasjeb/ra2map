@@ -58,6 +58,11 @@ BOOL CBitmap2MapConverter::Convert(HBITMAP hBitmap, CMapData & mapdata)
 	GetObject(hBitmap, sizeof(BITMAP), &bm);
 	
 	HBITMAP hUsed=hBitmap;
+
+	// Reuse a single desktop DC for every CreateCompatible* call below and
+	// release it once at the end. The previous code called GetDC(NULL) four
+	// times without a matching ReleaseDC, leaking a DC each time.
+	HDC hScreenDC = ::GetDC(NULL);
 	
 	
 	if(bm.bmWidth+bm.bmHeight>255)
@@ -67,10 +72,10 @@ BOOL CBitmap2MapConverter::Convert(HBITMAP hBitmap, CMapData & mapdata)
 		neededheight=255.0f/(scalex+1.0f);
 		neededwidth=255-neededheight;
 
-		hUsed=CreateCompatibleBitmap(GetDC(NULL), neededwidth, neededheight);
-		HDC hDC=CreateCompatibleDC(GetDC(NULL));
+		hUsed=CreateCompatibleBitmap(hScreenDC, neededwidth, neededheight);
+		HDC hDC=CreateCompatibleDC(hScreenDC);
 		SelectObject(hDC, hUsed);
-		HDC hSrcDC=CreateCompatibleDC(GetDC(NULL));
+		HDC hSrcDC=CreateCompatibleDC(hScreenDC);
 		SelectObject(hSrcDC, hBitmap);
 
 		StretchBlt(hDC, 0,0,neededwidth,neededheight, hSrcDC, 0,0,bm.bmWidth, bm.bmHeight, SRCCOPY);
@@ -82,7 +87,7 @@ BOOL CBitmap2MapConverter::Convert(HBITMAP hBitmap, CMapData & mapdata)
 	}
 
 	HDC hDC;
-	hDC=CreateCompatibleDC(GetDC(NULL));
+	hDC=CreateCompatibleDC(hScreenDC);
 	SelectObject(hDC, hUsed);
 	
 
@@ -199,6 +204,8 @@ BOOL CBitmap2MapConverter::Convert(HBITMAP hBitmap, CMapData & mapdata)
 	}
 
 	DeleteDC(hDC);
+
+	::ReleaseDC(NULL, hScreenDC);
 
 	if(hUsed!=hBitmap) DeleteObject(hUsed);
 

@@ -60,8 +60,11 @@ TextDrawer::TextDrawer(IDirectDraw4* pDirectDraw, int fontSizeInPoints, COLORREF
     m_shadowCol(shadowCol),
     m_bkCol(col == RGB(10, 10, 10) ? RGB(11, 11, 11) : RGB(10, 10, 10))
 {
-    auto dc = CDC::FromHandle(::GetDC(NULL));
-    auto fontSizeInPixels = -MulDiv(fontSizeInPoints, dc->GetDeviceCaps(LOGPIXELSY), 72);
+    // CClientDC(nullptr) wraps a DC for the desktop window and releases it in
+    // its destructor, matching the GetDC(NULL)/ReleaseDC contract that the
+    // previous code failed to honour.
+    CClientDC dc(nullptr);
+    auto fontSizeInPixels = -MulDiv(fontSizeInPoints, dc.GetDeviceCaps(LOGPIXELSY), 72);
     m_fontSizeInPixels = fontSizeInPixels;
 
     CFont f;
@@ -72,9 +75,12 @@ TextDrawer::TextDrawer(IDirectDraw4* pDirectDraw, int fontSizeInPoints, COLORREF
     for (char c = 32; c <= 126; ++c)
         s.push_back(c);
 
-    // get the extent in pixels of all characters
-    dc->SelectObject(f);
-    const auto extent = dc->GetTextExtent(s.c_str(), s.size());
+    // get the extent in pixels of all characters. Save and restore the
+    // previously selected font: GDI refuses to delete a font that is still
+    // selected into a DC, which would leak the HFONT owned by `f`.
+    CFont* pOldFont = dc.SelectObject(&f);
+    const auto extent = dc.GetTextExtent(s.c_str(), s.size());
+    dc.SelectObject(pOldFont);
 
     // Now create the DirectDraw surface
     DDSURFACEDESC2 desc = { 0 };
@@ -115,25 +121,40 @@ TextDrawer::TextDrawer(IDirectDraw4* pDirectDraw, int fontSizeInPoints, COLORREF
     if (pSurface->GetDC(&hDC) != DD_OK)
         return;
 
-    // Draw the string with all characters onto the surface
-    SelectObject(hDC, f);
-    SetBkMode(hDC, TRANSPARENT);
-    if (shadowCol != CLR_INVALID)
+    // Draw the string with all characters onto the surface. The surface DC
+    // and the previously selected font must be restored on every exit path,
+    // otherwise we leak the DC and the HFONT owned by `f`. The guard releases
+    // the DC and restores the font when its scope ends (including on return).
     {
-        SetTextColor(hDC, shadowCol);
-        if (!TextOutA(hDC, 0, extent.cy, s.c_str(), s.size()))
+        HGDIOBJ hOldFont = SelectObject(hDC, f);
+        SetBkMode(hDC, TRANSPARENT);
+
+        struct SurfaceDcGuard
+        {
+            IDirectDrawSurface4* surface;
+            HDC dc;
+            HGDIOBJ oldFont;
+            ~SurfaceDcGuard()
+            {
+                SelectObject(dc, oldFont);
+                surface->ReleaseDC(dc);
+            }
+        } guard{ pSurface, hDC, hOldFont };
+
+        if (shadowCol != CLR_INVALID)
+        {
+            SetTextColor(hDC, shadowCol);
+            if (!TextOutA(hDC, 0, extent.cy, s.c_str(), s.size()))
+                return;
+        }
+        SetTextColor(hDC, col);
+        if (!TextOutA(hDC, 0, 0, s.c_str(), s.size()))
             return;
     }
-    SetTextColor(hDC, col);
-    if (!TextOutA(hDC, 0, 0, s.c_str(), s.size()))
-        return;
-
-    if (pSurface->ReleaseDC(hDC) != DD_OK)
-        return;
 
     // set transparency key to top left
     FSunPackLib::SetColorKey(pSurface, CLR_INVALID);
-   
+
     // Everything fine, pass ownership of surface to m_fontSurface
     m_fontSurface.Attach(pSurface.Detach());
 }

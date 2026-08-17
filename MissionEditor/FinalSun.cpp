@@ -154,16 +154,26 @@ BOOL CFinalSunApp::InitInstance()
 	m_hAccel = LoadAccelerators(this->m_hInstance, MAKEINTRESOURCE(IDR_MAIN));
 
 #ifndef NOSURFACES
-	if (GetDeviceCaps(GetDC(GetDesktopWindow()), BITSPIXEL) <= 8)
 	{
-		MessageBox(0, "You currently only have 8 bit color mode enabled. This is not recommended. You can continue, but this will cause a significant slowdown while loading graphics, and result in poor graphics quality", "Error", 0);
-		//exit(0);
+		HDC hDesktopDC = ::GetDC(::GetDesktopWindow());
+		const int bitsPerPixel = GetDeviceCaps(hDesktopDC, BITSPIXEL);
+		::ReleaseDC(::GetDesktopWindow(), hDesktopDC);
+		if (bitsPerPixel <= 8)
+		{
+			MessageBox(0, "You currently only have 8 bit color mode enabled. This is not recommended. You can continue, but this will cause a significant slowdown while loading graphics, and result in poor graphics quality", "Error", 0);
+			//exit(0);
+		}
 	}
 #else
-	if (GetDeviceCaps(GetDC(GetDesktopWindow()), BITSPIXEL) <= 8)
 	{
-		MessageBox(0, "You currently only have 8 bit color mode enabled. FinalSun/FinalAlert 2 will not work in 8 bit color mode. See readme.txt for further information!", "Error", 0);
-		exit(0);
+		HDC hDesktopDC = ::GetDC(::GetDesktopWindow());
+		const int bitsPerPixel = GetDeviceCaps(hDesktopDC, BITSPIXEL);
+		::ReleaseDC(::GetDesktopWindow(), hDesktopDC);
+		if (bitsPerPixel <= 8)
+		{
+			MessageBox(0, "You currently only have 8 bit color mode enabled. FinalSun/FinalAlert 2 will not work in 8 bit color mode. See readme.txt for further information!", "Error", 0);
+			exit(0);
+		}
 	}
 #endif
 

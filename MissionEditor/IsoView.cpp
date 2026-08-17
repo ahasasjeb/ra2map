@@ -3928,8 +3928,16 @@ void CIsoView::ReInitializeDDraw()
 
 
 #ifdef NOSURFACES
-	while ((GetDeviceCaps(::GetDC(::GetDesktopWindow()), BITSPIXEL) <= 8))
+	while (true)
 	{
+		// Query the desktop DC fresh each iteration (the user may change the
+		// color depth between prompts) and always pair it with ReleaseDC.
+		// The previous code leaked a DC on every loop iteration.
+		HDC hDesktopDC = ::GetDC(::GetDesktopWindow());
+		const int bitsPerPixel = GetDeviceCaps(hDesktopDC, BITSPIXEL);
+		::ReleaseDC(::GetDesktopWindow(), hDesktopDC);
+		if (bitsPerPixel > 8)
+			break;
 		if (MessageBox("You currently only have 8 bit color mode enabled. FinalAlert 2 does not work in 8 bit color mode. Please change the color mode and then click on OK. Click Cancel to quit (and save the map as backup.map).", "Error", MB_OKCANCEL) == IDCANCEL)
 		{
 			((CFinalSunDlg*)theApp.m_pMainWnd)->SaveMap((u8AppDataPath + "\\backup.map").c_str());
@@ -6582,9 +6590,12 @@ void CIsoView::AutoLevel()
 
 	if (mapsize == 0) return;
 
-	BOOL* bChanged;
-	bChanged = new(BOOL[mapsize]);
-	memset(bChanged, 0, mapsize);
+	// Use std::vector so the array is always freed (including on early
+	// returns) and fully zero-initialised. The previous memset(bChanged, 0,
+	// mapsize) only cleared mapsize bytes, but BOOL is multi-byte, leaving
+	// most of the array uninitialised before being read below. The early
+	// "return" below this block also leaked the new[]'d array.
+	std::vector<BOOL> bChanged(mapsize, FALSE);
 
 	int iCliffStart = -1; //, iSlopeSetStart = -1;
 
@@ -6756,8 +6767,6 @@ void CIsoView::AutoLevel()
 
 	/*	delete[] bXSearch;
 		delete[] bYSearch;*/
-
-	if (bChanged) delete[] bChanged;
 
 	RedrawWindow();
 
