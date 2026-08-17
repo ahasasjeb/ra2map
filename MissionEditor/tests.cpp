@@ -426,7 +426,8 @@ void Tests::test_csf()
 	const size_t vlen = wcslen(value);
 	csf.insert(csf.end(), (const BYTE*)" FSC", (const BYTE*)" FSC" + 4);
 	push_u32(csf, 1); push_u32(csf, 1); push_u32(csf, 0); push_u32(csf, 0); push_u32(csf, 0);
-	push_u32(csf, 0); // dwFlag
+	csf.insert(csf.end(), (const BYTE*)" LBL", (const BYTE*)" LBL" + 4);
+	push_u32(csf, 1); // strings for this label
 	push_u32(csf, (unsigned int)strlen(id));
 	csf.insert(csf.end(), (const BYTE*)id, (const BYTE*)id + strlen(id));
 	csf.insert(csf.end(), (const BYTE*)" RTS", (const BYTE*)" RTS" + 4);

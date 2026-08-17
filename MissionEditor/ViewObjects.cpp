@@ -722,6 +722,22 @@ namespace
 		return value.IsEmpty() ? -1 : atoi(value);
 	}
 
+	CString GetMapHouseDisplayName(const CIniFile& mapIni, const CString& houseId)
+	{
+		CString countryId;
+		if(const CIniFileSection* houseSection = mapIni.GetSection(houseId))
+			countryId = houseSection->GetValueByName("Country");
+
+		CString displayName = countryId.IsEmpty() ? TranslateHouse(houseId, TRUE) : TranslateHouse(countryId, TRUE);
+		const CString localizedName = TranslateStringACP(displayName);
+		if(!localizedName.IsEmpty())
+			displayName = localizedName;
+
+		if(houseId.GetLength() >= 6 && houseId.Right(6).CompareNoCase(" House") == 0)
+			displayName += GetLanguageStringACP("HouseSuffix");
+		return displayName;
+	}
+
 	void InsertSideObject(CTreeCtrl& tree, const SideTreeNodes& nodes, WCHAR* text,
 		int param, const CString& owners, int planningSide)
 	{
@@ -978,7 +994,8 @@ void CViewObjects::UpdateDialog()
 				if(j=="nod" || j=="gdi") continue;
 #endif	
 
-				tree.InsertItem(TVIF_PARAM | TVIF_TEXT, TranslateHouse(*ini.sections[MAPHOUSES].GetValue(i), TRUE), 0,0,0,0, valadded*7+i, rootitems[11], TVI_LAST );
+				const CString houseId = *ini.sections[MAPHOUSES].GetValue(i);
+				tree.InsertItem(TVIF_PARAM | TVIF_TEXT, GetMapHouseDisplayName(ini, houseId), 0,0,0,0, valadded*7+i, rootitems[11], TVI_LAST );
 			}
 
 		}

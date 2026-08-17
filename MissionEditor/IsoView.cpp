@@ -5730,7 +5730,7 @@ void CIsoView::DrawObjectPreviewAt(int x, int y)
 	int footprintX1 = x, footprintY1 = y, footprintX2 = x, footprintY2 = y;
 	int left = 0, top = 0, right = 0, bottom = 0;
 	int dirtyCells = 0;
-	RECT ghostRect = { 0, 0, 0, 0 };
+	RECT previewRedrawRect = { 0, 0, 0, 0 };
 	{
 		const int bid = (pt == PT_STRUCTURE) ? Map->GetUnitTypeID(AD.data_s) : -1;
 		if (bid > -1 && bid < 0x0F00)
@@ -5810,12 +5810,6 @@ void CIsoView::DrawObjectPreviewAt(int x, int y)
 		gx1 += 16;
 		gy1 += 16;
 
-		// the unexpanded ghost rect - it is used to save/restore the clean pixels below the ghost
-		ghostRect.left = gx0;
-		ghostRect.top = gy0;
-		ghostRect.right = gx1;
-		ghostRect.bottom = gy1;
-
 		// expand the rect so that other objects whose sprites reach into the ghost area get
 		// redrawn as well (they are the ones that must be drawn on top of the ghost)
 		const int kOtherWHalf = 160; // generous half width of other objects' sprites
@@ -5824,6 +5818,22 @@ void CIsoView::DrawObjectPreviewAt(int x, int y)
 		gx1 += kOtherWHalf;
 		gy0 -= kOtherHHalf;
 		gy1 += kOtherHHalf;
+
+		// DrawMapObjectsCell can change more than the ghost itself. Connected walls, gates and
+		// similar structures select their frame from neighbouring map data, so injecting the
+		// preview may also redraw those neighbours. Save the complete clipped redraw area;
+		// restoring only the ghost sprite leaves the neighbours' preview-dependent frames in
+		// the back buffer after the mouse moves away.
+		previewRedrawRect.left = gx0;
+		previewRedrawRect.top = gy0;
+		previewRedrawRect.right = gx1;
+		previewRedrawRect.bottom = gy1;
+		RECT clippedPreviewRect = {};
+		const RECT displayRect = GetScaledDisplayRect();
+		if (IntersectRect(&clippedPreviewRect, &previewRedrawRect, &displayRect))
+			previewRedrawRect = clippedPreviewRect;
+		else
+			SetRectEmpty(&previewRedrawRect);
 
 		RECT wr;
 		GetWindowRect(&wr);
@@ -5846,6 +5856,8 @@ void CIsoView::DrawObjectPreviewAt(int x, int y)
 		if (right > (int)dwIsoSize) right = (int)dwIsoSize;
 		if (bottom > (int)dwIsoSize) bottom = (int)dwIsoSize;
 		dirtyCells = (right - left) * (bottom - top);
+		if (IsRectEmpty(&previewRedrawRect))
+			dirtyCells = 0;
 	}
 
 	// 3) inject the preview object directly into the object arrays + field data
@@ -6021,9 +6033,10 @@ void CIsoView::DrawObjectPreviewAt(int x, int y)
 
 		if (bInjected)
 		{
-			// erase the previous ghost and save the clean pixels below the new ghost
+			// Erase the previous preview and save every pixel that the clipped local redraw may
+			// touch, including neighbouring connected structures.
 			RestorePreviewRegion();
-			SavePreviewRegion(ghostRect);
+			SavePreviewRegion(previewRedrawRect);
 
 			// incremental redraw of only the affected area
 			SurfaceLocker locker(lpdsBack);
@@ -6040,7 +6053,7 @@ void CIsoView::DrawObjectPreviewAt(int x, int y)
 			else
 			{
 				DDSURFACEDESC2& ddsd = *desc;
-				const RECT r = GetScaledDisplayRect();
+				const RECT r = previewRedrawRect;
 				const int mapwidth = Map->GetWidth();
 				const int mapheight = Map->GetHeight();
 				const DrawMapCellContext ctx = { ddsd, r, 0, TRUE, false };

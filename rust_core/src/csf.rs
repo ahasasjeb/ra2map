@@ -57,64 +57,124 @@ fn parse_csf(data: &[u8]) -> Option<ParseResult> {
     let mut truncated = false;
 
     for _ in 0..dw_count1 {
-        // dwFlag (4 bytes) + id char count (4 bytes)
-        if pos + 8 > data.len() {
+        // Real CSF label records start with " LBL", followed by the number
+        // of strings assigned to the label and the label length. The old
+        // parser skipped only eight bytes here, so it interpreted the string
+        // count as the label length and could not parse an actual RA2/YR CSF.
+        if pos + 12 > data.len() || &data[pos..pos + 4] != b" LBL" {
             truncated = true;
             break;
         }
-        let id_len = u32::from_le_bytes([data[pos + 4], data[pos + 5], data[pos + 6], data[pos + 7]]) as usize;
-        pos += 8;
+        let string_count = u32::from_le_bytes([
+            data[pos + 4],
+            data[pos + 5],
+            data[pos + 6],
+            data[pos + 7],
+        ]) as usize;
+        let id_len = u32::from_le_bytes([
+            data[pos + 8],
+            data[pos + 9],
+            data[pos + 10],
+            data[pos + 11],
+        ]) as usize;
+        pos += 12;
         if pos + id_len > data.len() {
             truncated = true;
             break;
         }
-        ids.extend_from_slice(&data[pos..pos + id_len]);
+        let id = &data[pos..pos + id_len];
         pos += id_len;
 
-        // the original code checked lpData[0] == 'W' *before* skipping
-        // the 4-byte marker
-        let b2strings = data[pos] == b'W';
-        pos += 4;
-
-        // value char count (4 bytes); the value is 2 bytes per char
-        if pos + 4 > data.len() {
+        // Even an empty string record consumes an eight-byte marker/length
+        // header. Cap the count by the remaining bytes before iterating so a
+        // corrupt count cannot turn into an unbounded loop.
+        if string_count > (data.len().saturating_sub(pos) / 8) {
             truncated = true;
             break;
         }
-        let value_len = u32::from_le_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]]) as usize;
-        pos += 4;
-        if value_len > usize::MAX / 2 || pos + value_len * 2 > data.len() {
-            truncated = true;
-            break;
-        }
-        // values are stored as ~UTF-16LE (each code unit XORed with ~)
-        let val_slice = &data[pos..pos + value_len * 2];
-        for c in val_slice.chunks_exact(2) {
-            let w = u16::from_le_bytes([c[0], c[1]]);
-            values.extend_from_slice(&(!w).to_le_bytes());
-        }
-        pos += value_len * 2;
 
-        let mut value_asc_len = 0usize;
-        if b2strings {
-            if pos + 4 > data.len() {
+        let mut first_value = Vec::new();
+        let mut first_value_len = 0usize;
+        let mut first_value_asc = Vec::new();
+        let mut label_complete = true;
+        for string_index in 0..string_count {
+            if pos + 8 > data.len() {
                 truncated = true;
+                label_complete = false;
                 break;
             }
-            value_asc_len = u32::from_le_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]]) as usize;
+
+            let marker = &data[pos..pos + 4];
+            let has_extra_value = marker == b"WRTS";
+            if marker != b" RTS" && !has_extra_value {
+                truncated = true;
+                label_complete = false;
+                break;
+            }
             pos += 4;
-            if pos + value_asc_len > data.len() {
+
+            let value_len = u32::from_le_bytes([
+                data[pos],
+                data[pos + 1],
+                data[pos + 2],
+                data[pos + 3],
+            ]) as usize;
+            pos += 4;
+            if value_len > usize::MAX / 2 || pos + value_len * 2 > data.len() {
                 truncated = true;
+                label_complete = false;
                 break;
             }
-            values_asc.extend_from_slice(&data[pos..pos + value_asc_len]);
-            pos += value_asc_len;
+
+            // Values are stored as ~UTF-16LE (each code unit XORed with ~).
+            // FA2 consumes the first string when a label contains variants;
+            // still walk later strings so the following label stays aligned.
+            if string_index == 0 {
+                first_value_len = value_len;
+                first_value.reserve(value_len * 2);
+                for c in data[pos..pos + value_len * 2].chunks_exact(2) {
+                    let w = u16::from_le_bytes([c[0], c[1]]);
+                    first_value.extend_from_slice(&(!w).to_le_bytes());
+                }
+            }
+            pos += value_len * 2;
+
+            if has_extra_value {
+                if pos + 4 > data.len() {
+                    truncated = true;
+                    label_complete = false;
+                    break;
+                }
+                let value_asc_len = u32::from_le_bytes([
+                    data[pos],
+                    data[pos + 1],
+                    data[pos + 2],
+                    data[pos + 3],
+                ]) as usize;
+                pos += 4;
+                if pos + value_asc_len > data.len() {
+                    truncated = true;
+                    label_complete = false;
+                    break;
+                }
+                if string_index == 0 {
+                    first_value_asc.extend_from_slice(&data[pos..pos + value_asc_len]);
+                }
+                pos += value_asc_len;
+            }
         }
 
+        if !label_complete {
+            break;
+        }
+
+        ids.extend_from_slice(id);
+        values.extend_from_slice(&first_value);
+        values_asc.extend_from_slice(&first_value_asc);
         entries.push(RsCsfEntry {
             id_len: id_len as u32,
-            value_len: value_len as u32,
-            value_asc_len: value_asc_len as u32,
+            value_len: first_value_len as u32,
+            value_asc_len: first_value_asc.len() as u32,
         });
     }
 
@@ -231,7 +291,8 @@ mod tests {
         out.extend_from_slice(b"TDFT\x00\x00\x00\x00"); // placeholder, filled below
         let mut body = Vec::new();
         for (id, value, asc) in entries {
-            body.extend_from_slice(&0u32.to_le_bytes()); // dwFlag
+            body.extend_from_slice(b" LBL");
+            body.extend_from_slice(&1u32.to_le_bytes()); // strings for this label
             body.extend_from_slice(&(id.len() as u32).to_le_bytes());
             body.extend_from_slice(id.as_bytes());
             // 4-byte marker: 'W' means an extra ascii value follows
@@ -320,7 +381,8 @@ mod tests {
         data.extend_from_slice(&0u32.to_le_bytes());
         data.extend_from_slice(&0u32.to_le_bytes());
         data.extend_from_slice(&0u32.to_le_bytes());
-        data.extend_from_slice(&0u32.to_le_bytes()); // dwFlag
+        data.extend_from_slice(b" LBL");
+        data.extend_from_slice(&1u32.to_le_bytes()); // strings for this label
         data.extend_from_slice(&1000u32.to_le_bytes()); // id len
         data.extend_from_slice(b"ab");
         let parsed = parse_csf(&data).unwrap();
