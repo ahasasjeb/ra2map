@@ -28,6 +28,8 @@
 #include "variables.h"
 #include "functions.h"
 #include "inlines.h"
+#include "PropertyBrushTool.h"
+#include "resource.h"
 
 
 #ifdef _DEBUG
@@ -106,8 +108,79 @@ CString GetName(CString id)
 	return rules.sections[id].values["Name"];
 }
 
+namespace
+{
+	constexpr int PropertyBrushCheckIds[] = {
+		IDC_PROPERTYBRUSH_CHECK1, IDC_PROPERTYBRUSH_CHECK2, IDC_PROPERTYBRUSH_CHECK3,
+		IDC_PROPERTYBRUSH_CHECK4, IDC_PROPERTYBRUSH_CHECK5, IDC_PROPERTYBRUSH_CHECK6,
+		IDC_PROPERTYBRUSH_CHECK7, IDC_PROPERTYBRUSH_CHECK8, IDC_PROPERTYBRUSH_CHECK9,
+		IDC_PROPERTYBRUSH_CHECK10, IDC_PROPERTYBRUSH_CHECK11, IDC_PROPERTYBRUSH_CHECK12,
+		IDC_PROPERTYBRUSH_CHECK13, IDC_PROPERTYBRUSH_CHECK14
+	};
+
+	void SelectComboItem(CDialog& dialog, int controlId, const CString& value)
+	{
+		auto* combo = static_cast<CComboBox*>(dialog.GetDlgItem(controlId));
+		if (combo == nullptr)
+			return;
+
+		if (combo->SelectString(-1, value) == CB_ERR)
+			combo->SetWindowText(value);
+	}
+}
+
+void CBuilding::EnablePropertyBrush()
+{
+	m_propertyBrush = true;
+	m_propertyBrushFields.fill(FALSE);
+}
+
+PropertyBrushSettings CBuilding::GetPropertyBrushSettings() const
+{
+	PropertyBrushSettings settings;
+	settings.objectType = PropertyBrushObjectType::Structure;
+	settings.values = { m_house, m_strength, m_direction, m_flag1, m_flag2, m_energy,
+		m_upgradecount, m_spotlight, m_upgrade1, m_upgrade2, m_upgrade3, m_flag3, m_flag4, m_tag };
+	for (size_t i = 0; i < m_propertyBrushFields.size(); ++i)
+		settings.selected[i] = m_propertyBrushFields[i] != FALSE;
+	return settings;
+}
+
+bool CBuilding::HasSelectedPropertyBrushFields() const
+{
+	for (BOOL selected : m_propertyBrushFields)
+		if (selected != FALSE)
+			return true;
+	return false;
+}
+
+void CBuilding::UpdatePropertyBrushControls()
+{
+	for (int controlId : PropertyBrushCheckIds)
+	{
+		if (auto* control = GetDlgItem(controlId))
+			control->ShowWindow(m_propertyBrush ? SW_SHOW : SW_HIDE);
+	}
+	if (m_propertyBrush)
+	{
+		SetWindowText(GetLanguageStringACP("PropertyBrushCap"));
+		SetDlgItemText(IDC_LDESC, GetLanguageStringACP("PropertyBrushDesc"));
+	}
+}
+
 void CBuilding::OnOK() 
 {
+	if (m_propertyBrush)
+	{
+		for (size_t i = 0; i < m_propertyBrushFields.size(); ++i)
+			m_propertyBrushFields[i] = IsDlgButtonChecked(PropertyBrushCheckIds[i]);
+		if (!HasSelectedPropertyBrushFields())
+		{
+			AfxMessageBox(GetLanguageStringACP("PropertyBrushNoFields"));
+			return;
+		}
+	}
+
 	CDialog::OnOK();
 
 	m_strength=GetText(&m_strength_ctrl);
@@ -177,8 +250,6 @@ BOOL CBuilding::OnInitDialog()
 	}
 
 	
-	GetDlgItem(IDC_P5)->SendMessage(CB_SETCURSEL, atoi(m_spotlight), 0);
-
 	if(upgradecount>0)
 	{
 		for(i=0;i<rules.sections["BuildingTypes"].values.size();i++)
@@ -259,6 +330,23 @@ BOOL CBuilding::OnInitDialog()
 	
 
 	UpdateStrings();
+
+	// UpdateData(FALSE) writes directly into editable combo boxes. That leaves the
+	// embedded edit controls with their text selected, making every value appear
+	// blue until it receives focus. Select the corresponding list entries instead.
+	SelectComboItem(*this, IDC_HOUSE, m_house);
+	SelectComboItem(*this, IDC_DIRECTION, m_direction);
+	SelectComboItem(*this, IDC_TAG, m_tag);
+	SelectComboItem(*this, IDC_P2, m_flag2);
+	SelectComboItem(*this, IDC_P3, m_energy);
+	SelectComboItem(*this, IDC_P4, m_upgradecount);
+	SelectComboItem(*this, IDC_P5, m_spotlight);
+	SelectComboItem(*this, IDC_P6, m_upgrade1);
+	SelectComboItem(*this, IDC_P7, m_upgrade2);
+	SelectComboItem(*this, IDC_P8, m_upgrade3);
+	SelectComboItem(*this, IDC_P9, m_flag3);
+	SelectComboItem(*this, IDC_P10, m_flag4);
+	UpdatePropertyBrushControls();
 	
 	return TRUE;  
 }

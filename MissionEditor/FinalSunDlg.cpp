@@ -52,6 +52,7 @@
 #include "SearchWaypointDlg.h"
 #include "MultiSelectionTool.h"
 #include "PropertyBrushTool.h"
+#include "Building.h"
 #include <filesystem>
 #include <chrono>
 #include "userscriptsdlg.h"
@@ -4104,9 +4105,13 @@ void CFinalSunDlg::OnEditPropertybrush()
 {
 	if (Map->GetIsoSize() == 0)
 		return;
+	CBuilding dialog(this);
+	dialog.EnablePropertyBrush();
+	if (dialog.DoModal() != IDOK)
+		return;
 	AD.reset();
 	AD.mode = ACTIONMODE_MAPTOOL;
-	AD.tool = std::make_unique<PropertyBrushTool>(*Map, *m_view.m_isoview);
+	AD.tool = std::make_unique<PropertyBrushTool>(*Map, *m_view.m_isoview, dialog.GetPropertyBrushSettings());
 	SetText(GetLanguageStringACP("PropertyBrushHelp"));
 }
 

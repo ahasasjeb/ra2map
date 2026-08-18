@@ -27,6 +27,10 @@
 // Infantrie.h : Header-Datei
 //
 
+#include <array>
+
+struct PropertyBrushSettings;
+
 /////////////////////////////////////////////////////////////////////////////
 // Dialogfeld CInfantrie 
 
@@ -37,6 +41,8 @@ public:
 	void UpdateStrings();
 	CString m_strength;
 	void Init(CString house="", CString strength="256", CString action="Guard", CString direction="64", CString tag="None", CString p1="0", CString p2="-1", CString p3="0", CString p4="0", CString p5="0");
+	void EnablePropertyBrush();
+	PropertyBrushSettings GetPropertyBrushSettings() const;
 	CInfantrie(CWnd* pParent = NULL);   // Standardkonstruktor
 
 // Dialogfelddaten
@@ -64,6 +70,10 @@ public:
 
 // Implementierung
 protected:
+	void UpdatePropertyBrushControls();
+	bool HasSelectedPropertyBrushFields() const;
+	bool m_propertyBrush = false;
+	std::array<BOOL, 10> m_propertyBrushFields{};
 
 	// Generierte Nachrichtenzuordnungsfunktionen
 	//{{AFX_MSG(CInfantrie)

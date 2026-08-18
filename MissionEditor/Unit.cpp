@@ -28,12 +28,24 @@
 #include "mapdata.h"
 #include "variables.h"
 #include "functions.h"
+#include "PropertyBrushTool.h"
+#include "resource.h"
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
 #undef THIS_FILE
 static char THIS_FILE[] = __FILE__;
 #endif
+
+namespace
+{
+	constexpr int PropertyBrushCheckIds[] = {
+		IDC_PROPERTYBRUSH_CHECK1, IDC_PROPERTYBRUSH_CHECK2, IDC_PROPERTYBRUSH_CHECK3,
+		IDC_PROPERTYBRUSH_CHECK4, IDC_PROPERTYBRUSH_CHECK5, IDC_PROPERTYBRUSH_CHECK6,
+		IDC_PROPERTYBRUSH_CHECK7, IDC_PROPERTYBRUSH_CHECK8, IDC_PROPERTYBRUSH_CHECK9,
+		IDC_PROPERTYBRUSH_CHECK10, IDC_PROPERTYBRUSH_CHECK11
+	};
+}
 
 /////////////////////////////////////////////////////////////////////////////
 // Dialogfeld CUnit 
@@ -80,6 +92,45 @@ BEGIN_MESSAGE_MAP(CUnit, CDialog)
 	//{{AFX_MSG_MAP(CUnit)
 	//}}AFX_MSG_MAP
 END_MESSAGE_MAP()
+
+void CUnit::EnablePropertyBrush()
+{
+	m_propertyBrush = true;
+	m_propertyBrushFields.fill(FALSE);
+}
+
+PropertyBrushSettings CUnit::GetPropertyBrushSettings() const
+{
+	PropertyBrushSettings settings;
+	settings.objectType = PropertyBrushObjectType::Unit;
+	settings.values = { m_house, m_strength, m_action, m_direction, m_flag1, m_flag2,
+		m_flag3, m_flag4, m_flag5, m_flag6, m_tag };
+	for (size_t i = 0; i < m_propertyBrushFields.size(); ++i)
+		settings.selected[i] = m_propertyBrushFields[i] != FALSE;
+	return settings;
+}
+
+bool CUnit::HasSelectedPropertyBrushFields() const
+{
+	for (BOOL selected : m_propertyBrushFields)
+		if (selected != FALSE)
+			return true;
+	return false;
+}
+
+void CUnit::UpdatePropertyBrushControls()
+{
+	for (int controlId : PropertyBrushCheckIds)
+	{
+		if (auto* control = GetDlgItem(controlId))
+			control->ShowWindow(m_propertyBrush ? SW_SHOW : SW_HIDE);
+	}
+	if (m_propertyBrush)
+	{
+		SetWindowText(GetLanguageStringACP("PropertyBrushCap"));
+		SetDlgItemText(IDC_DESC, GetLanguageStringACP("PropertyBrushDesc"));
+	}
+}
 
 /////////////////////////////////////////////////////////////////////////////
 // Behandlungsroutinen für Nachrichten CUnit 
@@ -130,12 +181,24 @@ BOOL CUnit::OnInitDialog()
 	m_strength_ctrl.SetPos(atoi(m_strength));
 	
 	UpdateStrings();
+	UpdatePropertyBrushControls();
 
 	return TRUE;  
 }
 
 void CUnit::OnOK() 
 {
+	if (m_propertyBrush)
+	{
+		for (size_t i = 0; i < m_propertyBrushFields.size(); ++i)
+			m_propertyBrushFields[i] = IsDlgButtonChecked(PropertyBrushCheckIds[i]);
+		if (!HasSelectedPropertyBrushFields())
+		{
+			AfxMessageBox(GetLanguageStringACP("PropertyBrushNoFields"));
+			return;
+		}
+	}
+
 	CDialog::OnOK();
 	m_strength=GetText(&m_strength_ctrl);
 	UpdateData();

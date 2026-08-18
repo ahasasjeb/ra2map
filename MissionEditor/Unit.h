@@ -27,6 +27,10 @@
 // Unit.h : Header-Datei
 //
 
+#include <array>
+
+struct PropertyBrushSettings;
+
 /////////////////////////////////////////////////////////////////////////////
 // Dialogfeld CUnit 
 
@@ -37,6 +41,8 @@ public:
 	void UpdateStrings();
 	CString m_strength;
 	void Init(CString house="", CString strength="256", CString direction="64", CString action="Guard", CString tag="None", CString flag1="0", CString flag2="0", CString flag3="0", CString flag4="0", CString flag5="0", CString flag6="0");
+	void EnablePropertyBrush();
+	PropertyBrushSettings GetPropertyBrushSettings() const;
 	CUnit(CWnd* pParent = NULL);   // Standardkonstruktor
 
 // Dialogfelddaten
@@ -65,6 +71,10 @@ public:
 
 // Implementierung
 protected:
+	void UpdatePropertyBrushControls();
+	bool HasSelectedPropertyBrushFields() const;
+	bool m_propertyBrush = false;
+	std::array<BOOL, 11> m_propertyBrushFields{};
 
 	// Generierte Nachrichtenzuordnungsfunktionen
 	//{{AFX_MSG(CUnit)

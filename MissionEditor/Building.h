@@ -27,6 +27,10 @@
 // Building.h : Header-Datei
 //
 
+#include <array>
+
+struct PropertyBrushSettings;
+
 /////////////////////////////////////////////////////////////////////////////
 // Dialogfeld CBuilding 
 
@@ -37,7 +41,9 @@ public:
 	void UpdateStrings();
 	CString m_type;
 	CString m_strength;
-	void Init(CString house="", CString strength="256", CString direction="0", CString tag="None", CString flag1="0", CString flag2="0", CString energy="1", CString upgradecount="0", CString spotlight="0", CString upgrade1="None", CString upgrade2="None", CString upgrade3="None", CString flag3="0", CString flag4="0");
+	void Init(CString house="", CString strength="256", CString direction="0", CString tag="None", CString flag1="0", CString flag2="0", CString energy="1", CString upgradecount="0", CString spotlight="0", CString upgrade1="None", CString upgrade2="None", CString upgrade3="None", CString flag3="1", CString flag4="0");
+	void EnablePropertyBrush();
+	PropertyBrushSettings GetPropertyBrushSettings() const;
 	CBuilding(CWnd* pParent = NULL);   // Standardkonstruktor
 
 // Dialogfelddaten
@@ -69,6 +75,10 @@ public:
 
 // Implementierung
 protected:
+	void UpdatePropertyBrushControls();
+	bool HasSelectedPropertyBrushFields() const;
+	bool m_propertyBrush = false;
+	std::array<BOOL, 14> m_propertyBrushFields{};
 
 	// Generierte Nachrichtenzuordnungsfunktionen
 	//{{AFX_MSG(CBuilding)

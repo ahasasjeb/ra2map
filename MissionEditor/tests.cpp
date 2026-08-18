@@ -31,6 +31,7 @@
 #include "RustCore.h"
 #include "WaypointCodec.h"
 #include "MapSnapshots.h"
+#include "PropertyBrushTool.h"
 
 class TestError : public std::runtime_error
 {
@@ -99,6 +100,7 @@ int Tests::run()
 		[this]() { test_waypoint_codec(); },
 		[this]() { test_ini_utf8_normalization(); },
 		[this]() { test_snapshot_redraw_flag(); },
+		[this]() { test_property_brush_settings(); },
 	});
 	for (const auto f : test_functions)
 	{
@@ -109,6 +111,21 @@ int Tests::run()
 	std::cout << "Failed: " << failed_tests << std::endl;
 	std::cout << "Succeeded: " << test_functions.size() - failed_tests << std::endl;
 	return failed_tests ? 1 : 0;
+}
+
+void Tests::test_property_brush_settings()
+{
+	PropertyBrushSettings settings;
+	REPORT_TEST(!settings.HasSelectedFields());
+	REPORT_TEST(GetPropertyBrushFieldCount(PropertyBrushObjectType::Structure) == 14);
+	REPORT_TEST(GetPropertyBrushFieldCount(PropertyBrushObjectType::Infantry) == 10);
+	REPORT_TEST(GetPropertyBrushFieldCount(PropertyBrushObjectType::Unit) == 11);
+	REPORT_TEST(GetPropertyBrushFieldCount(PropertyBrushObjectType::Aircraft) == 9);
+
+	settings.selected[8] = true;
+	settings.values[8] = "GAPOWR";
+	REPORT_TEST(settings.HasSelectedFields());
+	REPORT_TEST(settings.values[8] == "GAPOWR");
 }
 
 void Tests::test_ini_utf8_normalization()
@@ -388,6 +405,11 @@ void Tests::test_iso()
 	TEST(d.MoveAircraft(1, aircraftPosD));
 	REPORT_TEST(d.GetAirAt(aircraftPosB) == -1);
 	REPORT_TEST(d.GetAirAt(aircraftPosD) == 1);
+
+	const DWORD structurePos = 5 + 7 * d.GetIsoSize();
+	d.m_noAutoObjectUpdate = TRUE; // UpdateStructures needs the editor's live view to calculate remap colors.
+	TEST(d.AddStructure(NULL, "TEST_STRUCTURE", "Neutral", structurePos));
+	REPORT_TEST(GetParam(*d.GetIniFile().sections["Structures"].GetValue(0), 15) == "1");
 	
 }
 

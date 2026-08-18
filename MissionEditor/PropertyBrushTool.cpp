@@ -3,135 +3,182 @@
 
 #include "MapData.h"
 #include "IsoView.h"
-#include "FinalSunDlg.h"
 #include "functions.h"
 #include "variables.h"
 
 extern ACTIONDATA AD;
 
-PropertyBrushTool::PropertyBrushTool(CMapData& map, CIsoView& view)
+namespace
+{
+	void ApplyValue(CString& target, const PropertyBrushSettings& settings, size_t index)
+	{
+		if (settings.selected[index] && !settings.values[index].IsEmpty())
+			target = settings.values[index];
+	}
+
+	bool IsSameCell(const MapCoords& first, const MapCoords& second)
+	{
+		return first.x == second.x && first.y == second.y;
+	}
+}
+
+bool PropertyBrushSettings::HasSelectedFields() const
+{
+	for (bool isSelected : selected)
+		if (isSelected)
+			return true;
+	return false;
+}
+
+size_t GetPropertyBrushFieldCount(PropertyBrushObjectType objectType)
+{
+	switch (objectType)
+	{
+	case PropertyBrushObjectType::Structure: return 14;
+	case PropertyBrushObjectType::Infantry: return 10;
+	case PropertyBrushObjectType::Unit: return 11;
+	case PropertyBrushObjectType::Aircraft: return 9;
+	}
+	return 0;
+}
+
+PropertyBrushTool::PropertyBrushTool(CMapData& map, CIsoView& view, const PropertyBrushSettings& settings)
 	: MapTool(map, view)
+	, m_settings(settings)
 {
 }
 
-bool PropertyBrushTool::Sample(const MapCoords& cell)
+bool PropertyBrushTool::ApplyStructure(DWORD position)
 {
-	const DWORD position = cell.x + cell.y * getMap().GetIsoSize();
-	int index = getMap().GetStructureAt(position);
-	if (index >= 0)
+	const int index = getMap().GetStructureAt(position);
+	if (index < 0)
+		return false;
+
+	STRUCTURE structure;
+	getMap().GetStructureData(index, &structure);
+	const CString id = *getMap().GetIniFile().sections["Structures"].GetValueName(index);
+
+	ApplyValue(structure.house, m_settings, 0);
+	ApplyValue(structure.strength, m_settings, 1);
+	ApplyValue(structure.direction, m_settings, 2);
+	ApplyValue(structure.flag1, m_settings, 3);
+	ApplyValue(structure.flag2, m_settings, 4);
+	ApplyValue(structure.energy, m_settings, 5);
+	ApplyValue(structure.upgradecount, m_settings, 6);
+	ApplyValue(structure.spotlight, m_settings, 7);
+	ApplyValue(structure.upgrade1, m_settings, 8);
+	ApplyValue(structure.upgrade2, m_settings, 9);
+	ApplyValue(structure.upgrade3, m_settings, 10);
+	ApplyValue(structure.flag3, m_settings, 11);
+	ApplyValue(structure.flag4, m_settings, 12);
+	ApplyValue(structure.tag, m_settings, 13);
+
+	getMap().DeleteStructure(index);
+	return getMap().AddStructure(&structure, nullptr, nullptr, 0, id) != FALSE;
+}
+
+bool PropertyBrushTool::ApplyInfantry(DWORD position)
+{
+	std::array<int, SUBPOS_COUNT> indices{};
+	for (int slot = 0; slot < SUBPOS_COUNT; ++slot)
+		indices[slot] = getMap().GetInfantryAt(position, slot);
+
+	bool applied = false;
+	for (int index : indices)
 	{
-		STRUCTURE value;
-		getMap().GetStructureData(index, &value);
-		m_properties = value;
-		return true;
+		if (index < 0)
+			continue;
+
+		INFANTRY infantry;
+		getMap().GetInfantryData(index, &infantry);
+		ApplyValue(infantry.house, m_settings, 0);
+		ApplyValue(infantry.strength, m_settings, 1);
+		ApplyValue(infantry.action, m_settings, 2);
+		ApplyValue(infantry.direction, m_settings, 3);
+		ApplyValue(infantry.flag1, m_settings, 4);
+		ApplyValue(infantry.flag2, m_settings, 5);
+		ApplyValue(infantry.flag3, m_settings, 6);
+		ApplyValue(infantry.flag4, m_settings, 7);
+		ApplyValue(infantry.flag5, m_settings, 8);
+		ApplyValue(infantry.tag, m_settings, 9);
+
+		getMap().DeleteInfantry(index);
+		applied = getMap().AddInfantry(&infantry, nullptr, nullptr, 0, index) != FALSE || applied;
 	}
-	index = getMap().GetAirAt(position);
-	if (index >= 0)
-	{
-		AIRCRAFT value;
-		getMap().GetAircraftData(index, &value);
-		m_properties = value;
-		return true;
-	}
-	index = getMap().GetUnitAt(position);
-	if (index >= 0)
-	{
-		UNIT value;
-		getMap().GetUnitData(index, &value);
-		m_properties = value;
-		return true;
-	}
-	index = getMap().GetInfantryAt(position);
-	if (index >= 0)
-	{
-		INFANTRY value;
-		getMap().GetInfantryData(index, &value);
-		m_properties = value;
-		return true;
-	}
-	return false;
+	return applied;
+}
+
+bool PropertyBrushTool::ApplyUnit(DWORD position)
+{
+	const int index = getMap().GetUnitAt(position);
+	if (index < 0)
+		return false;
+
+	UNIT unit;
+	getMap().GetUnitData(index, &unit);
+	const CString id = *getMap().GetIniFile().sections["Units"].GetValueName(index);
+
+	ApplyValue(unit.house, m_settings, 0);
+	ApplyValue(unit.strength, m_settings, 1);
+	ApplyValue(unit.action, m_settings, 2);
+	ApplyValue(unit.direction, m_settings, 3);
+	ApplyValue(unit.flag1, m_settings, 4);
+	ApplyValue(unit.flag2, m_settings, 5);
+	ApplyValue(unit.flag3, m_settings, 6);
+	ApplyValue(unit.flag4, m_settings, 7);
+	ApplyValue(unit.flag5, m_settings, 8);
+	ApplyValue(unit.flag6, m_settings, 9);
+	ApplyValue(unit.tag, m_settings, 10);
+
+	getMap().DeleteUnit(index);
+	return getMap().AddUnit(&unit, nullptr, nullptr, 0, id) != FALSE;
+}
+
+bool PropertyBrushTool::ApplyAircraft(DWORD position)
+{
+	const int index = getMap().GetAirAt(position);
+	if (index < 0)
+		return false;
+
+	AIRCRAFT aircraft;
+	getMap().GetAircraftData(index, &aircraft);
+	const CString id = *getMap().GetIniFile().sections["Aircraft"].GetValueName(index);
+
+	ApplyValue(aircraft.house, m_settings, 0);
+	ApplyValue(aircraft.strength, m_settings, 1);
+	ApplyValue(aircraft.direction, m_settings, 2);
+	ApplyValue(aircraft.action, m_settings, 3);
+	ApplyValue(aircraft.flag1, m_settings, 4);
+	ApplyValue(aircraft.flag2, m_settings, 5);
+	ApplyValue(aircraft.flag3, m_settings, 6);
+	ApplyValue(aircraft.flag4, m_settings, 7);
+	ApplyValue(aircraft.tag, m_settings, 8);
+
+	getMap().DeleteAircraft(index);
+	return getMap().AddAircraft(&aircraft, nullptr, nullptr, 0, id) != FALSE;
 }
 
 bool PropertyBrushTool::Apply(const MapCoords& cell)
 {
 	const DWORD position = cell.x + cell.y * getMap().GetIsoSize();
-	CIniFile& ini = getMap().GetIniFile();
-
-	if (const auto* source = std::get_if<STRUCTURE>(&m_properties))
+	switch (m_settings.objectType)
 	{
-		const int index = getMap().GetStructureAt(position);
-		if (index < 0) return false;
-		STRUCTURE target;
-		getMap().GetStructureData(index, &target);
-		const CString id = *ini.sections["Structures"].GetValueName(index);
-		STRUCTURE result = *source;
-		result.type = target.type;
-		result.x = target.x;
-		result.y = target.y;
-		getMap().DeleteStructure(index);
-		return getMap().AddStructure(&result, nullptr, nullptr, 0, id) != FALSE;
-	}
-	if (const auto* source = std::get_if<AIRCRAFT>(&m_properties))
-	{
-		const int index = getMap().GetAirAt(position);
-		if (index < 0) return false;
-		AIRCRAFT target;
-		getMap().GetAircraftData(index, &target);
-		const CString id = *ini.sections["Aircraft"].GetValueName(index);
-		AIRCRAFT result = *source;
-		result.type = target.type;
-		result.x = target.x;
-		result.y = target.y;
-		getMap().DeleteAircraft(index);
-		return getMap().AddAircraft(&result, nullptr, nullptr, 0, id) != FALSE;
-	}
-	if (const auto* source = std::get_if<UNIT>(&m_properties))
-	{
-		const int index = getMap().GetUnitAt(position);
-		if (index < 0) return false;
-		UNIT target;
-		getMap().GetUnitData(index, &target);
-		const CString id = *ini.sections["Units"].GetValueName(index);
-		UNIT result = *source;
-		result.type = target.type;
-		result.x = target.x;
-		result.y = target.y;
-		getMap().DeleteUnit(index);
-		return getMap().AddUnit(&result, nullptr, nullptr, 0, id) != FALSE;
-	}
-	if (const auto* source = std::get_if<INFANTRY>(&m_properties))
-	{
-		const int index = getMap().GetInfantryAt(position);
-		if (index < 0) return false;
-		INFANTRY target;
-		getMap().GetInfantryData(index, &target);
-		const int id = atoi(*ini.sections["Infantry"].GetValueName(index));
-		INFANTRY result = *source;
-		result.type = target.type;
-		result.x = target.x;
-		result.y = target.y;
-		result.pos = target.pos;
-		getMap().DeleteInfantry(index);
-		return getMap().AddInfantry(&result, nullptr, nullptr, 0, id) != FALSE;
+	case PropertyBrushObjectType::Structure: return ApplyStructure(position);
+	case PropertyBrushObjectType::Infantry: return ApplyInfantry(position);
+	case PropertyBrushObjectType::Unit: return ApplyUnit(position);
+	case PropertyBrushObjectType::Aircraft: return ApplyAircraft(position);
 	}
 	return false;
 }
 
-void PropertyBrushTool::onLButtonUp(const ProjectedCoords&, const MapCoords& mapCoords, MapToolMouseFlags flags)
+void PropertyBrushTool::onLButtonUp(const ProjectedCoords&, const MapCoords& mapCoords, MapToolMouseFlags)
 {
-	if (!getMap().isInside(mapCoords))
+	if (!getMap().isInside(mapCoords) || IsSameCell(mapCoords, m_lastAppliedCell))
 		return;
-	const bool forceSample = (flags & MapToolMouseFlags::CTRL) == MapToolMouseFlags::CTRL;
-	if (forceSample || std::holds_alternative<std::monostate>(m_properties))
-	{
-		if (Sample(mapCoords))
-			getView().SetError(GetLanguageStringACP("PropertyBrushSampled"));
-		else
-			getView().SetError(GetLanguageStringACP("PropertyBrushNoObject"));
-		return;
-	}
+
 	if (Apply(mapCoords))
 	{
+		m_lastAppliedCell = mapCoords;
 		getView().SetError(GetLanguageStringACP("PropertyBrushApplied"));
 		getView().RedrawWindow(nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW);
 	}
@@ -139,10 +186,26 @@ void PropertyBrushTool::onLButtonUp(const ProjectedCoords&, const MapCoords& map
 		getView().SetError(GetLanguageStringACP("PropertyBrushWrongType"));
 }
 
+void PropertyBrushTool::onMouseMove(const ProjectedCoords&, const MapCoords& mapCoords, MapToolMouseFlags flags)
+{
+	if (!getMap().isInside(mapCoords) ||
+		(flags & MapToolMouseFlags::LBUTTON) != MapToolMouseFlags::LBUTTON ||
+		IsSameCell(mapCoords, m_lastAppliedCell))
+	{
+		return;
+	}
+
+	if (Apply(mapCoords))
+	{
+		m_lastAppliedCell = mapCoords;
+		getView().RedrawWindow(nullptr, nullptr, RDW_INVALIDATE);
+	}
+}
+
 bool PropertyBrushTool::onRButtonUp(const ProjectedCoords&, const MapCoords&, MapToolMouseFlags)
 {
-	m_properties = std::monostate{};
-	getView().SetError(GetLanguageStringACP("PropertyBrushHelp"));
+	AD.reset();
+	getView().RedrawWindow(nullptr, nullptr, RDW_INVALIDATE);
 	return true;
 }
 

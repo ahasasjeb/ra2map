@@ -32,6 +32,11 @@
 #include "inlines.h"
 #include "rtpdlg.h"
 #include "TubeTool.h"
+#include "PropertyBrushTool.h"
+#include "Building.h"
+#include "Infantry.h"
+#include "Unit.h"
+#include "Aircraft.h"
 #include <set>
 #include <vector>
 
@@ -246,6 +251,68 @@ void CViewObjects::OnSelchanged(NMHDR* pNMHDR, LRESULT* pResult)
 			{
 				AD.mode=ACTIONMODE_MAPTOOL;
 				AD.tool.reset(new RemoveTubeTool(*Map, *((CFinalSunDlg*)theApp.m_pMainWnd)->m_view.m_isoview));				
+				break;
+			}
+			case 80:
+			case 81:
+			case 82:
+			case 83:
+			{
+				if (Map->GetIsoSize() == 0)
+					break;
+
+				auto* mainDialog = static_cast<CFinalSunDlg*>(theApp.m_pMainWnd);
+				const auto objectType = static_cast<PropertyBrushObjectType>(val - 80);
+				PropertyBrushSettings settings;
+				bool accepted = false;
+				switch (objectType)
+				{
+				case PropertyBrushObjectType::Structure:
+				{
+					CBuilding dialog(mainDialog);
+					dialog.EnablePropertyBrush();
+					accepted = dialog.DoModal() == IDOK;
+					if (accepted) settings = dialog.GetPropertyBrushSettings();
+					break;
+				}
+				case PropertyBrushObjectType::Infantry:
+				{
+					CInfantrie dialog(mainDialog);
+					dialog.EnablePropertyBrush();
+					accepted = dialog.DoModal() == IDOK;
+					if (accepted) settings = dialog.GetPropertyBrushSettings();
+					break;
+				}
+				case PropertyBrushObjectType::Unit:
+				{
+					CUnit dialog(mainDialog);
+					dialog.Init();
+					dialog.EnablePropertyBrush();
+					accepted = dialog.DoModal() == IDOK;
+					if (accepted) settings = dialog.GetPropertyBrushSettings();
+					break;
+				}
+				case PropertyBrushObjectType::Aircraft:
+				{
+					CAircraft dialog(mainDialog);
+					dialog.Init();
+					dialog.EnablePropertyBrush();
+					accepted = dialog.DoModal() == IDOK;
+					if (accepted) settings = dialog.GetPropertyBrushSettings();
+					break;
+				}
+				}
+
+				if (!accepted)
+				{
+					AD.reset();
+					break;
+				}
+
+				AD.reset();
+				AD.mode = ACTIONMODE_MAPTOOL;
+				AD.tool = std::make_unique<PropertyBrushTool>(*Map, *mainDialog->m_view.m_isoview, settings);
+				mainDialog->m_view.m_isoview->SetError(GetLanguageStringACP("PropertyBrushHelp"));
 				break;
 			}
 
@@ -765,7 +832,7 @@ void CViewObjects::UpdateDialog()
 	tree.Select(0,TVGN_CARET   );
 	tree.DeleteAllItems();
 	
-	CString sTreeRoots[15];
+	CString sTreeRoots[16];
 	sTreeRoots[0]=GetLanguageStringACP("InfantryObList");
 	sTreeRoots[1]=GetLanguageStringACP("VehiclesObList");
 	sTreeRoots[2]=GetLanguageStringACP("AircraftObList");
@@ -781,6 +848,7 @@ void CViewObjects::UpdateDialog()
 	sTreeRoots[12]=GetLanguageStringACP("StartpointsObList");
 	sTreeRoots[13]=GetLanguageStringACP("GroundObList");
 	sTreeRoots[14]=GetLanguageStringACP("SmudgesObList");
+	sTreeRoots[15]=GetLanguageStringACP("PropertyBrushObList");
 
 	int i=0;
 
@@ -789,7 +857,7 @@ void CViewObjects::UpdateDialog()
 	HTREEITEM first=tree.InsertItem(TVIF_PARAM | TVIF_TEXT,
 		TranslateStringACP(GetLanguageStringACP("NothingObList")), i, i, 0, 0, -2, TVI_ROOT, TVI_LAST);
 
-	HTREEITEM rootitems[15];
+	HTREEITEM rootitems[16];
 
 	// we want the change owner at the top
 	
@@ -820,6 +888,17 @@ void CViewObjects::UpdateDialog()
 
 	rootitems[12]=tree.InsertItem(TVIF_PARAM | TVIF_TEXT,
 			TranslateStringACP(sTreeRoots[12]), 12,12, 0, 0, 12, TVI_ROOT, TVI_LAST);
+
+	rootitems[15]=tree.InsertItem(TVIF_PARAM | TVIF_TEXT,
+			TranslateStringACP(sTreeRoots[15]), 15, 15, 0, 0, 15, TVI_ROOT, TVI_LAST);
+	tree.InsertItem(TVIF_PARAM | TVIF_TEXT, GetLanguageStringACP("PropertyBrushBuilding"),
+		0, 0, 0, 0, 80, rootitems[15], TVI_LAST);
+	tree.InsertItem(TVIF_PARAM | TVIF_TEXT, GetLanguageStringACP("PropertyBrushInfantry"),
+		0, 0, 0, 0, 81, rootitems[15], TVI_LAST);
+	tree.InsertItem(TVIF_PARAM | TVIF_TEXT, GetLanguageStringACP("PropertyBrushVehicle"),
+		0, 0, 0, 0, 82, rootitems[15], TVI_LAST);
+	tree.InsertItem(TVIF_PARAM | TVIF_TEXT, GetLanguageStringACP("PropertyBrushAircraft"),
+		0, 0, 0, 0, 83, rootitems[15], TVI_LAST);
 
 	rootitems[10]=tree.InsertItem(TVIF_PARAM | TVIF_TEXT,
 			TranslateStringACP(sTreeRoots[10]), 10, 10, 0, 0, 10, TVI_ROOT, TVI_LAST);

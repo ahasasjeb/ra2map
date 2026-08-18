@@ -27,6 +27,10 @@
 // Aircraft.h : Header-Datei
 //
 
+#include <array>
+
+struct PropertyBrushSettings;
+
 
 class CAircraft : public CDialog
 {
@@ -35,6 +39,8 @@ public:
 	void UpdateStrings();
 	CString m_strength;
 	void Init(CString house="", CString strength="256", CString direction="64", CString action="Guard", CString tag="None", CString flag1="0", CString flag2="0", CString flag3="0", CString flag4="0");
+	void EnablePropertyBrush();
+	PropertyBrushSettings GetPropertyBrushSettings() const;
 	CAircraft(CWnd* pParent = NULL);   // standard constructor
 
 // dialog field data
@@ -61,6 +67,10 @@ public:
 
 // implementation
 protected:
+	void UpdatePropertyBrushControls();
+	bool HasSelectedPropertyBrushFields() const;
+	bool m_propertyBrush = false;
+	std::array<BOOL, 9> m_propertyBrushFields{};
 
 	// generated message maps
 	//{{AFX_MSG(CAircraft)

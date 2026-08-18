@@ -2451,7 +2451,7 @@ BOOL CMapData::AddStructure(STRUCTURE* lpStructure, LPCTSTR lpType, LPCTSTR lpHo
 		structure.flag1 = "1";
 		structure.flag2 = "0";
 		structure.spotlight = "0";
-		structure.flag3 = "0";
+		structure.flag3 = "1";
 		structure.flag4 = "0";
 		structure.energy = "1";
 		structure.upgrade1 = "None";

@@ -27,6 +27,8 @@
 #include "mapdata.h"
 #include "variables.h"
 #include "functions.h"
+#include "PropertyBrushTool.h"
+#include "resource.h"
 
 
 #ifdef _DEBUG
@@ -34,6 +36,15 @@
 #undef THIS_FILE
 static char THIS_FILE[] = __FILE__;
 #endif
+
+namespace
+{
+	constexpr int PropertyBrushCheckIds[] = {
+		IDC_PROPERTYBRUSH_CHECK1, IDC_PROPERTYBRUSH_CHECK2, IDC_PROPERTYBRUSH_CHECK3,
+		IDC_PROPERTYBRUSH_CHECK4, IDC_PROPERTYBRUSH_CHECK5, IDC_PROPERTYBRUSH_CHECK6,
+		IDC_PROPERTYBRUSH_CHECK7, IDC_PROPERTYBRUSH_CHECK8, IDC_PROPERTYBRUSH_CHECK9
+	};
+}
 
 /////////////////////////////////////////////////////////////////////////////
 // dialog field CAircraft 
@@ -76,6 +87,44 @@ BEGIN_MESSAGE_MAP(CAircraft, CDialog)
 	//{{AFX_MSG_MAP(CAircraft)
 	//}}AFX_MSG_MAP
 END_MESSAGE_MAP()
+
+void CAircraft::EnablePropertyBrush()
+{
+	m_propertyBrush = true;
+	m_propertyBrushFields.fill(FALSE);
+}
+
+PropertyBrushSettings CAircraft::GetPropertyBrushSettings() const
+{
+	PropertyBrushSettings settings;
+	settings.objectType = PropertyBrushObjectType::Aircraft;
+	settings.values = { m_house, m_strength, m_direction, m_action, m_flag1, m_flag2, m_flag3, m_flag4, m_tag };
+	for (size_t i = 0; i < m_propertyBrushFields.size(); ++i)
+		settings.selected[i] = m_propertyBrushFields[i] != FALSE;
+	return settings;
+}
+
+bool CAircraft::HasSelectedPropertyBrushFields() const
+{
+	for (BOOL selected : m_propertyBrushFields)
+		if (selected != FALSE)
+			return true;
+	return false;
+}
+
+void CAircraft::UpdatePropertyBrushControls()
+{
+	for (int controlId : PropertyBrushCheckIds)
+	{
+		if (auto* control = GetDlgItem(controlId))
+			control->ShowWindow(m_propertyBrush ? SW_SHOW : SW_HIDE);
+	}
+	if (m_propertyBrush)
+	{
+		SetWindowText(GetLanguageStringACP("PropertyBrushCap"));
+		SetDlgItemText(IDC_LDESC, GetLanguageStringACP("PropertyBrushDesc"));
+	}
+}
 
 /////////////////////////////////////////////////////////////////////////////
 // handlers for messages CAircraft 
@@ -126,12 +175,24 @@ BOOL CAircraft::OnInitDialog()
 	m_strength_ctrl.SetPos(atoi(m_strength));
 	
 	UpdateStrings();
+	UpdatePropertyBrushControls();
 
 	return TRUE;  
 }
 
 void CAircraft::OnOK() 
 {
+	if (m_propertyBrush)
+	{
+		for (size_t i = 0; i < m_propertyBrushFields.size(); ++i)
+			m_propertyBrushFields[i] = IsDlgButtonChecked(PropertyBrushCheckIds[i]);
+		if (!HasSelectedPropertyBrushFields())
+		{
+			AfxMessageBox(GetLanguageStringACP("PropertyBrushNoFields"));
+			return;
+		}
+	}
+
 	CDialog::OnOK();
 	m_strength=GetText(&m_strength_ctrl);
 

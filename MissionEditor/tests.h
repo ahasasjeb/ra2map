@@ -37,4 +37,5 @@ private:
 	void test_waypoint_codec();
 	void test_snapshot_redraw_flag();
 	void test_ini_utf8_normalization();
+	void test_property_brush_settings();
 };

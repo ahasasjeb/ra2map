@@ -27,6 +27,8 @@
 #include "functions.h"
 #include "mapdata.h"
 #include "variables.h"
+#include "PropertyBrushTool.h"
+#include "resource.h"
 
 
 
@@ -35,6 +37,16 @@
 #undef THIS_FILE
 static char THIS_FILE[] = __FILE__;
 #endif
+
+namespace
+{
+	constexpr int PropertyBrushCheckIds[] = {
+		IDC_PROPERTYBRUSH_CHECK1, IDC_PROPERTYBRUSH_CHECK2, IDC_PROPERTYBRUSH_CHECK3,
+		IDC_PROPERTYBRUSH_CHECK4, IDC_PROPERTYBRUSH_CHECK5, IDC_PROPERTYBRUSH_CHECK6,
+		IDC_PROPERTYBRUSH_CHECK7, IDC_PROPERTYBRUSH_CHECK8, IDC_PROPERTYBRUSH_CHECK9,
+		IDC_PROPERTYBRUSH_CHECK10
+	};
+}
 
 /////////////////////////////////////////////////////////////////////////////
 // Dialogfeld CInfantrie 
@@ -81,6 +93,44 @@ BEGIN_MESSAGE_MAP(CInfantrie, CDialog)
 	//}}AFX_MSG_MAP
 END_MESSAGE_MAP()
 
+void CInfantrie::EnablePropertyBrush()
+{
+	m_propertyBrush = true;
+	m_propertyBrushFields.fill(FALSE);
+}
+
+PropertyBrushSettings CInfantrie::GetPropertyBrushSettings() const
+{
+	PropertyBrushSettings settings;
+	settings.objectType = PropertyBrushObjectType::Infantry;
+	settings.values = { m_house, m_strength, m_action, m_direction, m_flag1, m_flag2, m_flag3, m_flag4, m_flag5, m_tag };
+	for (size_t i = 0; i < m_propertyBrushFields.size(); ++i)
+		settings.selected[i] = m_propertyBrushFields[i] != FALSE;
+	return settings;
+}
+
+bool CInfantrie::HasSelectedPropertyBrushFields() const
+{
+	for (BOOL selected : m_propertyBrushFields)
+		if (selected != FALSE)
+			return true;
+	return false;
+}
+
+void CInfantrie::UpdatePropertyBrushControls()
+{
+	for (int controlId : PropertyBrushCheckIds)
+	{
+		if (auto* control = GetDlgItem(controlId))
+			control->ShowWindow(m_propertyBrush ? SW_SHOW : SW_HIDE);
+	}
+	if (m_propertyBrush)
+	{
+		SetWindowText(GetLanguageStringACP("PropertyBrushCap"));
+		SetDlgItemText(IDC_LDESC, GetLanguageStringACP("PropertyBrushDesc"));
+	}
+}
+
 /////////////////////////////////////////////////////////////////////////////
 // Behandlungsroutinen für Nachrichten CInfantrie 
 
@@ -104,12 +154,24 @@ BOOL CInfantrie::OnInitDialog()
 
 	
 	UpdateStrings();
+	UpdatePropertyBrushControls();
 
 	return TRUE;  
 }
 
 void CInfantrie::OnOK() 
 {
+	if (m_propertyBrush)
+	{
+		for (size_t i = 0; i < m_propertyBrushFields.size(); ++i)
+			m_propertyBrushFields[i] = IsDlgButtonChecked(PropertyBrushCheckIds[i]);
+		if (!HasSelectedPropertyBrushFields())
+		{
+			AfxMessageBox(GetLanguageStringACP("PropertyBrushNoFields"));
+			return;
+		}
+	}
+
 	CDialog::OnOK();
 	m_strength=GetText(&m_strength_ctrl);
 
