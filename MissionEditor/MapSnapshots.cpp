@@ -91,9 +91,9 @@ void CMapSnapshots::TakeSnapshot(FIELDDATA* fielddata, DWORD isoSize, BOOL bEras
 	ss.bRNDData.resize(size);
 	int i;
 	int e;
-	for (i = 0;i < width;i++)
+	for (e = 0;e < height;e++)
 	{
-		for (e = 0;e < height;e++)
+		for (i = 0;i < width;i++)
 		{
 			int pos_w, pos_r;
 			pos_w = i + e * width;
@@ -122,9 +122,9 @@ void CMapSnapshots::RestoreSnapshot(FIELDDATA* fielddata, DWORD isoSize, const S
 	const int height = ss.bottom - top;
 
 	int i, e;
-	for (i = 0;i < width;i++)
+	for (e = 0;e < height;e++)
 	{
-		for (e = 0;e < height;e++)
+		for (i = 0;i < width;i++)
 		{
 			int pos_w, pos_r;
 			pos_r = i + e * width;

@@ -6355,6 +6355,11 @@ void CMapData::Mini_UpdatePos(const int i, const int e, bool isMultiplayer)
 
 int CMapData::CalcMoneyOnMap()
 {
+	const int ripariusValue = atoi(rules.GetValueByName("Riparius", "Value", "0"));
+	const int cruentusValue = atoi(rules.GetValueByName("Cruentus", "Value", "0"));
+	const int viniferaValue = atoi(rules.GetValueByName("Vinifera", "Value", "0"));
+	const int aboreusValue = atoi(rules.GetValueByName("Aboreus", "Value", "0"));
+
 	int i;
 	int money = 0;
 	for (i = 0;i < fielddata_size;i++)
@@ -6367,22 +6372,22 @@ int CMapData::CalcMoneyOnMap()
 
 		if (ovrl >= RIPARIUS_BEGIN && ovrl <= RIPARIUS_END)
 		{
-			money += (ovrld + 1) * (atoi(rules.sections["Riparius"].values["Value"]));
+			money += (ovrld + 1) * ripariusValue;
 		}
 
 		if (ovrl >= CRUENTUS_BEGIN && ovrl <= CRUENTUS_END)
 		{
-			money += (ovrld + 1) * (atoi(rules.sections["Cruentus"].values["Value"]));
+			money += (ovrld + 1) * cruentusValue;
 		}
 
 		if (ovrl >= VINIFERA_BEGIN && ovrl <= VINIFERA_END)
 		{
-			money += (ovrld + 1) * (atoi(rules.sections["Vinifera"].values["Value"]));
+			money += (ovrld + 1) * viniferaValue;
 		}
 
 		if (ovrl >= ABOREUS_BEGIN && ovrl <= ABOREUS_END)
 		{
-			money += (ovrld + 1) * (atoi(rules.sections["Aboreus"].values["Value"]));
+			money += (ovrld + 1) * aboreusValue;
 		}
 	}
 
@@ -7394,7 +7399,7 @@ void CMapData::RedrawMinimap()
 {
 	const bool mp = IsMultiplayer();
 	int i, e;
-	for (i = 0; i < m_IsoSize; i++)
-		for (e = 0; e < m_IsoSize; e++)
+	for (e = 0; e < m_IsoSize; e++)
+		for (i = 0; i < m_IsoSize; i++)
 			Mini_UpdatePos(i, e, mp);
 }

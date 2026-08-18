@@ -198,38 +198,52 @@ impl Mat3x4 {
     }
 }
 
-// rotate_x / rotate_y / rotate_z / rotate_zxy replicate the C++ templates
-// in MissionEditorPackLib.cpp verbatim (same operation order).
-
-#[inline]
-fn rotate_x(v: &mut Vec3, a: f32) {
-    let l = (v.y * v.y + v.z * v.z).sqrt();
-    let d_a = v.y.atan2(v.z) + a;
-    v.y = l * d_a.sin();
-    v.z = l * d_a.cos();
+// `rotate_zxy` in the C++ renderer is algebraically a sequence of ordinary
+// plane rotations.  VXL rendering applies the same angles to every voxel and
+// normal in a section, so calculate their sine and cosine only once.
+#[derive(Clone, Copy)]
+struct RotationZxy {
+    sin_x: f32,
+    cos_x: f32,
+    sin_y: f32,
+    cos_y: f32,
+    sin_z: f32,
+    cos_z: f32,
 }
 
-#[inline]
-fn rotate_y(v: &mut Vec3, a: f32) {
-    let l = (v.x * v.x + v.z * v.z).sqrt();
-    let d_a = v.x.atan2(v.z) + a;
-    v.x = l * d_a.sin();
-    v.z = l * d_a.cos();
-}
+impl RotationZxy {
+    #[inline]
+    fn new(angles: Vec3) -> RotationZxy {
+        let (sin_x, cos_x) = angles.x.sin_cos();
+        let (sin_y, cos_y) = angles.y.sin_cos();
+        let (sin_z, cos_z) = angles.z.sin_cos();
+        RotationZxy {
+            sin_x,
+            cos_x,
+            sin_y,
+            cos_y,
+            sin_z,
+            cos_z,
+        }
+    }
 
-#[inline]
-fn rotate_z(v: &mut Vec3, a: f32) {
-    let l = (v.x * v.x + v.y * v.y).sqrt();
-    let d_a = v.x.atan2(v.y) + a;
-    v.x = l * d_a.sin();
-    v.y = l * d_a.cos();
-}
+    #[inline]
+    fn apply(&self, v: &mut Vec3) {
+        let x = v.x;
+        let y = v.y;
+        v.x = x * self.cos_z + y * self.sin_z;
+        v.y = y * self.cos_z - x * self.sin_z;
 
-#[inline]
-fn rotate_zxy(v: &mut Vec3, r: &Vec3) {
-    rotate_z(v, r.z);
-    rotate_x(v, r.x);
-    rotate_y(v, r.y);
+        let y = v.y;
+        let z = v.z;
+        v.y = y * self.cos_x + z * self.sin_x;
+        v.z = z * self.cos_x - y * self.sin_x;
+
+        let x = v.x;
+        let z = v.z;
+        v.x = x * self.cos_y + z * self.sin_y;
+        v.z = z * self.cos_y - x * self.sin_y;
+    }
 }
 
 /// Mirrors `normalize()` from the C++ Vec3 class (division by zero yields
@@ -291,6 +305,7 @@ fn section_bounds(
     model_offset: &Vec3,
 ) -> (Vec3, Vec3) {
     let matrix = Mat3x4::from_rows(hva_matrix).scaled_column(3, tailer.scale);
+    let rotation = RotationZxy::new(*rotation);
 
     let mut min_vec = Vec3::new(tailer.x_min_scale, tailer.y_min_scale, tailer.z_min_scale);
     let mut max_vec = min_vec;
@@ -316,7 +331,7 @@ fn section_bounds(
                     },
                 ) + *model_offset;
                 let mut cur = matrix.mul_vec(corner);
-                rotate_zxy(&mut cur, rotation);
+                rotation.apply(&mut cur);
                 min_vec = min_vec.minimum(&cur);
                 max_vec = max_vec.maximum(&cur);
             }
@@ -381,6 +396,7 @@ fn render_vxl_section_impl(
 
     // ---- mirrors RenderVXLSection() ----
     let inverse_light_direction = -normalize(light_direction);
+    let rotation = RotationZxy::new(rotation);
 
     set_op!(10);
 
@@ -418,7 +434,7 @@ fn render_vxl_section_impl(
     if out_center_x.is_some() || out_center_y.is_some() {
         let s_pixel = center;
         let mut d_pixel = scaled_matrix.mul_vec(s_pixel);
-        rotate_zxy(&mut d_pixel, &rotation);
+        rotation.apply(&mut d_pixel);
         d_pixel = d_pixel + model_offset;
 
         if let Some(o) = out_center_x.as_deref_mut() {
@@ -434,7 +450,7 @@ fn render_vxl_section_impl(
     if out_center_x_zmax.is_some() || out_center_y_zmax.is_some() {
         let s_pixel = center;
         let mut d_pixel = scaled_matrix.mul_vec(s_pixel);
-        rotate_zxy(&mut d_pixel, &rotation);
+        rotation.apply(&mut d_pixel);
         d_pixel = d_pixel + model_offset;
 
         if let Some(o) = out_center_x_zmax.as_deref_mut() {
@@ -462,6 +478,23 @@ fn render_vxl_section_impl(
     let img = unsafe { std::slice::from_raw_parts_mut(image, buf_len) };
     let lit = unsafe { std::slice::from_raw_parts_mut(lighting, buf_len) };
     let zimg = unsafe { std::slice::from_raw_parts_mut(image_z, buf_len) };
+
+    // Normal indices in VXL spans are bytes.  Their transformed lighting is
+    // independent of position, so performing it once per possible index
+    // removes two matrix/rotation operations from every visible voxel.
+    let mut lighting_lut = [0u8; 256];
+    for (normal_index, light) in lighting_lut.iter_mut().enumerate() {
+        let normal_vec = get_normal(normals, normal_index as u32);
+        let mut normal = normal_matrix.mul_vec(normal_vec);
+        rotation.apply(&mut normal);
+        let normal_dot_lighting_vec = normal.dot(&inverse_light_direction);
+        let light_val = if normal_dot_lighting_vec < 0.0 {
+            0.0
+        } else {
+            normal_dot_lighting_vec
+        };
+        *light = c_f32_to_int(light_val * 255.0) as i32 as u8;
+    }
 
     let mut truncated = false;
 
@@ -524,7 +557,7 @@ fn render_vxl_section_impl(
                                 .mul_vec(scale_to_world_matrix.mul_vec(s_pixel));
                             let t_pixel = scaled_matrix.mul_vec(m_pixel);
                             let mut d_pixel = t_pixel;
-                            rotate_zxy(&mut d_pixel, &rotation);
+                            rotation.apply(&mut d_pixel);
                             d_pixel = d_pixel + model_offset;
 
                             if _x == i3d_center_x && _y == i3d_center_y {
@@ -552,18 +585,7 @@ fn render_vxl_section_impl(
                                 if d_pixel.z > z_ofs {
                                     img[ofs] = color;
 
-                                    // lighting calc
-                                    let normal_vec = get_normal(normals, normal_index as u32);
-                                    let mut normal = normal_matrix.mul_vec(normal_vec);
-                                    rotate_zxy(&mut normal, &rotation);
-                                    let normal_dot_lighting_vec =
-                                        normal.dot(&inverse_light_direction);
-                                    let light_val = if normal_dot_lighting_vec < 0.0 {
-                                        0.0
-                                    } else {
-                                        normal_dot_lighting_vec
-                                    };
-                                    lit[ofs] = c_f32_to_int(light_val * 255.0) as i32 as u8;
+                                    lit[ofs] = lighting_lut[normal_index as usize];
                                     zimg[ofs] = c_f32_to_int(d_pixel.z) as i32 as i8;
                                 }
                             }

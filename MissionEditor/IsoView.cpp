@@ -454,27 +454,22 @@ __forceinline void BlitTerrain(void* dst, int x, int y, int dleft, int dtop, int
 #endif
 		for (e = srcRect.top;e < srcRect.bottom;e++)
 		{
-			short& left = st.vborder[e].left;
-			short& right = st.vborder[e].right;
+			const short left = st.vborder[e].left;
+			const short right = st.vborder[e].right;
 
 			auto l = max(left, srcRect.left);
 			auto r = min(right, static_cast<short>(srcRect.right - 1));
-			for (i = l;i <= r;i++)
+			if (l > r)
+				continue;
+
+			const BYTE* srcPixel = src + e * swidth + l;
+			BYTE* destPixel = static_cast<BYTE*>(dst) + (blrect.left + l) * bpp + (blrect.top + e) * dpitch;
+			for (i = l;i <= r;i++, ++srcPixel, destPixel += bpp)
 			{
-				//if (i < srcRect.left || i >= srcRect.right)
+				const BYTE val = *srcPixel;
+				if (val)
 				{
-					//dest+=bpp;
-				}
-				//else
-				{
-
-					BYTE& val = src[i + e * swidth];
-					if (val)
-					{
-						void* dest = ((BYTE*)dst + (blrect.left + i) * bpp + (blrect.top + e) * dpitch);
-
-						memcpy(dest, &iPalIso[val], bpp);
-					}
+					memcpy(destPixel, &iPalIso[val], bpp);
 				}
 			}
 
@@ -749,19 +744,19 @@ __forceinline void BlitPic(void* dst, int x, int y, int dleft, int dtop, int dpi
 		if (right >= srcRect.right)
 			right = srcRect.right - 1;
 
-		for (i = left;i <= right;i++)
-		{
-			if (blrect.left + i < 0)
-				continue;
+		if (left > right)
+			continue;
 
-			const int spos = i + e * swidth;
-			BYTE val = src[spos];
+		const BYTE* srcPixel = src + e * swidth + left;
+		const BYTE* lightingPixel = pLighting ? pLighting + e * swidth + left : nullptr;
+		BYTE* destPixel = static_cast<BYTE*>(dst) + (blrect.left + left) * bpp + (blrect.top + e) * dpitch;
+		for (i = left;i <= right;i++, ++srcPixel, destPixel += bpp)
+		{
+			const BYTE val = *srcPixel;
 
 			if (val)
 			{
-				void* dest = ((BYTE*)dst + (blrect.left + i) * bpp + (blrect.top + e) * dpitch);
-
-				if (dest >= dst)
+				if (destPixel >= static_cast<BYTE*>(dst))
 				{
 					int c;
 					if (!color || newPal != iPalUnit || val < houseColorMin || val > houseColorMax)
@@ -779,15 +774,17 @@ __forceinline void BlitPic(void* dst, int x, int y, int dleft, int dtop, int dpi
 					{
 						// bpp == 4
 						ASSERT(bpp == 4);
-						int l = pLighting[spos];
+						int l = *lightingPixel;
 						BYTE* bc = reinterpret_cast<BYTE*>(&c);
 						for (int i = 0; i < 4; ++i)
 							bc[i] = min(255, bc[i] * (200 + l * 300 / 255) / 255);  // game seems to overbrighten and have a lot of ambient - if you change this, also change Loading.cpp shp lighting value so that shp light stays at 1.0
 							//bc[i] = min(255, bc[i] * (0 + l * (255 - 0) / 255) / 255);
 					}
-					memcpy(dest, &c, bpp);
+					memcpy(destPixel, &c, bpp);
 				}
 			}
+			if (lightingPixel)
+				++lightingPixel;
 		}
 	}
 }
@@ -4486,14 +4483,14 @@ void CIsoView::UpdateStatusBar(int x, int y)
 {
 	CString statusbar;//=TranslateStringACP("Ready");
 
-	FIELDDATA m = *Map->GetFielddataAt(x + y * Map->GetIsoSize());
-	if (m.wGround == 0xFFFF) m.wGround = 0;
+	const FIELDDATA& m = *Map->GetFielddataAt(x + y * Map->GetIsoSize());
+	const DWORD ground = m.wGround == 0xFFFF ? 0 : m.wGround;
 
-	if (m.wGround < (*tiledata_count) && m.bSubTile < (*tiledata)[m.wGround].wTileCount)
+	if (ground < (*tiledata_count) && m.bSubTile < (*tiledata)[ground].wTileCount)
 	{
 		statusbar = "Terrain type: 0x";
 		char c[50];
-		itoa((*tiledata)[m.wGround].tiles[m.bSubTile].bTerrainType, c, 16);
+		itoa((*tiledata)[ground].tiles[m.bSubTile].bTerrainType, c, 16);
 		statusbar += c;
 		statusbar += ", height: ";
 		itoa(m.bHeight, c, 10);
@@ -5261,9 +5258,6 @@ void CIsoView::PlaceCurrentObjectAt(int x, int y)
 
 
 		DWORD dwPos = x + y * Map->GetIsoSize();
-
-		FIELDDATA m = *Map->GetFielddataAt(dwPos);
-		if (m.wGround == 0xFFFF) m.wGround = 0;
 
 		BYTE oldOverlay = Map->GetOverlayAt(dwPos);
 		BYTE oldOverlayData = Map->GetOverlayDataAt(dwPos);
@@ -6067,8 +6061,7 @@ void CIsoView::DrawObjectPreviewAt(int x, int y)
 							(v + 1 > mapwidth && u - 1 < v - mapwidth) || (u + 1 > mapwidth && v + mapwidth - 1 < u))
 							continue;
 
-						FIELDDATA m = *Map->GetFielddataAt(MapCoords(u, v));
-						if (m.wGround == 0xFFFF) m.wGround = 0;
+						const FIELDDATA& m = *Map->GetFielddataAt(MapCoords(u, v));
 						const auto drawCoords = GetRenderTargetCoordinates(MapCoords(u, v));
 
 						DrawMapObjectsCell(MapCoords(u, v), m, drawCoords, ctx);
@@ -6269,8 +6262,7 @@ bool CIsoView::RefreshObjectScene(const MapCoords& oldPos, const MapCoords& newP
 				for (int v = top; v < bottom; ++v)
 				{
 					if (!cellIsVisible(u, v)) continue;
-					FIELDDATA field = *Map->GetFielddataAt(MapCoords(u, v));
-					if (field.wGround >= *tiledata_count) field.wGround = 0;
+					const FIELDDATA& field = *Map->GetFielddataAt(MapCoords(u, v));
 					if (!field.bRedrawTerrain)
 						DrawMapTerrainCell(field, GetRenderTargetCoordinates(MapCoords(u, v)), ctx);
 				}
@@ -6283,9 +6275,8 @@ bool CIsoView::RefreshObjectScene(const MapCoords& oldPos, const MapCoords& newP
 			{
 				if (!cellIsVisible(u, v)) continue;
 				const MapCoords pos(u, v);
-				FIELDDATA field = *Map->GetFielddataAt(pos);
-				if (field.wGround == 0xFFFF || field.wGround >= *tiledata_count) field.wGround = 0;
-				const DWORD originalGround = field.wGround;
+				const FIELDDATA& field = *Map->GetFielddataAt(pos);
+				const DWORD originalGround = field.wGround == 0xFFFF ? 0 : field.wGround;
 				const auto draw = GetRenderTargetCoordinates(pos);
 				if (rebuildTerrain)
 				{
@@ -7049,13 +7040,10 @@ void CIsoView::DrawMap()
 				continue;
 
 
-			FIELDDATA m = *Map->GetFielddataAt(mapCoords);
+			const FIELDDATA& m = *Map->GetFielddataAt(mapCoords);
 			const auto drawCoords = GetRenderTargetCoordinates(mapCoords);
 
 			// draw terrain
-			if (m.wGround >= (*tiledata_count))
-				m.wGround = 0;
-
 			if (!m.bRedrawTerrain)
 				DrawMapTerrainCell(m, drawCoords, ctx);
 
@@ -7077,13 +7065,10 @@ void CIsoView::DrawMap()
 			if (u < 1 || v < 1 || u + v<mapwidth + 1 || u + v>mapwidth + mapheight * 2 || (v + 1 > mapwidth && u - 1 < v - mapwidth) || (u + 1 > mapwidth && v + mapwidth - 1 < u))
 				continue;
 
-			FIELDDATA m = *Map->GetFielddataAt(mapCoords);  // copy
+			const FIELDDATA& m = *Map->GetFielddataAt(mapCoords);
 			const auto drawCoords = GetRenderTargetCoordinates(mapCoords);
 
-			if (m.wGround == 0xFFFF)
-				m.wGround = 0;
-
-			const DWORD dwOrigGround = m.wGround;
+			const DWORD dwOrigGround = m.wGround == 0xFFFF ? 0 : m.wGround;
 
 			if (m.bRedrawTerrain)
 				DrawMapTerrainCell(m, drawCoords, ctx);
@@ -7195,29 +7180,31 @@ void CIsoView::DrawMap()
 
 }
 
-void CIsoView::DrawMapTerrainCell(FIELDDATA& m, const ProjectedCoords& drawCoords, const DrawMapCellContext& ctx)
+void CIsoView::DrawMapTerrainCell(const FIELDDATA& m, const ProjectedCoords& drawCoords, const DrawMapCellContext& ctx)
 {
 	const DDSURFACEDESC2& ddsd = ctx.ddsd;
 	const RECT& r = ctx.r;
 
-	const DWORD dwOrigGround = m.wGround;
+	const DWORD dwOrigGround = m.wGround == 0xFFFF ? 0 : m.wGround;
+	DWORD ground = dwOrigGround;
+	BYTE subTile = m.bSubTile;
 
 	if (theApp.m_Options.bMarbleMadness)
 	{
-		if ((*tiledata)[m.wGround].wMarbleGround != 0xFFFF)
+		if ((*tiledata)[ground].wMarbleGround != 0xFFFF)
 		{
-			m.wGround = (*tiledata)[m.wGround].wMarbleGround;
+			ground = (*tiledata)[ground].wMarbleGround;
 		}
 		else if (ctx.bMarbleHeight)
 		{
-			m.wGround = ctx.MM_heightstart + m.bHeight;
-			m.bSubTile = 0;
+			ground = ctx.MM_heightstart + m.bHeight;
+			subTile = 0;
 		}
 	}
 
-	if (m.wGround < *tiledata_count)
+	if (ground < *tiledata_count)
 	{
-		TILEDATA* td = &(*tiledata)[m.wGround];
+		TILEDATA* td = &(*tiledata)[ground];
 		if (td->bReplacementCount)
 		{
 			if (m.bRNDImage > 0)
@@ -7226,9 +7213,9 @@ void CIsoView::DrawMapTerrainCell(FIELDDATA& m, const ProjectedCoords& drawCoord
 			}
 		}
 
-		if (m.bSubTile < td->wTileCount && td->tiles[m.bSubTile].pic != NULL)
+		if (subTile < td->wTileCount && td->tiles[subTile].pic != NULL)
 		{
-			const SUBTILE& st = td->tiles[m.bSubTile];
+			const SUBTILE& st = td->tiles[subTile];
 			const auto stDrawCoords = drawCoords + st.drawOffset();
 
 			if (!m.bHide && (*tiledata)[dwOrigGround].bHide == FALSE)
@@ -7252,14 +7239,15 @@ void CIsoView::DrawMapTerrainCell(FIELDDATA& m, const ProjectedCoords& drawCoord
 }
 
 
-void CIsoView::DrawMapTerrainAnim(FIELDDATA& m, const ProjectedCoords& drawCoords, const DrawMapCellContext& ctx, DWORD dwOrigGround)
+void CIsoView::DrawMapTerrainAnim(const FIELDDATA& m, const ProjectedCoords& drawCoords, const DrawMapCellContext& ctx, DWORD dwOrigGround)
 {
 	const DDSURFACEDESC2& ddsd = ctx.ddsd;
 	const RECT& r = ctx.r;
 
-	if (m.wGround < *tiledata_count)
+	const DWORD ground = m.wGround == 0xFFFF ? 0 : m.wGround;
+	if (ground < *tiledata_count)
 	{
-		TILEDATA* td = &(*tiledata)[m.wGround];
+		TILEDATA* td = &(*tiledata)[ground];
 
 		if (m.bSubTile < td->wTileCount)
 		{
@@ -7278,7 +7266,7 @@ void CIsoView::DrawMapTerrainAnim(FIELDDATA& m, const ProjectedCoords& drawCoord
 }
 
 
-void CIsoView::DrawMapObjectsCell(const MapCoords& mapCoords, FIELDDATA& m, const ProjectedCoords& drawCoords, const DrawMapCellContext& ctx)
+void CIsoView::DrawMapObjectsCell(const MapCoords& mapCoords, const FIELDDATA& m, const ProjectedCoords& drawCoords, const DrawMapCellContext& ctx)
 {
 	DDSURFACEDESC2& ddsd = ctx.ddsd;
 	const RECT& r = ctx.r;
@@ -8087,36 +8075,38 @@ bool CIsoView::DrawMapPan(int left, int right, int top, int bottom, DWORD MM_hei
 	// Terrain artwork is often much taller and wider than its logical cell.
 	// Use the real subtile bitmap bounds, otherwise the owner cell can be outside
 	// the exposed band while its cliff/shore pixels still need to be filled.
-	auto getTerrainBounds = [&](FIELDDATA field, const ProjectedCoords& drawCoords)
+	auto getTerrainBounds = [&](const FIELDDATA& field, const ProjectedCoords& drawCoords)
 	{
 		RECT bounds = { drawCoords.x, drawCoords.y, drawCoords.x, drawCoords.y };
-		if (field.wGround >= *tiledata_count)
+		DWORD ground = field.wGround == 0xFFFF ? 0 : field.wGround;
+		if (ground >= *tiledata_count)
 			return bounds;
+		BYTE subTile = field.bSubTile;
 
 		if (theApp.m_Options.bMarbleMadness)
 		{
-			if ((*tiledata)[field.wGround].wMarbleGround != 0xFFFF)
-				field.wGround = (*tiledata)[field.wGround].wMarbleGround;
+			if ((*tiledata)[ground].wMarbleGround != 0xFFFF)
+				ground = (*tiledata)[ground].wMarbleGround;
 			else if (bMarbleHeight)
 			{
-				field.wGround = MM_heightstart + field.bHeight;
-				field.bSubTile = 0;
+				ground = MM_heightstart + field.bHeight;
+				subTile = 0;
 			}
 		}
 
-		if (field.wGround >= *tiledata_count)
+		if (ground >= *tiledata_count)
 			return bounds;
 
-		TILEDATA* tile = &(*tiledata)[field.wGround];
+		TILEDATA* tile = &(*tiledata)[ground];
 		if (tile->bReplacementCount && field.bRNDImage > 0)
 		{
 			const int replacement = min<int>(field.bRNDImage, tile->bReplacementCount) - 1;
 			tile = &tile->lpReplacements[replacement];
 		}
-		if (field.bSubTile >= tile->wTileCount || tile->tiles[field.bSubTile].pic == nullptr)
+		if (subTile >= tile->wTileCount || tile->tiles[subTile].pic == nullptr)
 			return bounds;
 
-		const SUBTILE& subtile = tile->tiles[field.bSubTile];
+		const SUBTILE& subtile = tile->tiles[subTile];
 		const auto imagePosition = drawCoords + subtile.drawOffset();
 		bounds.left = imagePosition.x;
 		bounds.top = imagePosition.y;
@@ -8173,24 +8163,19 @@ bool CIsoView::DrawMapPan(int left, int right, int top, int bottom, DWORD MM_hei
 			if (!cellInBounds(u, v)) continue;
 
 			const MapCoords mapCoords(u, v);
-			FIELDDATA m = *Map->GetFielddataAt(mapCoords);
+			const FIELDDATA& m = *Map->GetFielddataAt(mapCoords);
 			const auto drawCoords = GetRenderTargetCoordinates(mapCoords);
-
-			if (m.wGround >= (*tiledata_count))
-				m.wGround = 0;
 
 			if (!m.bRedrawTerrain)
 			{
 				const RECT terrainBounds = getTerrainBounds(m, drawCoords);
 				if (overlapsBand(stripX, terrainBounds.left, terrainBounds.top, terrainBounds.right, terrainBounds.bottom))
 				{
-					FIELDDATA terrain = m;
-					DrawMapTerrainCell(terrain, drawCoords, terrainStripXCtx);
+					DrawMapTerrainCell(m, drawCoords, terrainStripXCtx);
 				}
 				if (overlapsBand(stripY, terrainBounds.left, terrainBounds.top, terrainBounds.right, terrainBounds.bottom))
 				{
-					FIELDDATA terrain = m;
-					DrawMapTerrainCell(terrain, drawCoords, terrainStripYCtx);
+					DrawMapTerrainCell(m, drawCoords, terrainStripYCtx);
 				}
 			}
 		}
@@ -8204,15 +8189,12 @@ bool CIsoView::DrawMapPan(int left, int right, int top, int bottom, DWORD MM_hei
 			if (!cellInBounds(u, v)) continue;
 
 			const MapCoords mapCoords(u, v);
-			FIELDDATA m = *Map->GetFielddataAt(mapCoords);
+			const FIELDDATA& m = *Map->GetFielddataAt(mapCoords);
 			const auto drawCoords = GetRenderTargetCoordinates(mapCoords);
 			const int x0 = drawCoords.x;
 			const int y0 = drawCoords.y;
 
-			if (m.wGround == 0xFFFF)
-				m.wGround = 0;
-
-			const DWORD dwOrigGround = m.wGround;
+			const DWORD dwOrigGround = m.wGround == 0xFFFF ? 0 : m.wGround;
 			const bool objectsNeedRedraw = overlapsStrip(x0, y0, x0 + f_x, y0 + f_y, stripXExp, stripYExp);
 			const RECT terrainBounds = getTerrainBounds(m, drawCoords);
 			const bool terrainNeedsStripX = m.bRedrawTerrain &&
@@ -8225,13 +8207,11 @@ bool CIsoView::DrawMapPan(int left, int right, int top, int bottom, DWORD MM_hei
 
 			if (terrainNeedsStripX)
 			{
-				FIELDDATA terrain = m;
-				DrawMapTerrainCell(terrain, drawCoords, terrainStripXCtx);
+				DrawMapTerrainCell(m, drawCoords, terrainStripXCtx);
 			}
 			if (terrainNeedsStripY)
 			{
-				FIELDDATA terrain = m;
-				DrawMapTerrainCell(terrain, drawCoords, terrainStripYCtx);
+				DrawMapTerrainCell(m, drawCoords, terrainStripYCtx);
 			}
 
 			if (objectsNeedRedraw)

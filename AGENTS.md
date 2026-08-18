@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-`MissionEditor/` is the MFC/C++20 desktop editor. Most features are a matching
+`MissionEditor/` is the MFC/C++23 desktop editor. Most features are a matching
 `Name.h`/`Name.cpp` pair; shared resources and distributable game data live in
 `MissionEditor/data/`, while build configuration is in `MissionEditor/PropertySheets/`.
 `MissionEditorPackLib/` exposes C-compatible packing and loading helpers used by the

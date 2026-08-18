@@ -110,6 +110,48 @@ __forceinline void CreateConvLookUpTable(DDPIXELFORMAT& pf, HTSPALETTE hPalette)
 
 }
 
+// The GDI fallback is used only when a DirectDraw surface cannot be locked.
+// Render it through one 32-bit DIB transfer instead of making one GDI call per
+// source pixel. DIB pixels are BGR in memory, unlike COLORREF values.
+static void DrawPaletteImageToDC(HDC hDC, const BYTE* image, int width, int height,
+	int imageX, int imageY, int imageWidth, int imageHeight, HTSPALETTE hPalette,
+	bool forceTransparentTopLeft = false)
+{
+	if (hDC == NULL || image == NULL || width <= 0 || height <= 0 ||
+		imageWidth <= 0 || imageHeight <= 0 || hPalette == NULL || hPalette > dwPalCount)
+		return;
+
+	std::vector<DWORD> pixels(static_cast<size_t>(width) * height, 0x00F5F5F5);
+	for (int y = 0; y < height; ++y)
+	{
+		for (int x = 0; x < width; ++x)
+		{
+			if (x < imageX || y < imageY || x >= imageX + imageWidth || y >= imageY + imageHeight)
+				continue;
+
+			const BYTE colorIndex = image[(x - imageX) + (y - imageY) * imageWidth];
+			if (colorIndex == 0)
+				continue;
+
+			const t_palet_entry& color = ts_palettes[hPalette - 1][colorIndex];
+			pixels[x + y * width] = (static_cast<DWORD>(color.r) << 16) |
+				(static_cast<DWORD>(color.g) << 8) | color.b;
+		}
+	}
+	if (forceTransparentTopLeft)
+		pixels.front() = 0x00F5F5F5;
+
+	BITMAPINFO bitmapInfo = {};
+	bitmapInfo.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+	bitmapInfo.bmiHeader.biWidth = width;
+	bitmapInfo.bmiHeader.biHeight = -height; // top-down, matching `pixels`
+	bitmapInfo.bmiHeader.biPlanes = 1;
+	bitmapInfo.bmiHeader.biBitCount = 32;
+	bitmapInfo.bmiHeader.biCompression = BI_RGB;
+	SetDIBitsToDevice(hDC, 0, 0, width, height, 0, 0, 0, height,
+		pixels.data(), &bitmapInfo, DIB_RGB_COLORS);
+}
+
 
 namespace FSunPackLib
 {
@@ -788,12 +830,12 @@ namespace FSunPackLib
 							if (dest)
 							{
 								int i, e;
-								for (i = 0; i < head.cx; i++)
+								for (e = 0; e < head.cy; e++)
 								{
-									for (e = 0;e < head.cy;e++)
+									BYTE* const destRow = dest + e * pitch;
+									for (i = 0; i < head.cx; i++)
 									{
 										DWORD dwRead = 0xFFFFFFFF;
-										DWORD dwWrite = i * bytesize + e * pitch;
 
 										if (i >= imghead.x && e >= imghead.y && i < imghead.x + imghead.cx && e < imghead.y + imghead.cy)
 											dwRead = (i - imghead.x) + (e - imghead.y) * imghead.cx;
@@ -801,12 +843,12 @@ namespace FSunPackLib
 										if (dwRead != 0xFFFFFFFF && image[dwRead] != 0)
 										{
 											DWORD col = conv_color[hPalette - 1][image[dwRead]];
-											memcpy(&dest[dwWrite], &col, bytesize);
+											memcpy(destRow + i * bytesize, &col, bytesize);
 										}
 										else
 										{
 											DWORD col = transp_conv_color[hPalette - 1];
-											memcpy(&dest[dwWrite], &col, bytesize);
+											memcpy(destRow + i * bytesize, &col, bytesize);
 										}
 
 									}
@@ -823,32 +865,8 @@ namespace FSunPackLib
 						while ((getDCResult = pdds[pic]->GetDC(&hDC)) == DDERR_WASSTILLDRAWING);
 						if (getDCResult == DD_OK)
 						{
-						{
-							int i, e;
-							for (i = 0; i < head.cx; i++)
-							{
-								for (e = 0;e < head.cy;e++)
-								{
-									DWORD dwRead = 0xFFFFFFFF;
-									//DWORD dwWrite=i*bytesize+e*pitch;
-
-									if (i >= imghead.x && e >= imghead.y && i < imghead.x + imghead.cx && e < imghead.y + imghead.cy)
-										dwRead = (i - imghead.x) + (e - imghead.y) * imghead.cx;
-
-									if (dwRead != 0xFFFFFFFF && image[dwRead] != 0)
-									{
-										t_palet_entry& p = ts_palettes[hPalette - 1][image[dwRead]];
-										SetPixel(hDC, i, e, RGB(p.r, p.g, p.b));
-									}
-									else
-									{
-										SetPixel(hDC, i, e, RGB(245, 245, 245));
-									}
-
-								}
-							}
-
-						}
+							DrawPaletteImageToDC(hDC, image, head.cx, head.cy,
+								imghead.x, imghead.y, imghead.cx, imghead.cy, hPalette);
 
 						pdds[pic]->ReleaseDC(hDC);
 						}
@@ -1150,7 +1168,7 @@ namespace FSunPackLib
 									// pixel format overwritten
 									CreateConvLookUpTable(ddsd.ddpfPixelFormat, hPalette);
 
-									int bytesize = 1;//(pf.dwRGBBitCount+1)/8;
+									bytesize = 1;//(pf.dwRGBBitCount+1)/8;
 									if (ddsd.ddpfPixelFormat.dwRGBBitCount <= 8) bytesize = 1;
 									else if (ddsd.ddpfPixelFormat.dwRGBBitCount <= 16) bytesize = 2;
 									else if (ddsd.ddpfPixelFormat.dwRGBBitCount <= 24) bytesize = 3;
@@ -1177,27 +1195,28 @@ namespace FSunPackLib
 
 								last_succeeded_operation = 21016;
 
-								if (dest && !IsBadWritePtr(dest, pitch * cy)) // TODO: debug this case when using surfaces
+								const size_t rowBytes = static_cast<size_t>(cx) * bytesize;
+								if (dest && pitch >= 0 && static_cast<size_t>(pitch) >= rowBytes)
 								{
 
 									bFastLoaded = TRUE;
 
-									for (i = 0; i < cx; i++)
+									for (e = 0; e < cy; e++)
 									{
-										for (e = 0;e < cy;e++)
+										BYTE* const destRow = dest + e * pitch;
+										for (i = 0; i < cx; i++)
 										{
-											DWORD dwWrite = i * bytesize + e * pitch;
 											DWORD dwRead = i + e * cx;
 
 											if (image[dwRead] != 0)
 											{
 												DWORD col = conv_color[hPalette - 1][image[dwRead]];
-												memcpy(&dest[dwWrite], &col, bytesize);
+												memcpy(destRow + i * bytesize, &col, bytesize);
 											}
 											else
 											{
 												DWORD col = transp_conv_color[hPalette - 1];
-												memcpy(&dest[dwWrite], &col, bytesize);
+												memcpy(destRow + i * bytesize, &col, bytesize);
 											}
 
 										}
@@ -1228,7 +1247,6 @@ namespace FSunPackLib
 
 					if (!bFastLoaded) // use GDI
 					{
-						int i, e;
 						// Reuse the buffer the fast path already allocated and
 						// drew into. Only allocate when the fast path never ran
 						// (image == NULL). The previous unconditional new[]
@@ -1244,25 +1262,7 @@ namespace FSunPackLib
 						while ((getDCResult = pdds[pic]->GetDC(&hDC)) == DDERR_WASSTILLDRAWING) {};
 						if (getDCResult == DD_OK)
 						{
-
-							for (i = 0; i < cx; i++)
-							{
-								for (e = 0;e < cy;e++)
-								{
-									DWORD dwRead = i + e * cx;
-
-									if (image[dwRead] != 0)
-									{
-										t_palet_entry& p = ts_palettes[hPalette - 1][image[dwRead]];
-										SetPixel(hDC, i, e, RGB(p.r, p.g, p.b));
-									}
-									else
-									{
-										SetPixel(hDC, i, e, RGB(245, 245, 245));
-									}
-
-								}
-							}
+							DrawPaletteImageToDC(hDC, image, cx, cy, 0, 0, cx, cy, hPalette);
 
 							pdds[pic]->ReleaseDC(hDC);
 							SetColorKey(pdds[pic], RGB(245, 245, 245));
@@ -1723,26 +1723,26 @@ namespace FSunPackLib
 					int k, e;
 					//HDC dc;
 					//pdds[0]->GetDC(&dc);
-					for (k = 0;k < rtWidth;k++)
+					for (e = 0;e < rtHeight;e++)
 					{
-						for (e = 0;e < rtHeight;e++)
+						BYTE* const destRow = dest + e * ddsd.lPitch;
+						for (k = 0;k < rtWidth;k++)
 						{
 							//t_palet_entry p=ts_palettes[hPalette-1][image[k+e*cl_max]];								
 
 							if (k >= left && e >= top && k < right && e < bottom)
 							{
 								//SetPixel(dc, k-left, e-top, RGB(p.r, p.g, p.b) );
-								DWORD dwWrite = k * bytesize + e * ddsd.lPitch;
 								int pos = k + e * rtWidth;
 								if (pos < c_pixels && image[pos] != 0)
 								{
 									DWORD col = conv_color[hPalette - 1][image[k + e * rtWidth]];
-									memcpy(&dest[dwWrite], &col, bytesize);
+									memcpy(destRow + k * bytesize, &col, bytesize);
 								}
 								else
 								{
 									DWORD col = transp_conv_color[hPalette - 1];
-									memcpy(&dest[dwWrite], &col, bytesize);
+									memcpy(destRow + k * bytesize, &col, bytesize);
 								}
 
 
@@ -1770,35 +1770,8 @@ namespace FSunPackLib
 
 
 			last_succeeded_operation = 7;
-			int k, e;
-			//HDC dc;
-			//pdds[0]->GetDC(&dc);
-			for (k = 0;k < rtWidth;k++)
-			{
-				for (e = 0;e < rtHeight;e++)
-				{
-					//t_palet_entry p=ts_palettes[hPalette-1][image[k+e*cl_max]];								
-
-					if (k >= left && e >= top && k < right && e < bottom)
-					{
-						//SetPixel(dc, k-left, e-top, RGB(p.r, p.g, p.b) );
-						//DWORD dwWrite=k*bytesize+e*ddsd.lPitch;
-						int pos = k + e * rtWidth;
-						if (pos < c_pixels && image[pos] != 0)
-						{
-							t_palet_entry& p = ts_palettes[hPalette - 1][image[k + e * rtWidth]];
-							SetPixel(hDC, k, e, RGB(p.r, p.g, p.b));
-						}
-						else
-						{
-							SetPixel(hDC, k, e, RGB(245, 245, 245));
-						}
-
-					}
-				}
-			}
-
-			SetPixel(hDC, 0, 0, RGB(245, 245, 245));
+			DrawPaletteImageToDC(hDC, image, rtWidth, rtHeight, 0, 0, rtWidth, rtHeight,
+				hPalette, true);
 			pdds[0]->ReleaseDC(hDC);
 			}
 

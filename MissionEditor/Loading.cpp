@@ -678,10 +678,9 @@ void CLoading::InitPics(CProgressCtrl* prog)
 
 
 	// new: Prepare building terrain information:
-	int i;
-	for(i=0;i<rules.sections["BuildingTypes"].values.size();i++)
+	for (const auto& buildingType : rules.sections["BuildingTypes"].values)
 	{
-		PrepareUnitGraphic(*rules.sections["BuildingTypes"].GetValue(i));
+		PrepareUnitGraphic(buildingType.second);
 		
 	}
 	ms.dwLength=sizeof(MEMORYSTATUS);
@@ -893,74 +892,96 @@ void CLoading::InitSHPs(CProgressCtrl* prog)
 	errstream << "InitSHPs() called. Available memory: " << cs << endl;
 	errstream.flush();
 
-	int i;
-
 	// overlay:
 	if(!theApp.m_Options.bDoNotLoadOverlayGraphics)
-	for(i=0;i<rules.sections["OverlayTypes"].values.size();i++)
 	{
-		LoadOverlayGraphic(*rules.sections["OverlayTypes"].GetValue(i), i);
-		if(m_progress.m_hWnd!=NULL && i%15==0) {
-			m_progress.SetPos(m_progress.GetPos()+1);
-			UpdateWindow();
+		int i = 0;
+		for (const auto& overlayType : rules.sections["OverlayTypes"].values)
+		{
+			LoadOverlayGraphic(overlayType.second, i);
+			if(m_progress.m_hWnd!=NULL && i%15==0) {
+				m_progress.SetPos(m_progress.GetPos()+1);
+				UpdateWindow();
+			}
+			++i;
 		}
-	}	
+	}
 
 	if(!theApp.m_Options.bDoNotLoadVehicleGraphics)
-	for(i=0;i<rules.sections["VehicleTypes"].values.size();i++)
 	{
-		LoadUnitGraphic(*rules.sections["VehicleTypes"].GetValue(i));
-		if(m_progress.m_hWnd!=NULL && i%15==0) {
-			m_progress.SetPos(m_progress.GetPos()+1);
-			UpdateWindow();
+		int i = 0;
+		for (const auto& vehicleType : rules.sections["VehicleTypes"].values)
+		{
+			LoadUnitGraphic(vehicleType.second);
+			if(m_progress.m_hWnd!=NULL && i%15==0) {
+				m_progress.SetPos(m_progress.GetPos()+1);
+				UpdateWindow();
+			}
+			++i;
 		}
 	}
 
 	if(!theApp.m_Options.bDoNotLoadInfantryGraphics)
-	for(i=0;i<rules.sections["InfantryTypes"].values.size();i++)
 	{
-		LoadUnitGraphic(*rules.sections["InfantryTypes"].GetValue(i));
-		if(m_progress.m_hWnd!=NULL && i%15==0){
-			m_progress.SetPos(m_progress.GetPos()+1);
-			UpdateWindow();
+		int i = 0;
+		for (const auto& infantryType : rules.sections["InfantryTypes"].values)
+		{
+			LoadUnitGraphic(infantryType.second);
+			if(m_progress.m_hWnd!=NULL && i%15==0){
+				m_progress.SetPos(m_progress.GetPos()+1);
+				UpdateWindow();
+			}
+			++i;
 		}
 	}
 
 	if(!theApp.m_Options.bDoNotLoadBuildingGraphics)
-	for(i=0;i<rules.sections["BuildingTypes"].values.size();i++)
 	{
-		LoadUnitGraphic(*rules.sections["BuildingTypes"].GetValue(i));
-		if(m_progress.m_hWnd!=NULL && i%15==0) {
-			m_progress.SetPos(m_progress.GetPos()+1);
-			UpdateWindow();
+		int i = 0;
+		for (const auto& buildingType : rules.sections["BuildingTypes"].values)
+		{
+			LoadUnitGraphic(buildingType.second);
+			if(m_progress.m_hWnd!=NULL && i%15==0) {
+				m_progress.SetPos(m_progress.GetPos()+1);
+				UpdateWindow();
+			}
+			++i;
 		}
 	}
 
 	if(!theApp.m_Options.bDoNotLoadAircraftGraphics)
-	for(i=0;i<rules.sections["AircraftTypes"].values.size();i++)
 	{
-		LoadUnitGraphic(*rules.sections["AircraftTypes"].GetValue(i));
-		if(m_progress.m_hWnd!=NULL && i%15==0) {
-			m_progress.SetPos(m_progress.GetPos()+1);
-			UpdateWindow();
+		int i = 0;
+		for (const auto& aircraftType : rules.sections["AircraftTypes"].values)
+		{
+			LoadUnitGraphic(aircraftType.second);
+			if(m_progress.m_hWnd!=NULL && i%15==0) {
+				m_progress.SetPos(m_progress.GetPos()+1);
+				UpdateWindow();
+			}
+			++i;
 		}
 	}
 
 	if(!theApp.m_Options.bDoNotLoadTreeGraphics)
-	for(i=0;i<rules.sections["TerrainTypes"].values.size();i++)
 	{
-		LoadUnitGraphic(*rules.sections["TerrainTypes"].GetValue(i));
-		if(m_progress.m_hWnd!=NULL && i%15==0)
+		int i = 0;
+		for (const auto& terrainType : rules.sections["TerrainTypes"].values)
 		{
-			m_progress.SetPos(m_progress.GetPos()+1);
-			UpdateWindow();
+			LoadUnitGraphic(terrainType.second);
+			if(m_progress.m_hWnd!=NULL && i%15==0)
+			{
+				m_progress.SetPos(m_progress.GetPos()+1);
+				UpdateWindow();
+			}
+			++i;
 		}
 	}
 
 #ifdef SMUDGE_SUPP
-	for(i=0;i<rules.sections["SmudgeTypes"].values.size();i++)
+	for (const auto& smudgeType : rules.sections["SmudgeTypes"].values)
 	{
-		LoadUnitGraphic(*rules.sections["SmudgeTypes"].GetValue(i));
+		LoadUnitGraphic(smudgeType.second);
 		/*if(m_progress.m_hWnd!=NULL && i%15==0)
 		{
 			m_progress.SetPos(m_progress.GetPos()+1);

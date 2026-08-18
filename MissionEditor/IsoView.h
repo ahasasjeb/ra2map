@@ -181,9 +181,9 @@ public:
 		BOOL bMarbleHeight;
 		bool bPanMode;
 	};
-	void DrawMapTerrainCell(FIELDDATA& m, const ProjectedCoords& drawCoords, const DrawMapCellContext& ctx);
-	void DrawMapTerrainAnim(FIELDDATA& m, const ProjectedCoords& drawCoords, const DrawMapCellContext& ctx, DWORD dwOrigGround);
-	void DrawMapObjectsCell(const MapCoords& mapCoords, FIELDDATA& m, const ProjectedCoords& drawCoords, const DrawMapCellContext& ctx);
+	void DrawMapTerrainCell(const FIELDDATA& m, const ProjectedCoords& drawCoords, const DrawMapCellContext& ctx);
+	void DrawMapTerrainAnim(const FIELDDATA& m, const ProjectedCoords& drawCoords, const DrawMapCellContext& ctx, DWORD dwOrigGround);
+	void DrawMapObjectsCell(const MapCoords& mapCoords, const FIELDDATA& m, const ProjectedCoords& drawCoords, const DrawMapCellContext& ctx);
 	void AutoLevel();
 	void FillArea(DWORD dwX, DWORD dwY, DWORD dwID, BYTE bSubTile);
 	BOOL m_NoMove;
