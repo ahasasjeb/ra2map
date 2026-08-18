@@ -24,6 +24,8 @@
 #include <string>
 #include <functional>
 #include <iostream>
+#include <filesystem>
+#include <fstream>
 #include "Tube.h"
 #include "MissionEditorPackLib.h"
 #include "RustCore.h"
@@ -95,6 +97,7 @@ int Tests::run()
 		[this]() { test_codecs(); },
 		[this]() { test_csf(); },
 		[this]() { test_waypoint_codec(); },
+		[this]() { test_ini_utf8_normalization(); },
 		[this]() { test_snapshot_redraw_flag(); },
 	});
 	for (const auto f : test_functions)
@@ -106,6 +109,67 @@ int Tests::run()
 	std::cout << "Failed: " << failed_tests << std::endl;
 	std::cout << "Succeeded: " << test_functions.size() - failed_tests << std::endl;
 	return failed_tests ? 1 : 0;
+}
+
+void Tests::test_ini_utf8_normalization()
+{
+	const std::filesystem::path inputPath = std::filesystem::temp_directory_path() /
+		("FinalAlert2YRTests_cp936_" + std::to_string(GetCurrentProcessId()) + ".ini");
+	const std::filesystem::path outputPath = std::filesystem::temp_directory_path() /
+		("FinalAlert2YRTests_utf8_" + std::to_string(GetCurrentProcessId()) + ".ini");
+	struct TempFileCleanup
+	{
+		std::filesystem::path input;
+		std::filesystem::path output;
+		~TempFileCleanup()
+		{
+			std::error_code error;
+			std::filesystem::remove(input, error);
+			std::filesystem::remove(output, error);
+		}
+	} cleanup{ inputPath, outputPath };
+
+	const std::string cp936Map =
+		"[Triggers]\r\n"
+		"01000000=GDI,<none>,\xB2\xE2\xCA\xD4,0,1,1,1,0\r\n";
+	{
+		std::ofstream input(inputPath, std::ios::binary | std::ios::trunc);
+		input.write(cp936Map.data(), static_cast<std::streamsize>(cp936Map.size()));
+	}
+
+	CIniFile ini;
+	REPORT_TEST(ini.LoadFile(inputPath.string()) == 0);
+	REPORT_TEST(GetParam(ini.sections["Triggers"].values["01000000"], 2) == CString("测试"));
+	REPORT_TEST(ini.SaveFile(outputPath.string()));
+
+	std::ifstream savedFile(outputPath, std::ios::binary);
+	const std::string saved((std::istreambuf_iterator<char>(savedFile)),
+		std::istreambuf_iterator<char>());
+	REPORT_TEST(MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, saved.data(),
+		static_cast<int>(saved.size()), nullptr, 0) > 0);
+	REPORT_TEST(saved.find("测试") != std::string::npos);
+
+	CIniFile reloaded;
+	REPORT_TEST(reloaded.LoadFile(outputPath.string()) == 0);
+	REPORT_TEST(GetParam(reloaded.sections["Triggers"].values["01000000"], 2) == CString("测试"));
+
+	// D2 BB (GBK "一") is coincidentally valid two-byte UTF-8 and must still
+	// follow the Chinese legacy-code-page path instead of turning into "һ".
+	const std::string ambiguousCp936Map =
+		"[Triggers]\r\n"
+		"01000000=GDI,<none>,\xD2\xBB,0,1,1,1,0\r\n";
+	{
+		std::ofstream input(inputPath, std::ios::binary | std::ios::trunc);
+		input.write(ambiguousCp936Map.data(),
+			static_cast<std::streamsize>(ambiguousCp936Map.size()));
+	}
+	CIniFile ambiguous;
+	REPORT_TEST(ambiguous.LoadFile(inputPath.string()) == 0);
+	REPORT_TEST(GetParam(ambiguous.sections["Triggers"].values["01000000"], 2) == CString("一"));
+	REPORT_TEST(ambiguous.SaveFile(outputPath.string()));
+	CIniFile ambiguousReloaded;
+	REPORT_TEST(ambiguousReloaded.LoadFile(outputPath.string()) == 0);
+	REPORT_TEST(GetParam(ambiguousReloaded.sections["Triggers"].values["01000000"], 2) == CString("一"));
 }
 
 void Tests::test_inlines()

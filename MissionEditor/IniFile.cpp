@@ -25,8 +25,10 @@
 #include "stdafx.h"
 #include "IniFile.h"
 #include <string>
+#include <string_view>
 #include <algorithm>
 #include <stdexcept>
+#include <sstream>
 
 
 
@@ -37,6 +39,121 @@ static char THIS_FILE[] = __FILE__;
 #endif
 
 using namespace std;
+
+namespace
+{
+	constexpr std::string_view Utf8Marker = "; Encoding=UTF-8";
+
+	bool IsValidUtf8(std::string_view text)
+	{
+		if (text.empty())
+			return true;
+		if (text.size() > static_cast<size_t>(INT_MAX))
+			return false;
+
+		return MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text.data(),
+			static_cast<int>(text.size()), nullptr, 0) > 0;
+	}
+
+	bool LooksLikeCp936(std::string_view text)
+	{
+		size_t pairCount = 0;
+		for (size_t i = 0; i < text.size(); ++i)
+		{
+			const auto lead = static_cast<unsigned char>(text[i]);
+			if (lead < 0x80)
+				continue;
+			if (lead < 0x81 || lead > 0xFE || i + 1 >= text.size())
+				return false;
+
+			const auto trail = static_cast<unsigned char>(text[++i]);
+			if (trail < 0x40 || trail == 0x7F || trail > 0xFE)
+				return false;
+			++pairCount;
+		}
+		return pairCount > 0;
+	}
+
+	bool ContainsThreeOrFourByteUtf8(std::string_view text)
+	{
+		return std::ranges::any_of(text, [](char value)
+		{
+			const auto byte = static_cast<unsigned char>(value);
+			return byte >= 0xE0 && byte <= 0xF4;
+		});
+	}
+
+	UINT GetLegacyAnsiCodePage()
+	{
+		wchar_t codePageText[16]{};
+		if (GetLocaleInfoEx(LOCALE_NAME_SYSTEM_DEFAULT, LOCALE_IDEFAULTANSICODEPAGE,
+			codePageText, _countof(codePageText)) > 0)
+		{
+			const auto codePage = static_cast<UINT>(wcstoul(codePageText, nullptr, 10));
+			if (codePage != 0 && codePage != CP_UTF8 && IsValidCodePage(codePage))
+				return codePage;
+		}
+
+		const UINT oemCodePage = GetOEMCP();
+		if (oemCodePage != CP_UTF8 && IsValidCodePage(oemCodePage))
+			return oemCodePage;
+		return 1252;
+	}
+
+	std::string ConvertToUtf8(std::string_view text, UINT sourceCodePage)
+	{
+		if (text.empty() || text.size() > static_cast<size_t>(INT_MAX))
+			return std::string(text);
+
+		const int sourceLength = static_cast<int>(text.size());
+		const int wideLength = MultiByteToWideChar(sourceCodePage, 0, text.data(),
+			sourceLength, nullptr, 0);
+		if (wideLength <= 0)
+			return std::string(text);
+
+		std::wstring wide(wideLength, L'\0');
+		if (MultiByteToWideChar(sourceCodePage, 0, text.data(), sourceLength,
+			wide.data(), wideLength) == 0)
+			return std::string(text);
+
+		const int utf8Length = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS,
+			wide.data(), wideLength, nullptr, 0, nullptr, nullptr);
+		if (utf8Length <= 0)
+			return std::string(text);
+
+		std::string utf8(utf8Length, '\0');
+		if (WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, wide.data(), wideLength,
+			utf8.data(), utf8Length, nullptr, nullptr) == 0)
+			return std::string(text);
+		return utf8;
+	}
+
+	std::string NormalizeToUtf8(std::string text)
+	{
+		constexpr std::string_view utf8Bom("\xEF\xBB\xBF", 3);
+		bool explicitlyUtf8 = text.find(Utf8Marker) != std::string::npos;
+		if (text.starts_with(utf8Bom))
+		{
+			text.erase(0, utf8Bom.size());
+			explicitlyUtf8 = true;
+		}
+		if (IsValidUtf8(text))
+		{
+			// Some CP936 pairs are also valid two-byte UTF-8 sequences (for example,
+			// GBK D2 BB is decoded as UTF-8 "һ" instead of "一"). On a Chinese
+			// legacy system, prefer CP936 for this otherwise indistinguishable case.
+			if (explicitlyUtf8 || GetLegacyAnsiCodePage() != 936 || ContainsThreeOrFourByteUtf8(text) ||
+				!LooksLikeCp936(text))
+				return text;
+			return ConvertToUtf8(text, 936);
+		}
+
+		// Maps made by older Chinese editors commonly contain CP936 text. Detect
+		// well-formed double-byte text even when Windows itself uses another locale.
+		const UINT sourceCodePage = LooksLikeCp936(text) ? 936 : GetLegacyAnsiCodePage();
+		return ConvertToUtf8(text, sourceCodePage);
+	}
+}
 
 bool SortDummy::operator()(const CString& x, const CString& y) const
 {
@@ -115,9 +232,12 @@ WORD CIniFile::InsertFile(const std::string& filename, const char* Section, BOOL
 	if (filename.size() == 0)
 		return 1;
 
-	fstream file;
+	ifstream input(filename, ios::in | ios::binary);
+	if (!input.good())
+		return 2;
 
-	file.open(filename, ios::in);
+	std::string contents((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+	std::istringstream file(NormalizeToUtf8(std::move(contents)));
 	if (!file.good())
 		return 2;
 
@@ -129,13 +249,12 @@ WORD CIniFile::InsertFile(const std::string& filename, const char* Section, BOOL
 	//memset(cLine, 0, 4096);
 	CString cSec;
 	std::string cLine;
+	CIniFileSection* currentSection = nullptr;
 
 	const auto npos = std::string::npos;
 
-	while (!file.eof())
+	while (std::getline(file, cLine))
 	{
-		std::getline(file, cLine);
-
 		// strip to left side of newline or comment
 		cLine.erase(std::find_if(cLine.begin(), cLine.end(), [](const char c) { return c == '\r' || c == '\n' || c == ';'; }), cLine.end());
 
@@ -149,6 +268,7 @@ WORD CIniFile::InsertFile(const std::string& filename, const char* Section, BOOL
 				return 0; // the section we want to insert is finished
 
 			cSec = cLine.substr(openBracket + 1, closeBracket - openBracket - 1).c_str();
+			currentSection = nullptr;
 		}
 		else if (equals != npos && !cSec.IsEmpty())
 		{
@@ -158,24 +278,22 @@ WORD CIniFile::InsertFile(const std::string& filename, const char* Section, BOOL
 				CString name = cLine.substr(0, equals).c_str();
 				CString value = cLine.substr(equals + 1, cLine.size() - equals - 1).c_str();
 
-				int cuValueIndex = sections[cSec].values.size();
-
 				if (bNoSpaces)
 				{
 					name.Trim();
 					value.Trim();
 				}
 
-				sections[cSec].values[name] = value;
-				sections[cSec].value_orig_pos[name] = cuValueIndex;
+				if (!currentSection)
+					currentSection = &sections[cSec];
+
+				const int cuValueIndex = static_cast<int>(currentSection->values.size());
+				currentSection->values[name] = value;
+				currentSection->value_orig_pos[name] = cuValueIndex;
 			}
 		}
 
 	}
-
-
-
-	file.close();
 
 	return 0;
 }
@@ -287,9 +405,8 @@ BOOL CIniFile::SaveFile(const CString& filename) const
 
 BOOL CIniFile::SaveFile(const std::string& Filename) const
 {
-	fstream file;
-
-	file.open(Filename, ios::out | ios::trunc);
+	ofstream file(Filename, ios::out | ios::trunc);
+	file << Utf8Marker << '\n';
 
 	for (const auto& section : sections)
 	{
@@ -298,15 +415,15 @@ BOOL CIniFile::SaveFile(const std::string& Filename) const
 		if (section.second.values.empty())
 			continue;
 
-		file << "[" << (LPCTSTR)section.first << "]" << endl;
+		file << "[" << (LPCTSTR)section.first << "]\n";
 		for (const auto& value : section.second.values)
 		{
-			file << (LPCTSTR)value.first << "=" << (LPCTSTR)value.second << endl;
+			file << (LPCTSTR)value.first << "=" << (LPCTSTR)value.second << '\n';
 		}
-		file << endl;
+		file << '\n';
 	}
 
-	file << endl;
+	file << '\n';
 
 	return TRUE;
 }

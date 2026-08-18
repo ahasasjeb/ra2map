@@ -1133,50 +1133,29 @@ void CFinalSunDlg::SaveMap(CString FileName_, bool interactive)
 
 	int i;
 
-	for(i=0;i<ini.sections.size();i++)
+	for (auto section = ini.sections.begin(); section != ini.sections.end();)
 	{
-		if(ini.GetSection(i)->values.size()==0 || ini.GetSectionName(i)->GetLength()==0)
-		{
-			ini.sections.erase(*ini.GetSectionName(i));
-		}
+		if (section->first.IsEmpty() || section->second.values.empty())
+			section = ini.sections.erase(section);
+		else
+			++section;
 	}
 
-	for(i=0;i<ini.sections.size();i++)
+	for (auto& section : ini.sections)
 	{
-		CIniFileSection& sec=*ini.GetSection(i);
-		int e;
-		if(*ini.GetSectionName(i)!="IsoMapPack5")
-		for(e=0;e<sec.values.size();e++)
+		if (section.first == "IsoMapPack5")
+			continue;
+
+		map<CString, CString, SortDummy> trimmedValues;
+		for (const auto& entry : section.second.values)
 		{
-			sec.GetValue(e)->TrimLeft();
-			{
-				CString value=*sec.GetValue(e);
-				CString name=*sec.GetValueName(e);
-
-				sec.values.erase(name);
-				name.TrimLeft();
-				sec.values[name]=value;
-			}
+			CString name = entry.first;
+			CString value = entry.second;
+			name.Trim();
+			value.Trim();
+			trimmedValues[name] = value;
 		}
-	}
-
-	for(i=0;i<ini.sections.size();i++)
-	{
-		CIniFileSection& sec=*ini.GetSection(i);
-		int e;
-		if(*ini.GetSectionName(i)!="IsoMapPack5")
-		for(e=0;e<sec.values.size();e++)
-		{
-			sec.GetValue(e)->TrimRight();
-			{
-				CString value=*sec.GetValue(e);
-				CString name=*sec.GetValueName(e);
-
-				sec.values.erase(name);
-				name.TrimRight();
-				sec.values[name]=value;
-			}
-		}
+		section.second.values.swap(trimmedValues);
 	}
 
 	
@@ -1218,98 +1197,59 @@ void CFinalSunDlg::SaveMap(CString FileName_, bool interactive)
 		fi+= "\n";
 		fi+="\n";
 #endif
+		fi+= "; Encoding=UTF-8";
+		fi+= "\n";
 
 		WriteFile(hFile, fi, fi.GetLength(), &bwr, NULL);
 
 		fi="";
+		auto writeSection = [&](const CString& sectionName, const CIniFileSection& section)
+		{
+			std::string output;
+			output.reserve(sectionName.GetLength() + 4 + section.values.size() * 80);
+			output += '[';
+			output.append(sectionName.GetString(), sectionName.GetLength());
+			output += "]\n";
+
+			int entryIndex = 0;
+			for (const auto& entry : section.values)
+			{
+				output.append(entry.first.GetString(), entry.first.GetLength());
+				output += '=';
+				output.append(entry.second.GetString(), entry.second.GetLength());
+				output += '\n';
+
+				if (entryIndex % 500 == 0)
+				{
+					const int percent = entryIndex * 100 / static_cast<int>(section.values.size());
+					char percentText[50];
+					itoa(percent, percentText, 10);
+					SetText(TranslateStringVariables(2, TranslateStringVariables(1, GetLanguageStringACP("SavingStatusPct"), sectionName), percentText));
+					UpdateWindow();
+				}
+				++entryIndex;
+			}
+			output += '\n';
+			WriteFile(hFile, output.data(), static_cast<DWORD>(output.size()), &bwr, NULL);
+		};
 
 		// MW 07/28/01: Header saving at top
-		for(i=0;i<ini.sections.size();i++)
+		for (const auto& section : ini.sections)
 		{
-			if(*ini.GetSectionName(i)=="Header")
+			if (section.first == "Header")
 			{
-				rulessections[*ini.GetSectionName(i)]=TRUE;
-
-				fi= "[" ;
-				fi+= *ini.GetSectionName(i);
-				fi+= "]" ;
-				fi+= "\n";
-
-				WriteFile(hFile, fi, fi.GetLength(), &bwr, NULL);
-				
-				int e;
-				CIniFileSection& sec=*ini.GetSection(i);
-				CString d;
-				
-			
-				char c[50];
-				for(e=0;e<sec.values.size();e++)
-				{
-					fi= *sec.GetValueName(e);
-					fi+= "=" ;
-					fi+= *sec.GetValue(e) ;
-					fi+= "\n";
-					WriteFile(hFile, fi, fi.GetLength(), &bwr, NULL);
-	
-					
-					if(e%500==0)
-					{
-						int percent=e*100/sec.values.size();
-						d=*ini.GetSectionName(i);
-						itoa(percent,c ,10);
-						SetText(TranslateStringVariables(2, TranslateStringVariables(1, GetLanguageStringACP("SavingStatusPct"), d), c));
-						UpdateWindow();
-					}
-					
-				}
-
-				fi= "\n";
-				WriteFile(hFile, fi, fi.GetLength(), &bwr, NULL);	
+				rulessections[section.first] = TRUE;
+				writeSection(section.first, section.second);
 			}
 
 		}
 
-		for(i=0;i<ini.sections.size();i++)
+		for (const auto& section : ini.sections)
 		{
-			if(Map->IsRulesSection(*ini.GetSectionName(i)))
+			if (Map->IsRulesSection(section.first))
 			{
-				rulessections[*ini.GetSectionName(i)]=TRUE;
-
-				fi= "[" ;
-				fi+= *ini.GetSectionName(i);
-				fi+= "]" ;
-				fi+= "\n";
-
-				WriteFile(hFile, fi, fi.GetLength(), &bwr, NULL);
-				
-				int e;
-				CIniFileSection& sec=*ini.GetSection(i);
-				CString d;
-				
-			
-				char c[50];
-				for(e=0;e<sec.values.size();e++)
-				{
-					fi= *sec.GetValueName(e);
-					fi+= "=" ;
-					fi+= *sec.GetValue(e) ;
-					fi+= "\n";
-					WriteFile(hFile, fi, fi.GetLength(), &bwr, NULL);
-	
-					
-					if(e%500==0)
-					{
-						int percent=e*100/sec.values.size();
-						d=*ini.GetSectionName(i);
-						itoa(percent,c ,10);
-						SetText(TranslateStringVariables(2, TranslateStringVariables(1, GetLanguageStringACP("SavingStatusPct"), d), c));
-						UpdateWindow();
-					}
-					
-				}
-
-				fi= "\n";
-				WriteFile(hFile, fi, fi.GetLength(), &bwr, NULL);	
+				rulessections[section.first] = TRUE;
+				writeSection(section.first, section.second);
 			}
 
 		}
@@ -1326,19 +1266,18 @@ void CFinalSunDlg::SaveMap(CString FileName_, bool interactive)
 		}
 		else{
 			fi+= "[Preview]" ;fi+= "\n";
-			int e;
-			for(e=0;e<ini.sections["Preview"].values.size();e++)
+			for (const auto& entry : ini.sections["Preview"].values)
 			{
-				fi+= *ini.sections["Preview"].GetValueName(e) ;fi+= "=" ;
-				fi+= *ini.sections["Preview"].GetValue(e);
+				fi += entry.first; fi += "=";
+				fi += entry.second;
 				fi+= "\n";
 			}
 			fi+= "\n";
 			fi+= "[PreviewPack]" ;fi+= "\n";
-			for(e=0;e<ini.sections["PreviewPack"].values.size();e++)
+			for (const auto& entry : ini.sections["PreviewPack"].values)
 			{
-				fi+= *ini.sections["PreviewPack"].GetValueName(e) ;fi+= "=" ;
-				fi+= *ini.sections["PreviewPack"].GetValue(e) ;
+				fi += entry.first; fi += "=";
+				fi += entry.second;
 				fi+= "\n";
 			}
 			fi+= "\n";
@@ -1347,70 +1286,30 @@ void CFinalSunDlg::SaveMap(CString FileName_, bool interactive)
 		
 		WriteFile(hFile, fi, fi.GetLength(), &bwr, NULL);
 
-		for(i=0;i<ini.sections.size();i++)
+		for (const auto& section : ini.sections)
 		{
-			if(rulessections.find(*ini.GetSectionName(i))!=rulessections.end() || (*ini.GetSectionName(i)=="Digest" || *ini.GetSectionName(i)=="PreviewPack" || *ini.GetSectionName(i)=="Preview" || *ini.GetSectionName(i)=="Header"))
+			if (rulessections.find(section.first) != rulessections.end() ||
+				section.first == "Digest" || section.first == "PreviewPack" ||
+				section.first == "Preview" || section.first == "Header")
 			{
 
 				
 
 				
 			}
-			else if(*ini.GetSectionName(i)!="")
+			else if (!section.first.IsEmpty())
 			{
-				//MessageBox(ini.GetSectionName(i)->data());
-				
-				
-				//its a standard section:
-				fi= "[" ;
-				fi+= *ini.GetSectionName(i);
-				fi+= "]" ;
-				fi+= "\n";
-
-				WriteFile(hFile, fi, fi.GetLength(), &bwr, NULL);
-				
-				int e;
-				CIniFileSection& sec=*ini.GetSection(i);
-				CString d;
-				
-			
-				char c[50];
-				for(e=0;e<sec.values.size();e++)
-				{
-					fi= *sec.GetValueName(e);
-					fi+= "=" ;
-					fi+= *sec.GetValue(e) ;
-					fi+= "\n";
-					WriteFile(hFile, fi, fi.GetLength(), &bwr, NULL);
-
-					
-										
-					
-					if(e%500==0)
-					{
-						int percent=e*100/sec.values.size();
-						d=*ini.GetSectionName(i);
-						itoa(percent,c ,10);
-						SetText(TranslateStringVariables(2, TranslateStringVariables(1, GetLanguageStringACP("SavingStatusPct"), d), c));
-						UpdateWindow();
-					}
-					
-				}
-
-				fi= "\n";
-				WriteFile(hFile, fi, fi.GetLength(), &bwr, NULL);			
-				
+				writeSection(section.first, section.second);
 			}
 		}
 
 		
 		fi+= "\n";
 		fi+= "[Digest]" ;fi+= "\n";
-		int e;
-		for(e=0;e<ini.sections["Digest"].values.size();e++)
+		for (const auto& entry : ini.sections["Digest"].values)
 		{
-			fi+= *ini.sections["Digest"].GetValueName(e) ;fi+= "=" ;
-			fi+= *ini.sections["Digest"].GetValue(e) ;
+			fi += entry.first; fi += "=";
+			fi += entry.second;
 			fi+= "\n";
 		}
 		fi+= "\n";
