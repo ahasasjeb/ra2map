@@ -120,6 +120,12 @@
     <ClCompile Include="MapData.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="MapSnapshots.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="MapMinimap.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="MapLoadingDlg.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -395,6 +401,15 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="MapData.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="FieldData.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="MapSnapshots.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="MapMinimap.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="MapLoadingDlg.h">

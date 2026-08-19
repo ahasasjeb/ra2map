@@ -73,3 +73,6 @@ Recent commits use short, imperative summaries, commonly in Chinese (for example
 the affected editor variant, link any issue, list build/test commands run, and include
 screenshots for UI or rendering changes. Call out data, third-party, or distribution
 changes explicitly.
+
+
+修改的文件要与MissionEditor.vcxproj.filters进行同步
