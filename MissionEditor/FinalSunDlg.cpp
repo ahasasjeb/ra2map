@@ -398,7 +398,11 @@ BOOL CFinalSunDlg::OnInitDialog()
 		this->SetWindowText(str);
 		SetCursor(LoadCursor(NULL, IDC_WAIT));
  
-		Map->LoadMap((LPCSTR)currentMapFile);
+		if (!Map->LoadMap((LPCSTR)currentMapFile))
+		{
+			currentMapFile.Empty();
+			Map->CreateMap(32, 32, THEATER0, 0);
+		}
  
 		SetCursor(m_hArrowCursor);
 
@@ -562,6 +566,8 @@ void CFinalSunDlg::OnFileOpenmap()
 
 	bNoDraw=TRUE;
 
+	CString previousCaption;
+	GetWindowText(previousCaption);
 	CString str;
 	str = GetLanguageStringACP("MainDialogCaption");
 	str+=" (";
@@ -580,7 +586,13 @@ void CFinalSunDlg::OnFileOpenmap()
 
 	
 
-	Map->LoadMap((char*)(LPCTSTR)fileToOpen);
+	if (!Map->LoadMap((char*)(LPCTSTR)fileToOpen))
+	{
+		SetWindowText(previousCaption);
+		SetCursor(m_hArrowCursor);
+		bNoDraw=FALSE;
+		return;
+	}
 
 	
 	BOOL bNoMapFile=FALSE;
@@ -1645,6 +1657,9 @@ void CFinalSunDlg::OnFileNew()
 	m_TerrainDlg.DestroyWindow();
 
 	// set currentMapFile to nothing and update window caption
+	const CString previousMapFile=currentMapFile;
+	CString previousCaption;
+	GetWindowText(previousCaption);
 	currentMapFile.Empty();
 	CString cap;
 	cap=GetLanguageStringACP("MainDialogCaption");
@@ -1671,7 +1686,14 @@ void CFinalSunDlg::OnFileNew()
 		}
 		else
 		{
-			Map->LoadMap(file.GetString());
+			if (!Map->LoadMap(file.GetString()))
+			{
+				currentMapFile=previousMapFile;
+				SetWindowText(previousCaption);
+				SetCursor(m_hArrowCursor);
+				bNoDraw=FALSE;
+				return;
+			}
 			
 			if(!bImportOverlay) {
 				Map->ClearOverlay();
@@ -3876,6 +3898,8 @@ void CFinalSunDlg::OpenMap(LPCSTR lpFilename)
 
 	bNoDraw=TRUE;
 
+	CString previousCaption;
+	GetWindowText(previousCaption);
 	CString str = GetLanguageStringACP("MainDialogCaption");
 	str+=" (";
 	str+=(char*)(LPCTSTR)lpFilename;
@@ -3893,7 +3917,13 @@ void CFinalSunDlg::OpenMap(LPCSTR lpFilename)
 
 	
 
-	Map->LoadMap((char*)(LPCTSTR)fileToOpen);
+	if (!Map->LoadMap((char*)(LPCTSTR)fileToOpen))
+	{
+		SetWindowText(previousCaption);
+		SetCursor(m_hArrowCursor);
+		bNoDraw=FALSE;
+		return;
+	}
 
 	
 	BOOL bNoMapFile=FALSE;

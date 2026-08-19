@@ -258,12 +258,22 @@ WORD CIniFile::InsertFile(const std::string& filename, const char* Section, BOOL
 		// strip to left side of newline or comment
 		cLine.erase(std::find_if(cLine.begin(), cLine.end(), [](const char c) { return c == '\r' || c == '\n' || c == ';'; }), cLine.end());
 
-		const auto openBracket = cLine.find('[');
-		const auto closeBracket = cLine.find(']');
 		const auto equals = cLine.find('=');
+		const auto openBracket = cLine.find('[');
 
-		if (openBracket != npos && closeBracket != npos && openBracket < closeBracket && (equals == npos || equals > openBracket))
+		if (openBracket != npos && (equals == npos || equals > openBracket))
 		{
+			const auto closeBracket = cLine.find(']', openBracket + 1);
+			if (closeBracket == npos || closeBracket == openBracket + 1)
+			{
+				// Ignore incomplete section headers such as a line containing only
+				// "[". Clearing the active section also prevents subsequent lines
+				// from being assigned to the preceding valid section by accident.
+				cSec.Empty();
+				currentSection = nullptr;
+				continue;
+			}
+
 			if ((Section != nullptr) && cSec == Section)
 				return 0; // the section we want to insert is finished
 

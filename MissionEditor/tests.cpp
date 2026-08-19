@@ -99,6 +99,7 @@ int Tests::run()
 		[this]() { test_csf(); },
 		[this]() { test_waypoint_codec(); },
 		[this]() { test_ini_utf8_normalization(); },
+		[this]() { test_ini_malformed_section_is_discarded(); },
 		[this]() { test_snapshot_redraw_flag(); },
 		[this]() { test_property_brush_settings(); },
 	});
@@ -187,6 +188,47 @@ void Tests::test_ini_utf8_normalization()
 	CIniFile ambiguousReloaded;
 	REPORT_TEST(ambiguousReloaded.LoadFile(outputPath.string()) == 0);
 	REPORT_TEST(GetParam(ambiguousReloaded.sections["Triggers"].values["01000000"], 2) == CString("一"));
+}
+
+void Tests::test_ini_malformed_section_is_discarded()
+{
+	const std::filesystem::path inputPath = std::filesystem::temp_directory_path() /
+		("FinalAlert2YRTests_malformed_ini_" + std::to_string(GetCurrentProcessId()) + ".ini");
+	const std::filesystem::path outputPath = std::filesystem::temp_directory_path() /
+		("FinalAlert2YRTests_clean_ini_" + std::to_string(GetCurrentProcessId()) + ".ini");
+	struct TempFileCleanup
+	{
+		std::filesystem::path input;
+		std::filesystem::path output;
+		~TempFileCleanup()
+		{
+			std::error_code error;
+			std::filesystem::remove(input, error);
+			std::filesystem::remove(output, error);
+		}
+	} cleanup{ inputPath, outputPath };
+
+	const std::string malformedMap =
+		"[Map]\r\n"
+		"Theater=TEMPERATE\r\n"
+		"[\r\n"
+		"[Basic]\r\n"
+		"Name=Clean map\r\n";
+	{
+		std::ofstream input(inputPath, std::ios::binary | std::ios::trunc);
+		input.write(malformedMap.data(), static_cast<std::streamsize>(malformedMap.size()));
+	}
+
+	CIniFile ini;
+	REPORT_TEST(ini.LoadFile(inputPath.string()) == 0);
+	REPORT_TEST(ini.GetValueByName("Map", "Theater", CString()) == CString("TEMPERATE"));
+	REPORT_TEST(ini.GetValueByName("Basic", "Name", CString()) == CString("Clean map"));
+	REPORT_TEST(ini.SaveFile(outputPath.string()));
+
+	std::ifstream savedFile(outputPath, std::ios::binary);
+	const std::string saved((std::istreambuf_iterator<char>(savedFile)),
+		std::istreambuf_iterator<char>());
+	REPORT_TEST(saved.find("\n[\n") == std::string::npos);
 }
 
 void Tests::test_inlines()

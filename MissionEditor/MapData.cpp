@@ -489,8 +489,31 @@ void CMapData::UpdateIniFile(DWORD dwFlags)
 
 }
 
-void CMapData::LoadMap(const std::string& file)
+BOOL CMapData::LoadMap(const std::string& file)
 {
+	// Parse and validate the complete map before releasing the active map or any
+	// graphics. The INI reader discards malformed section headers, and this
+	// check keeps files without essential map data out of the loading code.
+	CIniFile loadedMap;
+	if (loadedMap.LoadFile(file, TRUE) != 0)
+	{
+		errstream << "LoadMap() could not read map INI data\n";
+		errstream.flush();
+		MessageBox(0, "The map cannot be loaded because its INI data could not be read.", "Invalid Map", MB_OK | MB_ICONERROR);
+		return FALSE;
+	}
+
+	const CString theater = loadedMap.GetValueByName("Map", "Theater", CString());
+	const bool supportedTheater = theater == THEATER0 || theater == THEATER1 || theater == THEATER2 ||
+		theater == THEATER5 || (yuri_mode && (theater == THEATER3 || theater == THEATER4));
+	if (!supportedTheater)
+	{
+		errstream << "LoadMap() rejected missing or unsupported map theater\n";
+		errstream.flush();
+		MessageBox(0, "The map cannot be loaded because it has no supported [Map] Theater entry.", "Invalid Map", MB_OK | MB_ICONERROR);
+		return FALSE;
+	}
+
 	errstream << "LoadMap() frees memory\n";
 	errstream.flush();
 
@@ -515,7 +538,7 @@ void CMapData::LoadMap(const std::string& file)
 	errstream.flush();
 
 	m_mapfile.Clear();
-	m_mapfile.LoadFile(file, TRUE);
+	m_mapfile.sections.swap(loadedMap.sections);
 
 	// any .mpr is a multi map. Previous FinalAlert/FinalSun versions did not set this value correctly->
 	char lowc[MAX_PATH] = { 0 };
@@ -820,7 +843,8 @@ void CMapData::LoadMap(const std::string& file)
 		CString s = "Fatal error! %9 doesn´t support the theater of this map!";
 		s = TranslateStringACP(s);
 		MessageBox(0, s, "Error", 0);
-		exit(0);
+		dlg.DestroyWindow();
+		return FALSE;
 	}
 	dlg.DestroyWindow();
 
@@ -849,6 +873,7 @@ void CMapData::LoadMap(const std::string& file)
 
 	UpdateIniFile(MAPDATA_UPDATE_FROM_INI);
 
+	return TRUE;
 }
 
 
