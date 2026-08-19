@@ -5857,6 +5857,8 @@ void CIsoView::DrawObjectPreviewAt(int x, int y)
 
 	// 3) inject the preview object directly into the object arrays + field data
 	BOOL bInjected = FALSE;
+	int previewObjectIndex = -1;
+	int previewInfantrySubPos = -1;
 	std::vector<std::pair<DWORD, FIELDDATA>> oldCells; // restore information for the touched cells
 	const auto injectGhost = [&]()
 	{
@@ -5886,8 +5888,8 @@ void CIsoView::DrawObjectPreviewAt(int x, int y)
 			unit.deleted = 0;
 
 			oldCells.push_back({ dwPos, *Map->GetFielddataAt(dwPos) });
-			const int pushedIndex = Map->PreviewPushUnit(unit);
-			Map->GetFielddataAt(dwPos)->unit = pushedIndex;
+			previewObjectIndex = Map->PreviewPushUnit(unit);
+			Map->GetFielddataAt(dwPos)->unit = previewObjectIndex;
 			break;
 		}
 		case PT_STRUCTURE:
@@ -5904,7 +5906,7 @@ void CIsoView::DrawObjectPreviewAt(int x, int y)
 			spd.direction = 64;
 			spd.type = AD.data_s;
 
-			const int pushedIndex = Map->PreviewPushStructure(spd);
+			previewObjectIndex = Map->PreviewPushStructure(spd);
 
 			const int bid = Map->GetUnitTypeID(AD.data_s);
 			for (const auto& cell : GetBuildingFoundation(bid))
@@ -5916,7 +5918,7 @@ void CIsoView::DrawObjectPreviewAt(int x, int y)
 				const DWORD pos = cellX + cellY * dwIsoSize;
 				FIELDDATA* fd = Map->GetFielddataAt(pos);
 				oldCells.push_back({ pos, *fd });
-				fd->structure = pushedIndex;
+				fd->structure = previewObjectIndex;
 				fd->structuretype = bid;
 			}
 			break;
@@ -5939,8 +5941,8 @@ void CIsoView::DrawObjectPreviewAt(int x, int y)
 			aircraft.deleted = 0;
 
 			oldCells.push_back({ dwPos, *Map->GetFielddataAt(dwPos) });
-			const int pushedIndex = Map->PreviewPushAircraft(aircraft);
-			Map->GetFielddataAt(dwPos)->aircraft = pushedIndex;
+			previewObjectIndex = Map->PreviewPushAircraft(aircraft);
+			Map->GetFielddataAt(dwPos)->aircraft = previewObjectIndex;
 			break;
 		}
 		case PT_INFANTRY:
@@ -5974,8 +5976,9 @@ void CIsoView::DrawObjectPreviewAt(int x, int y)
 			inf.deleted = 0;
 
 			oldCells.push_back({ dwPos, *Map->GetFielddataAt(dwPos) });
-			const int pushedIndex = Map->PreviewPushInfantry(inf);
-			Map->GetFielddataAt(dwPos)->infantry[sp] = pushedIndex;
+			previewObjectIndex = Map->PreviewPushInfantry(inf);
+			previewInfantrySubPos = sp;
+			Map->GetFielddataAt(dwPos)->infantry[sp] = previewObjectIndex;
 			break;
 		}
 		case PT_TERRAIN:
@@ -5987,8 +5990,8 @@ void CIsoView::DrawObjectPreviewAt(int x, int y)
 			td.y = y;
 
 			oldCells.push_back({ dwPos, *Map->GetFielddataAt(dwPos) });
-			const int pushedIndex = Map->PreviewPushTerrain(td);
-			Map->GetFielddataAt(dwPos)->terrain = pushedIndex;
+			previewObjectIndex = Map->PreviewPushTerrain(td);
+			Map->GetFielddataAt(dwPos)->terrain = previewObjectIndex;
 			Map->GetFielddataAt(dwPos)->terraintype = Map->GetUnitTypeID(terrainType);
 			break;
 		}
@@ -6049,24 +6052,48 @@ void CIsoView::DrawObjectPreviewAt(int x, int y)
 			{
 				DDSURFACEDESC2& ddsd = *desc;
 				const RECT r = previewRedrawRect;
-				const int mapwidth = Map->GetWidth();
-				const int mapheight = Map->GetHeight();
 				const DrawMapCellContext ctx = { ddsd, r, 0, TRUE, false };
-
-				for (int u = left; u < right; u++)
+				FIELDDATA previewField;
+				MapCoords previewCell(x, y);
+				switch (pt)
 				{
-					for (int v = top; v < bottom; v++)
+				case PT_UNIT:
+					previewField.unit = previewObjectIndex;
+					break;
+				case PT_STRUCTURE:
+				{
+					previewField.structure = previewObjectIndex;
+					previewField.structuretype = Map->GetUnitTypeID(AD.data_s);
+					const auto& foundation = GetBuildingFoundation(previewField.structuretype);
+					if (!foundation.empty())
 					{
-						if (u < 1 || v < 1 || u + v < mapwidth + 1 || u + v > mapwidth + mapheight * 2 ||
-							(v + 1 > mapwidth && u - 1 < v - mapwidth) || (u + 1 > mapwidth && v + mapwidth - 1 < u))
-							continue;
-
-						const FIELDDATA& m = *Map->GetFielddataAt(MapCoords(u, v));
-						const auto drawCoords = GetRenderTargetCoordinates(MapCoords(u, v));
-
-						DrawMapObjectsCell(MapCoords(u, v), m, drawCoords, ctx);
+						previewCell.x += foundation.front().x;
+						previewCell.y += foundation.front().y;
 					}
+					break;
 				}
+				case PT_AIRCRAFT:
+					previewField.aircraft = previewObjectIndex;
+					break;
+				case PT_INFANTRY:
+					if (previewInfantrySubPos >= 0 && previewInfantrySubPos < SUBPOS_COUNT)
+						previewField.infantry[previewInfantrySubPos] = previewObjectIndex;
+					break;
+				case PT_TERRAIN:
+					previewField.terrain = previewObjectIndex;
+					previewField.terraintype = Map->GetUnitTypeID(terrainType);
+					break;
+				default:
+					break;
+				}
+
+				// The clean backbuffer already contains every real map object in the correct order.
+				// Repainting the surrounding cells would draw their translucent shadows and remap
+				// pixels a second time, making the area under a moving unit preview visibly change.
+				// Composite only the injected ghost; placement previews intentionally stay on top.
+				if (previewObjectIndex >= 0)
+					DrawMapObjectsCell(previewCell, previewField,
+						GetRenderTargetCoordinates(previewCell), ctx);
 
 				locker.ensure_unlocked();
 

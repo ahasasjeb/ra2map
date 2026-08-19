@@ -1190,12 +1190,14 @@ void CFinalSunDlg::SaveMap(CString FileName_, bool interactive)
 		fi+="\n";
 		fi+= "; note that all comments were truncated" ;
 		fi+= "\n";
+		fi+= "; https://github.com/ahasasjeb/ra2map" ;
 		fi+="\n";
 #else
 		fi= "; Map created with FinalAlert 2 Mission Editor";
 		fi+="\n";
 		fi+= "; note that all comments were truncated" ;
 		fi+= "\n";
+		fi+= "; https://github.com/ahasasjeb/ra2map" ;
 		fi+="\n";
 #endif
 		fi+= "; Encoding=UTF-8";
