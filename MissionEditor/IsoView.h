@@ -197,6 +197,7 @@ public:
 	void HideTileSet(DWORD dwTileSet);
 	void FlipHighResBuffer(const RECT* sourceRectOverride = nullptr);
 	void BlitBackbufferToHighRes();
+	void EnsureHighResSurface();
 	void RenderUIOverlay();
 	bool InitializeVulkanRenderer();
 	int m_BrushSize_x;

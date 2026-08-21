@@ -2773,7 +2773,13 @@ BOOL CMapData::AddAircraft(AIRCRAFT* lpAircraft, LPCTSTR lpType, LPCTSTR lpHouse
 		{
 			const size_t index = std::distance(sec.values.begin(), inserted);
 			aircraft.deleted = 0;
-			m_aircraft.insert(m_aircraft.begin() + index, aircraft);
+			// Seeking an iterator of an empty vector is rejected by newer MSVC
+			// STL debug checks even for offset 0; push_back is equivalent when
+			// appending at the end.
+			if (index < m_aircraft.size())
+				m_aircraft.insert(m_aircraft.begin() + index, aircraft);
+			else
+				m_aircraft.push_back(aircraft);
 
 			const DWORD newPos = atoi(aircraft.x) + atoi(aircraft.y) * GetIsoSize();
 			if (newPos < fielddata_size)
@@ -2854,7 +2860,13 @@ BOOL CMapData::AddUnit(UNIT* lpUnit, LPCTSTR lpType, LPCTSTR lpHouse, DWORD dwPo
 		{
 			const size_t index = std::distance(sec.values.begin(), inserted);
 			unit.deleted = 0;
-			m_units.insert(m_units.begin() + index, unit);
+			// Seeking an iterator of an empty vector is rejected by newer MSVC
+			// STL debug checks even for offset 0; push_back is equivalent when
+			// appending at the end.
+			if (index < m_units.size())
+				m_units.insert(m_units.begin() + index, unit);
+			else
+				m_units.push_back(unit);
 
 			const DWORD newPos = atoi(unit.x) + atoi(unit.y) * GetIsoSize();
 			if (newPos < fielddata_size)

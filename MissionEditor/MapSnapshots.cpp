@@ -59,7 +59,15 @@ void CMapSnapshots::TakeSnapshot(FIELDDATA* fielddata, DWORD isoSize, BOOL bEras
 
 	if (bEraseFollowing)
 	{
-		m_snapshots.erase(m_snapshots.begin() + m_cursnapshot + 1, m_snapshots.end());
+		// Compute the offset before seeking: `begin() + m_cursnapshot + 1`
+		// evaluates (begin() + m_cursnapshot) first, which seeks before begin
+		// when the cursor is still -1 and newer MSVC STL debug checks reject
+		// that even though the final offset would be valid. Seeking an
+		// iterator of an empty vector is likewise rejected; skipping the
+		// erase in both cases preserves the original no-op behavior.
+		const int eraseFrom = m_cursnapshot + 1;
+		if (eraseFrom >= 0 && eraseFrom < static_cast<int>(m_snapshots.size()))
+			m_snapshots.erase(m_snapshots.begin() + eraseFrom, m_snapshots.end());
 	}
 
 	if (m_snapshots.size() == MAX_SNAPSHOTS)

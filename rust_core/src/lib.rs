@@ -1282,3 +1282,696 @@ mod tests {
         assert_eq!(image_z[0], 0);
     }
 }
+
+// ---------------------------------------------------------------------------
+// A/B regression tests: current Rust VXL renderer vs. verbatim port of the
+// pre-port C++ renderer (MissionEditorPackLib.cpp at a547a31). Verifies that
+// the Rust port produces identical turret/body composition offsets for all
+// 8 vehicle directions.
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod vxl_ab_tests {
+    use super::*;
+
+// ---------------------------------------------------------------------------
+// old C++ math
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct OldVec {
+    x: f32,
+    y: f32,
+    z: f32,
+}
+
+impl OldVec {
+    fn new(x: f32, y: f32, z: f32) -> Self {
+        OldVec { x, y, z }
+    }
+    fn minimum(&mut self, o: OldVec) {
+        self.x = self.x.min(o.x);
+        self.y = self.y.min(o.y);
+        self.z = self.z.min(o.z);
+    }
+    fn maximum(&mut self, o: OldVec) {
+        self.x = self.x.max(o.x);
+        self.y = self.y.max(o.y);
+        self.z = self.z.max(o.z);
+    }
+}
+
+impl std::ops::Add<OldVec> for OldVec {
+    type Output = OldVec;
+    fn add(self, rhs: OldVec) -> OldVec {
+        OldVec::new(self.x + rhs.x, self.y + rhs.y, self.z + rhs.z)
+    }
+}
+
+#[derive(Clone, Copy)]
+struct OldMat3x4 {
+    m: [[f32; 4]; 3],
+}
+
+impl OldMat3x4 {
+    fn from_rows(v: &[f32; 12]) -> Self {
+        let mut m = [[0f32; 4]; 3];
+        for r in 0..3 {
+            for c in 0..4 {
+                m[r][c] = v[r * 4 + c];
+            }
+        }
+        OldMat3x4 { m }
+    }
+    fn mul(&self, v: OldVec) -> OldVec {
+        OldVec::new(
+            v.x * self.m[0][0] + v.y * self.m[0][1] + v.z * self.m[0][2] + self.m[0][3],
+            v.x * self.m[1][0] + v.y * self.m[1][1] + v.z * self.m[1][2] + self.m[1][3],
+            v.x * self.m[2][0] + v.y * self.m[2][1] + v.z * self.m[2][2] + self.m[2][3],
+        )
+    }
+    /// scaleColumn(3, scale): copies, scales column 3
+    fn scale_column(self, col: usize, s: f32) -> Self {
+        let mut c = self;
+        c.m[0][col] *= s;
+        c.m[1][col] *= s;
+        c.m[2][col] *= s;
+        c
+    }
+    fn set_column(self, col: usize, v: OldVec) -> Self {
+        let mut c = self;
+        c.m[0][col] = v.x;
+        c.m[1][col] = v.y;
+        c.m[2][col] = v.z;
+        c
+    }
+    fn translation(v: OldVec) -> Self {
+        OldMat3x4 {
+            m: [
+                [1.0, 0.0, 0.0, v.x],
+                [0.0, 1.0, 0.0, v.y],
+                [0.0, 0.0, 1.0, v.z],
+            ],
+        }
+    }
+    fn scale(v: OldVec) -> Self {
+        OldMat3x4 {
+            m: [
+                [v.x, 0.0, 0.0, 0.0],
+                [0.0, v.y, 0.0, 0.0],
+                [0.0, 0.0, v.z, 0.0],
+            ],
+        }
+    }
+}
+
+fn old_rotate_z(v: &mut OldVec, a: f32) {
+    let l = (v.x * v.x + v.y * v.y).sqrt();
+    let d_a = v.x.atan2(v.y) + a;
+    v.x = l * d_a.sin();
+    v.y = l * d_a.cos();
+}
+fn old_rotate_x(v: &mut OldVec, a: f32) {
+    let l = (v.y * v.y + v.z * v.z).sqrt();
+    let d_a = v.y.atan2(v.z) + a;
+    v.y = l * d_a.sin();
+    v.z = l * d_a.cos();
+}
+fn old_rotate_y(v: &mut OldVec, a: f32) {
+    let l = (v.x * v.x + v.z * v.z).sqrt();
+    let d_a = v.x.atan2(v.z) + a;
+    v.x = l * d_a.sin();
+    v.z = l * d_a.cos();
+}
+fn old_rotate_zxy(v: &mut OldVec, r: OldVec) {
+    old_rotate_z(v, r.z);
+    old_rotate_x(v, r.x);
+    old_rotate_y(v, r.y);
+}
+
+fn old_normalize(v: OldVec) -> OldVec {
+    let inv_l = 1.0f32 / (v.x * v.x + v.y * v.y + v.z * v.z).sqrt();
+    OldVec::new(v.x * inv_l, v.y * inv_l, v.z * inv_l)
+}
+
+fn c_trunc(v: f32) -> i32 {
+    if v.is_nan() {
+        0
+    } else {
+        v as i32
+    }
+}
+
+// ---------------------------------------------------------------------------
+// synthetic model
+// ---------------------------------------------------------------------------
+
+struct Section {
+    tailer: RsVxlTailer,
+    hva: [f32; 12],
+    id: [u8; 16],
+    span_data: Vec<u8>,
+    starts: Vec<i32>,
+    ends: Vec<i32>,
+    span_data_ofs: i32,
+}
+
+impl Section {
+    /// Full-column spans for an cx*cy column grid covering all cz voxels.
+    fn new(id: &str, mins: [f32; 3], maxs: [f32; 3], cx: u8, cy: u8, cz: u8, hva: [f32; 12]) -> Self {
+        // span layout per column: [skip=0][count=cz][cz*(color,norm)][end]
+        let columns = cx as usize * cy as usize;
+        let mut span_data = Vec::new();
+        let mut starts = vec![0i32; columns];
+        let mut ends = vec![0i32; columns];
+        for j in 0..columns {
+            starts[j] = span_data.len() as i32;
+            span_data.push(0); // skip
+            span_data.push(cz); // count
+            for k in 0..cz {
+                span_data.push(40u8.wrapping_add(k).wrapping_mul(7)); // color
+                span_data.push(((j + k as usize) % 7) as u8); // normal index
+            }
+            span_data.push(0); // end of span byte
+            ends[j] = span_data.len() as i32 - 1;
+        }
+        let mut idb = [0u8; 16];
+        idb[..id.len()].copy_from_slice(id.as_bytes());
+        Section {
+            tailer: RsVxlTailer {
+                scale: 1.0,
+                x_min_scale: mins[0],
+                y_min_scale: mins[1],
+                z_min_scale: mins[2],
+                x_max_scale: maxs[0],
+                y_max_scale: maxs[1],
+                z_max_scale: maxs[2],
+                cx,
+                cy,
+                cz,
+            },
+            hva,
+            id: idb,
+            span_data,
+            starts,
+            ends,
+            span_data_ofs: 0,
+        }
+    }
+}
+
+struct Model {
+    sections: Vec<Section>,
+    normals: Vec<f32>, // n*3 floats
+}
+
+/// One render result from a pipeline
+struct RenderOut {
+    image: Vec<u8>,
+    lighting: Vec<u8>,
+    x_center: i32,
+    y_center: i32,
+    width: i32,
+    height: i32,
+}
+
+// ---------------------------------------------------------------------------
+// OLD pipeline (verbatim port of a547a31 C++)
+// ---------------------------------------------------------------------------
+
+fn old_get_section_bounds(sec: &Section, rotation: OldVec, model_offset: OldVec) -> (OldVec, OldVec) {
+    let matrix = OldMat3x4::from_rows(&sec.hva).scale_column(3, sec.tailer.scale);
+    let mut min_vec = OldVec::new(
+        sec.tailer.x_min_scale,
+        sec.tailer.y_min_scale,
+        sec.tailer.z_min_scale,
+    );
+    let mut max_vec = min_vec;
+    for x in 0..2 {
+        for y in 0..2 {
+            for z in 0..2 {
+                let corner = OldVec::new(
+                    if x == 0 { sec.tailer.x_min_scale } else { sec.tailer.x_max_scale },
+                    if y == 0 { sec.tailer.y_min_scale } else { sec.tailer.y_max_scale },
+                    if z == 0 { sec.tailer.z_min_scale } else { sec.tailer.z_max_scale },
+                ) + model_offset;
+                let mut cur = matrix.mul(corner);
+                old_rotate_zxy(&mut cur, rotation);
+                min_vec.minimum(cur);
+                max_vec.maximum(cur);
+            }
+        }
+    }
+    (min_vec, max_vec)
+}
+
+fn old_render_section(
+    sec: &Section,
+    normals: &[f32],
+    light_direction: OldVec,
+    rt_width: i32,
+    rt_height: i32,
+    model_offset: OldVec, // actually renderOffset from LoadVXLImage
+    rotation: OldVec,
+    post_hva_offset: OldVec,
+    image: &mut [u8],
+    lighting: &mut [u8],
+    image_z: &mut [i8],
+    track_center: bool,
+    i3d_center_x: i32,
+    i3d_center_y: i32,
+) -> (i32, i32, i32, i32) {
+    let inverse_light = {
+        let n = old_normalize(light_direction);
+        OldVec::new(-n.x, -n.y, -n.z)
+    };
+    let t = &sec.tailer;
+    let cx1 = t.cx as i32;
+    let cy1 = t.cy as i32;
+    let cz1 = t.cz as i32;
+    let matrix = OldMat3x4::from_rows(&sec.hva);
+    let normal_matrix = matrix.set_column(3, OldVec::new(0.0, 0.0, 0.0));
+    let scaled_matrix = matrix.scale_column(3, t.scale);
+    let min_scale = OldVec::new(t.x_min_scale, t.y_min_scale, t.z_min_scale) + post_hva_offset;
+    let max_scale = OldVec::new(t.x_max_scale, t.y_max_scale, t.z_max_scale) + post_hva_offset;
+    let translate_to_world = OldMat3x4::translation(min_scale);
+    let scale_to_world = OldMat3x4::scale(OldVec::new(
+        (max_scale.x - min_scale.x) / cx1 as f32,
+        (max_scale.y - min_scale.y) / cy1 as f32,
+        (max_scale.z - min_scale.z) / cz1 as f32,
+    ));
+
+    let mut i3dx = if i3d_center_x < 0 { 0 } else { i3d_center_x };
+    let mut i3dy = if i3d_center_y < 0 { 0 } else { i3d_center_y };
+
+    let mut x_center = 0i32;
+    let mut y_center = 0i32;
+    let mut x_center_zmax = 0i32;
+    let mut y_center_zmax = 0i32;
+
+    if track_center {
+        let s_pixel = OldVec::new(0.0, 0.0, 0.0);
+        let mut d_pixel = scaled_matrix.mul(s_pixel);
+        old_rotate_zxy(&mut d_pixel, rotation);
+        d_pixel = d_pixel + model_offset;
+        x_center = c_trunc(d_pixel.x + 0.5);
+        y_center = c_trunc(d_pixel.y + 0.5);
+    }
+
+    let get_normal = |idx: usize| -> OldVec {
+        if idx * 3 + 2 < normals.len() {
+            OldVec::new(normals[idx * 3], normals[idx * 3 + 1], normals[idx * 3 + 2])
+        } else {
+            OldVec::new(0.0, 1.0, 0.0)
+        }
+    };
+
+    let mut last_z_reported = -5000i32;
+    let mut j = 0usize;
+    for y in 0..cy1 {
+        for x in 0..cx1 {
+            let start = sec.starts[j];
+            if start >= 0 {
+                let end = sec.ends[j];
+                let span_len = (end - start + 1) as usize;
+                let base = sec.span_data_ofs as i64 + start as i64;
+                let span = &sec.span_data[base as usize..(base as usize + span_len).min(sec.span_data.len())];
+                let mut r = 0usize;
+                let mut z = 0i32;
+                while z < cz1 {
+                    z += span[r] as i32;
+                    r += 1;
+                    let mut count = span[r] as i32;
+                    r += 1;
+                    while count > 0 {
+                        let s_pixel = OldVec::new(x as f32, y as f32, z as f32);
+                        let m_pixel = translate_to_world.mul(scale_to_world.mul(s_pixel));
+                        let t_pixel = scaled_matrix.mul(m_pixel);
+                        let mut d_pixel = t_pixel;
+                        old_rotate_zxy(&mut d_pixel, rotation);
+                        d_pixel = d_pixel + model_offset;
+
+                        if x == i3dx && y == i3dy && z >= last_z_reported {
+                            last_z_reported = z;
+                            x_center_zmax = c_trunc(d_pixel.x);
+                            y_center_zmax = c_trunc(d_pixel.y);
+                        }
+
+                        let px = c_trunc(d_pixel.x + 0.5);
+                        let py = c_trunc(d_pixel.y + 0.5);
+                        let ofs = (px + rt_width * py) as usize;
+
+                        if px >= 0 && py >= 0 && px < rt_width && py < rt_height
+                            && d_pixel.z > image_z[ofs] as f32
+                        {
+                            image[ofs] = span[r];
+                            let normal_index = span[r + 1];
+                            let normal = normal_matrix.mul(get_normal(normal_index as usize));
+                            let mut n = normal;
+                            old_rotate_zxy(&mut n, rotation);
+                            let dot = n.x * inverse_light.x + n.y * inverse_light.y + n.z * inverse_light.z;
+                            let light_val = if dot < 0.0 { 0.0 } else { dot };
+                            lighting[ofs] = c_trunc(light_val * 255.0) as i32 as u8;
+                            image_z[ofs] = c_trunc(d_pixel.z) as i8;
+                        }
+                        r += 2;
+                        z += 1;
+                        count -= 1;
+                    }
+                    r += 1;
+                }
+            }
+            j += 1;
+        }
+    }
+    (x_center, y_center, x_center_zmax, y_center_zmax)
+}
+
+fn old_load_vxl_image(model: &Model, light_direction: OldVec, rotation: OldVec, model_offset: OldVec) -> RenderOut {
+    let mut min_coords = OldVec::new(10000.0, 10000.0, 10000.0);
+    let mut max_coords = OldVec::new(-10000.0, -10000.0, -10000.0);
+    let mut i_body_section: i32 = -1;
+    let mut i_largest_section = 0usize;
+    let mut i_largest_volume = 0f32;
+    for (i, sec) in model.sections.iter().enumerate() {
+        let (smin, smax) = old_get_section_bounds(sec, rotation, model_offset);
+        let ex = smax.x - smin.x;
+        let ey = smax.y - smin.y;
+        let ez = smax.z - smin.z;
+        let volume = ex * ey * ez;
+        if volume >= i_largest_volume {
+            i_largest_volume = volume;
+            i_largest_section = i;
+        }
+        if sec.id.starts_with(b"BODY") {
+            i_body_section = i as i32;
+        }
+        min_coords.minimum(smin);
+        max_coords.maximum(smax);
+    }
+    let i_main = if i_body_section >= 0 { i_body_section as usize } else { i_largest_section };
+
+    let render_offset = OldVec::new(-min_coords.x, -min_coords.y, -min_coords.z);
+
+    let extents = OldVec::new(
+        max_coords.x - min_coords.x,
+        max_coords.y - min_coords.y,
+        max_coords.z - min_coords.z,
+    );
+    let rt_width = extents.x.ceil() as i32 + 1;
+    let rt_height = extents.y.ceil() as i32 + 1;
+    let c_pixels = (rt_width * rt_height) as usize;
+
+    let mut image = vec![0u8; c_pixels];
+    let mut lighting = vec![255u8; c_pixels];
+    let mut image_z = vec![i8::MIN; c_pixels];
+
+    let mut xc = 0;
+    let mut yc = 0;
+    for (i, sec) in model.sections.iter().enumerate() {
+        let (a, b, _c, _d) = old_render_section(
+            sec,
+            &model.normals,
+            light_direction,
+            rt_width,
+            rt_height,
+            render_offset,
+            rotation,
+            model_offset,
+            &mut image,
+            &mut lighting,
+            &mut image_z,
+            i == i_main,
+            -1,
+            -1,
+        );
+        if i == i_main {
+            xc = a;
+            yc = b;
+        }
+    }
+
+    RenderOut {
+        image,
+        lighting,
+        x_center: xc,
+        y_center: yc,
+        width: rt_width,
+        height: rt_height,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// NEW pipeline (mirrors the current C++ wrappers around the Rust core)
+// ---------------------------------------------------------------------------
+
+fn new_get_section_bounds(sec: &Section, rotation: [f32; 3], model_offset: [f32; 3]) -> ([f32; 3], [f32; 3]) {
+    let mut mn = [0f32; 3];
+    let mut mx = [0f32; 3];
+    let mut main_section = 0i32;
+    let res = unsafe { rs_vxl_compute_bounds(
+        1,
+        sec.id.as_ptr(),
+        &sec.tailer,
+        sec.hva.as_ptr(),
+        rotation.as_ptr(),
+        model_offset.as_ptr(),
+        &mut main_section,
+        mn.as_mut_ptr(),
+        mx.as_mut_ptr(),
+    ) };
+    assert_eq!(res, RS_OK);
+    (mn, mx)
+}
+
+fn new_render_section(
+    sec: &Section,
+    normals: &[f32],
+    light_direction: [f32; 3],
+    rt_width: i32,
+    rt_height: i32,
+    model_offset: [f32; 3],
+    rotation: [f32; 3],
+    post_hva_offset: [f32; 3],
+    image: &mut [u8],
+    lighting: &mut [u8],
+    image_z: &mut [i8],
+    track_center: bool,
+    i3d_center_x: i32,
+    i3d_center_y: i32,
+) -> (i32, i32, i32, i32) {
+    let (mut xc, mut yc) = (0i32, 0i32);
+    let (mut xc_z, mut yc_z) = (0i32, 0i32);
+    let res = unsafe { rs_vxl_render_section(
+        image.as_mut_ptr(),
+        lighting.as_mut_ptr(),
+        image_z.as_mut_ptr(),
+        image.len(),
+        rt_width,
+        rt_height,
+        &sec.tailer,
+        sec.hva.as_ptr(),
+        normals.as_ptr(),
+        (normals.len() / 3) as u32,
+        light_direction.as_ptr(),
+        rotation.as_ptr(),
+        model_offset.as_ptr(),
+        post_hva_offset.as_ptr(),
+        sec.span_data.as_ptr(),
+        sec.span_data.len(),
+        sec.span_data_ofs,
+        sec.starts.as_ptr(),
+        sec.ends.as_ptr(),
+        if track_center { &mut xc } else { std::ptr::null_mut() },
+        if track_center { &mut yc } else { std::ptr::null_mut() },
+        if track_center { &mut xc_z } else { std::ptr::null_mut() },
+        if track_center { &mut yc_z } else { std::ptr::null_mut() },
+        i3d_center_x,
+        i3d_center_y,
+        std::ptr::null_mut(),
+    ) };
+    assert_eq!(res, RS_OK);
+    (xc, yc, xc_z, yc_z)
+}
+
+fn new_load_vxl_image(model: &Model, light_direction: [f32; 3], rotation: [f32; 3], model_offset: [f32; 3]) -> RenderOut {
+    let mut min_coords = [10000f32; 3];
+    let mut max_coords = [-10000f32; 3];
+    let mut i_body_section: i32 = -1;
+    let mut i_largest_section = 0usize;
+    let mut i_largest_volume = 0f32;
+    for (i, sec) in model.sections.iter().enumerate() {
+        let (smin, smax) = new_get_section_bounds(sec, rotation, model_offset);
+        let ex = smax[0] - smin[0];
+        let ey = smax[1] - smin[1];
+        let ez = smax[2] - smin[2];
+        let volume = ex * ey * ez;
+        if volume >= i_largest_volume {
+            i_largest_volume = volume;
+            i_largest_section = i;
+        }
+        if sec.id.starts_with(b"BODY") {
+            i_body_section = i as i32;
+        }
+        for k in 0..3 {
+            min_coords[k] = min_coords[k].min(smin[k]);
+            max_coords[k] = max_coords[k].max(smax[k]);
+        }
+    }
+    let i_main = if i_body_section >= 0 { i_body_section as usize } else { i_largest_section };
+
+    let render_offset = [-min_coords[0], -min_coords[1], -min_coords[2]];
+
+    let ex = max_coords[0] - min_coords[0];
+    let ey = max_coords[1] - min_coords[1];
+    let rt_width = ex.ceil() as i32 + 1;
+    let rt_height = ey.ceil() as i32 + 1;
+    let c_pixels = (rt_width * rt_height) as usize;
+
+    let mut image = vec![0u8; c_pixels];
+    let mut lighting = vec![255u8; c_pixels];
+    let mut image_z = vec![i8::MIN; c_pixels];
+
+    let mut xc = 0;
+    let mut yc = 0;
+    for (i, sec) in model.sections.iter().enumerate() {
+        let (a, b, _c, _d) = new_render_section(
+            sec,
+            &model.normals,
+            light_direction,
+            rt_width,
+            rt_height,
+            render_offset,
+            rotation,
+            model_offset,
+            &mut image,
+            &mut lighting,
+            &mut image_z,
+            i == i_main,
+            -1,
+            -1,
+        );
+        if i == i_main {
+            xc = a;
+            yc = b;
+        }
+    }
+
+    RenderOut {
+        image,
+        lighting,
+        x_center: xc,
+        y_center: yc,
+        width: rt_width,
+        height: rt_height,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// tests
+// ---------------------------------------------------------------------------
+
+const PI_F32: f32 = 3.141592654_f32;
+
+fn vehicle_rotation(i: i32) -> ([f32; 3], OldVec) {
+    let (r_x, r_y, r_z) = (300.0f32, 0.0f32, 45.0f32 * i as f32 + 90.0f32);
+    let rot = OldVec::new(
+        r_x / 180.0f32 * PI_F32,
+        r_y / 180.0f32 * PI_F32,
+        r_z / 180.0f32 * PI_F32,
+    );
+    ([rot.x, rot.y, rot.z], rot)
+}
+
+fn compare_models(name: &str, model: &Model, turret_offset: [f32; 3]) {
+    let light = OldVec::new(-0.55, -0.4, 0.9);
+    let light_arr = [light.x, light.y, light.z];
+
+    for i in 0..8 {
+        let (rot_arr, rot_old) = vehicle_rotation(i);
+
+        // body: no model offset
+        let old_body = old_load_vxl_image(model, light, rot_old, OldVec::new(0.0, 0.0, 0.0));
+        let new_body = new_load_vxl_image(model, light_arr, rot_arr, [0.0; 3]);
+
+        // turret: with model offset (single section)
+        let old_tur = old_load_vxl_image(model, light, rot_old, OldVec::new(turret_offset[0], turret_offset[1], turret_offset[2]));
+        let new_tur = new_load_vxl_image(model, light_arr, rot_arr, turret_offset);
+
+        // emulate the editor's composition: dest_left = xcenter - turret_x
+        let old_shift = (old_body.x_center - old_tur.x_center, old_body.y_center - old_tur.y_center);
+        let new_shift = (new_body.x_center - new_tur.x_center, new_body.y_center - new_tur.y_center);
+
+        let mut body_pixel_diffs = 0usize;
+        if old_body.image.len() == new_body.image.len() {
+            for (o, n) in old_body.image.iter().zip(new_body.image.iter()) {
+                if o != n { body_pixel_diffs += 1; }
+            }
+        }
+        let mut tur_pixel_diffs = 0usize;
+        if old_tur.image.len() == new_tur.image.len() {
+            for (o, n) in old_tur.image.iter().zip(new_tur.image.iter()) {
+                if o != n { tur_pixel_diffs += 1; }
+            }
+        }
+
+        println!(
+            "{} dir {}: body {}x{} c=({},{}) vs {}x{} c=({},{}) | turret {}x{} c=({},{}) vs {}x{} c=({},{}) | shift old {:?} new {:?} | pixdiff body={} tur={}",
+            name, i,
+            old_body.width, old_body.height, old_body.x_center, old_body.y_center,
+            new_body.width, new_body.height, new_body.x_center, new_body.y_center,
+            old_tur.width, old_tur.height, old_tur.x_center, old_tur.y_center,
+            new_tur.width, new_tur.height, new_tur.x_center, new_tur.y_center,
+            old_shift, new_shift, body_pixel_diffs, tur_pixel_diffs,
+        );
+    }
+}
+
+#[test]
+fn ab_body_multi_section_matches_old_renderer() {
+    // body-like: two sections, second is BODY with an HVA translation
+    let model = Model {
+        sections: vec![
+            Section::new(
+                "TURRET",
+                [-6.0, -4.0, 0.0],
+                [8.0, 6.0, 12.0],
+                2,
+                2,
+                3,
+                [1.0, 0.0, 0.0, 1.5, 0.0, 1.0, 0.0, -2.0, 0.0, 0.0, 1.0, 0.5],
+            ),
+            Section::new(
+                "BODY",
+                [-10.0, -6.0, 0.0],
+                [14.0, 10.0, 24.0],
+                3,
+                3,
+                4,
+                [1.0, 0.0, 0.0, -2.0, 0.0, 1.0, 0.0, 3.0, 0.0, 0.0, 1.0, -1.0],
+            ),
+        ],
+        normals: vec![0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.7071, 0.0, 0.7071],
+    };
+    compare_models("body", &model, [0.0; 3]);
+}
+
+#[test]
+fn ab_turret_single_section_with_translation_matches_old_renderer() {
+    // turret-like: single section, non-zero HVA translation, asymmetric box
+    let model = Model {
+        sections: vec![Section::new(
+            "TURRET",
+            [-7.0, -5.0, 0.0],
+            [13.0, 9.0, 20.0],
+            3,
+            2,
+            5,
+            [1.0, 0.0, 0.0, 4.0, 0.0, 1.0, 0.0, -2.5, 0.0, 0.0, 1.0, 1.25],
+        )],
+        normals: vec![0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.7071, 0.0, 0.7071],
+    };
+    // art.ini TurretOffset=18 -> 18/6 = 3.0 along x
+    compare_models("turret", &model, [3.0, 0.0, 0.0]);
+}
+}

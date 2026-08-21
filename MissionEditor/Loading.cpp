@@ -6010,22 +6010,9 @@ BOOL CLoading::InitDirectDraw()
 
 		return FALSE;
 	}
-	if (theApp.m_Options.bHighResUI && v.dd->CreateSurface(&ddsd, &v.lpdsBackHighRes, NULL) != DD_OK)
-	{
-		errstream << "CreateSurface() failed\n";
-		errstream.flush();
-		ShowWindow(SW_HIDE);
-		MessageBox("Highres Backbuffer surface could not be initialized! Quitting...");
-		v.lpdsBack->Release();
-		v.lpdsBack = NULL;
-		v.lpds->Release();
-		v.lpds = NULL;
-		v.dd->Release();
-		v.dd = NULL;
-		exit(-4);
-
-		return FALSE;
-	}
+	// lpdsBackHighRes is created lazily by CIsoView::EnsureHighResSurface()
+	// when the user actually zooms (m_viewScale != 1.0), so an idle startup
+	// does not hold a full-desktop-size surface.
 	if(v.dd->CreateSurface(&ddsd, &v.lpdsTemp, NULL)!=DD_OK)
 	{
 		errstream << "CreateSurface() failed\n";
@@ -6080,7 +6067,9 @@ BOOL CLoading::InitDirectDraw()
 	// the surface's own reference, so the clipper survives until the surface
 	// is released. Without this the caller-owned reference leaks.
 	ddc->Release();
-	v.InitializeVulkanRenderer();
+	// The Vulkan renderer is initialized lazily by
+	// CIsoView::FlipHighResBuffer() on the first presented frame, so an idle
+	// startup does not allocate device/swapchain/staging memory.
 
 	return TRUE;
 }

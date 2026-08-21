@@ -3959,6 +3959,14 @@ void CIsoView::ReInitializeDDraw()
 	m_picFileCache.clear();
 
 	theApp.m_loading->FreeAll();
+	// InitDirectDraw() no longer creates the high-res surface; release a
+	// surface from the previous DirectDraw object so it is re-created lazily
+	// against the new one
+	if (lpdsBackHighRes != nullptr)
+	{
+		lpdsBackHighRes->Release();
+		lpdsBackHighRes = nullptr;
+	}
 	theApp.m_loading->InitDirectDraw();
 	theApp.m_loading->InitPics();
 	theApp.m_loading->InitTMPs(&dlg.m_Progress);
@@ -5017,6 +5025,31 @@ void CIsoView::HideTileSet(DWORD dwTileSet)
 	}
 }
 
+void CIsoView::EnsureHighResSurface()
+{
+	if (lpdsBackHighRes != nullptr || lpds == nullptr || dd == nullptr)
+		return;
+	if (!theApp.m_Options.bHighResUI)
+		return;
+
+	DDSURFACEDESC2 ddsd;
+	memset(&ddsd, 0, sizeof(DDSURFACEDESC2));
+	ddsd.dwSize = sizeof(DDSURFACEDESC2);
+	ddsd.dwFlags = DDSD_WIDTH | DDSD_HEIGHT;
+	lpds->GetSurfaceDesc(&ddsd);
+	ddsd.ddsCaps.dwCaps = DDSCAPS_OFFSCREENPLAIN;
+	ddsd.dwFlags = DDSD_CAPS | DDSD_HEIGHT | DDSD_WIDTH;
+
+	if (dd->CreateSurface(&ddsd, &lpdsBackHighRes, NULL) != DD_OK)
+	{
+		// stay without the high-res buffer; callers fall back to the
+		// unscaled backbuffer presentation path
+		lpdsBackHighRes = nullptr;
+		errstream << "Highres backbuffer surface could not be created; using unscaled presentation" << endl;
+		errstream.flush();
+	}
+}
+
 void CIsoView::BlitBackbufferToHighRes()
 {
 	// MW:
@@ -5031,6 +5064,12 @@ void CIsoView::BlitBackbufferToHighRes()
 	// Altogether it'd probably be best to move from DirectDraw to Direct3D, support high DPI awareness and do the scaling right when initially drawing the map.
 
 	
+	if (m_viewScale != Vec2<CSProjected, float>(1.0f, 1.0f))
+	{
+		// the surface is only needed once the user zoomed; create it on demand
+		EnsureHighResSurface();
+	}
+
 	if (m_viewScale != Vec2<CSProjected, float>(1.0f, 1.0f) && lpdsBackHighRes)
 	{
 		// copy scene backbuffer to the high-res buffer that will receive text rendering
@@ -5049,6 +5088,10 @@ void CIsoView::FlipHighResBuffer(const RECT* sourceRectOverride)
 {
 	LPDIRECTDRAWSURFACE4 presentSurface = lpdsBack;
 	RECT sourceRect = GetScaledDisplayRect();
+	if (m_viewScale != Vec2<CSProjected, float>(1.0f, 1.0f))
+	{
+		EnsureHighResSurface();
+	}
 	if (m_viewScale != Vec2<CSProjected, float>(1.0f, 1.0f) && lpdsBackHighRes)
 	{
 		presentSurface = lpdsBackHighRes;

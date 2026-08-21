@@ -80,6 +80,14 @@ bool run_test(const std::function<void()>& f)
 
 int main(int argc, char* argv[])
 {
+#ifdef _DEBUG
+	// Route CRT assertions to the debugger/stdout instead of a message box so
+	// automated runs never block on a dialog; the resulting abort() still
+	// terminates the process for CI.
+	_CrtSetReportMode(_CRT_WARN, _CRTDBG_MODE_DEBUG);
+	_CrtSetReportMode(_CRT_ERROR, _CRTDBG_MODE_DEBUG);
+	_CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_DEBUG);
+#endif
 	Tests t;
 	return t.run();
 }
