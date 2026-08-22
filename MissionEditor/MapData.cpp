@@ -435,17 +435,12 @@ void CMapData::UpdateIniFile(DWORD dwFlags)
 		cliffwater2set = atoi(g_data.sections["NewUrbanInfo"].values["CliffsWater2"]);
 
 		InitializeUnitTypes();
-		errstream << "UpdateIniFile: InitializeUnitTypes done\n"; errstream.flush();
 		UpdateBuildingInfo();
-		errstream << "UpdateIniFile: UpdateBuildingInfo done\n"; errstream.flush();
 		UpdateTreeInfo();
-		errstream << "UpdateIniFile: UpdateTreeInfo done\n"; errstream.flush();
 #ifdef SMUDGE_SUPP
 		UpdateSmudgeInfo();
-		errstream << "UpdateIniFile: UpdateSmudgeInfo done\n"; errstream.flush();
 #endif
 		UpdateMapFieldData(bSave);
-		errstream << "UpdateIniFile: UpdateMapFieldData done\n"; errstream.flush();
 
 
 	}
@@ -1946,11 +1941,18 @@ void CMapData::DeleteUnit(DWORD dwIndex)
 
 BOOL CMapData::MoveUnit(DWORD dwIndex, DWORD dwPos)
 {
-	if (m_noAutoObjectUpdate || dwPos >= fielddata_size || dwIndex >= m_units.size())
+	if (m_noAutoObjectUpdate || dwPos >= fielddata_size)
 		return FALSE;
 
 	CIniFileSection& sec = m_mapfile.sections["Units"];
-	if (dwIndex >= sec.values.size())
+
+	// AddUnit/DeleteUnit keep this cache parallel to the numerically sorted INI
+	// keys. A bulk editor may have left it stale; resync before writing through
+	// both structures, otherwise the wrong INI entry would be overwritten.
+	if (m_units.size() != sec.values.size())
+		UpdateUnits(FALSE);
+
+	if (dwIndex >= m_units.size() || dwIndex >= sec.values.size())
 		return FALSE;
 
 	const int occupant = fielddata[dwPos].unit;
@@ -2040,11 +2042,17 @@ void CMapData::DeleteAircraft(DWORD dwIndex)
 
 BOOL CMapData::MoveAircraft(DWORD dwIndex, DWORD dwPos)
 {
-	if (m_noAutoObjectUpdate || dwPos >= fielddata_size || dwIndex >= m_aircraft.size())
+	if (m_noAutoObjectUpdate || dwPos >= fielddata_size)
 		return FALSE;
 
 	CIniFileSection& sec = m_mapfile.sections["Aircraft"];
-	if (dwIndex >= sec.values.size())
+
+	// same staleness guard as MoveUnit: resync the parallel cache before the
+	// move writes through both the vector and the INI section
+	if (m_aircraft.size() != sec.values.size())
+		UpdateAircraft(FALSE);
+
+	if (dwIndex >= m_aircraft.size() || dwIndex >= sec.values.size())
 		return FALSE;
 
 	const int occupant = fielddata[dwPos].aircraft;
@@ -3690,7 +3698,7 @@ void CMapData::UpdateBuildingInfo(LPCSTR lpUnitType)
 
 	if (!lpUnitType)
 	{
-		memset(buildinginfo, 0, 0x0F00 * sizeof(BUILDING_INFO));
+		memset(buildinginfo, 0, TypeTableCapacity * sizeof(BUILDING_INFO));
 		ClearBuildingFoundations();
 
 		for (const auto& entry : rules.sections["BuildingTypes"].values)
@@ -3715,7 +3723,7 @@ void CMapData::UpdateBuildingInfo(LPCSTR lpUnitType)
 
 			int n = Map->GetUnitTypeID(type);
 
-			if (n >= 0 && n < 0x0F00)
+			if (n >= 0 && n < TypeTableCapacity)
 			{
 				UpdateBuildingFoundation(n, artname);
 
@@ -3790,7 +3798,7 @@ void CMapData::UpdateBuildingInfo(LPCSTR lpUnitType)
 
 			int n = Map->GetUnitTypeID(type);
 
-			if (n >= 0 && n < 0x0F00)
+			if (n >= 0 && n < TypeTableCapacity)
 			{
 				UpdateBuildingFoundation(n, artname);
 				buildinginfo[n].bSnow = TRUE;
@@ -3839,7 +3847,7 @@ void CMapData::UpdateBuildingInfo(LPCSTR lpUnitType)
 
 		int n = Map->GetUnitTypeID(type);
 
-		if (n >= 0 && n < 0x0F00)
+		if (n >= 0 && n < TypeTableCapacity)
 		{
 			UpdateBuildingFoundation(n, artname);
 			CString lpPicFile = GetUnitPictureFilename(type, 0);
@@ -3871,7 +3879,7 @@ void CMapData::UpdateTreeInfo(LPCSTR lpTreeType)
 
 	if (!lpTreeType)
 	{
-		memset(treeinfo, 0, 0x0F00 * sizeof(TREE_INFO));
+		memset(treeinfo, 0, TypeTableCapacity * sizeof(TREE_INFO));
 
 		for (const auto& entry : rules.sections["TerrainTypes"].values)
 		{
@@ -3906,7 +3914,7 @@ void CMapData::UpdateTreeInfo(LPCSTR lpTreeType)
 
 			int n = GetUnitTypeID(type);
 
-			if (n >= 0 && n < 0x0F00)
+			if (n >= 0 && n < TypeTableCapacity)
 			{
 				treeinfo[n].w = w;
 				treeinfo[n].h = h;
@@ -3953,7 +3961,7 @@ void CMapData::UpdateTreeInfo(LPCSTR lpTreeType)
 
 			int n = Map->GetUnitTypeID(type);
 
-			if (n >= 0 && n < 0x0F00)
+			if (n >= 0 && n < TypeTableCapacity)
 			{
 				treeinfo[n].w = w;
 				treeinfo[n].h = h;
@@ -4000,7 +4008,7 @@ void CMapData::UpdateTreeInfo(LPCSTR lpTreeType)
 		if (h == 0) h = 1;
 		int n = Map->GetUnitTypeID(type);
 
-		if (n >= 0 && n < 0x0F00)
+		if (n >= 0 && n < TypeTableCapacity)
 		{
 			treeinfo[n].w = w;
 			treeinfo[n].h = h;
@@ -7318,7 +7326,7 @@ void CMapData::UpdateSmudgeInfo(LPCSTR lpSmudgeType)
 
 	if (!lpSmudgeType)
 	{
-		memset(smudgeinfo, 0, 0x0F00 * sizeof(SMUDGE_INFO));
+		memset(smudgeinfo, 0, TypeTableCapacity * sizeof(SMUDGE_INFO));
 
 		for (const auto& entry : rules.sections["SmudgeTypes"].values)
 		{
@@ -7330,7 +7338,7 @@ void CMapData::UpdateSmudgeInfo(LPCSTR lpSmudgeType)
 
 			int n = GetUnitTypeID(type);
 
-			if (n >= 0 && n < 0x0F00)
+			if (n >= 0 && n < TypeTableCapacity)
 			{
 
 				CString lpPicFile = GetUnitPictureFilename(type, 0);
@@ -7357,7 +7365,7 @@ void CMapData::UpdateSmudgeInfo(LPCSTR lpSmudgeType)
 
 			int n = Map->GetUnitTypeID(type);
 
-			if (n >= 0 && n < 0x0F00)
+			if (n >= 0 && n < TypeTableCapacity)
 			{
 				//smudgeinfo[n].w=w;
 				//smudgeinfo[n].h=h;
@@ -7383,7 +7391,7 @@ void CMapData::UpdateSmudgeInfo(LPCSTR lpSmudgeType)
 
 		int n = Map->GetUnitTypeID(type);
 
-		if (n >= 0 && n < 0x0F00)
+		if (n >= 0 && n < TypeTableCapacity)
 		{
 
 			CString lpPicFile = GetUnitPictureFilename(type, 0);

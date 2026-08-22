@@ -168,27 +168,46 @@ TextDrawer::CachedString& TextDrawer::GetCachedString(const std::string& text)
 {
     const auto it = m_stringCache.find(text);
     if (it != m_stringCache.end())
+    {
+        // mark as most recently used; splice keeps all iterators valid
+        m_lruOrder.splice(m_lruOrder.end(), m_lruOrder, it->second.lruPos);
         return it->second;
+    }
 
-    if (m_stringCache.size() >= m_maxCacheEntries)
-        m_stringCache.clear();
+    // evict least recently used entries one by one instead of dropping the
+    // whole cache (a full clear forces every hot label to be re-rendered on
+    // the next frame, which shows up as a periodic hitch)
+    while (m_stringCache.size() >= m_maxCacheEntries)
+    {
+        if (m_lruOrder.empty())
+            break;
+        m_stringCache.erase(m_lruOrder.front());
+        m_lruOrder.pop_front();
+    }
 
     CachedString cached;
+    // a valid, copyable default: overwritten with the real node on insertion
+    cached.lruPos = m_lruOrder.end();
+
+    // inserts the (possibly incomplete) entry into the cache and registers it
+    // as most recently used; failed entries are cached as negative results so
+    // they are not retried every frame and age out through normal eviction
+    const auto insert = [&]() -> CachedString&
+    {
+        const auto insIt = m_stringCache.try_emplace(text, cached).first;
+        insIt->second.lruPos = m_lruOrder.insert(m_lruOrder.end(), text);
+        return insIt->second;
+    };
+
     const auto extent = GetExtent(text);
     cached.w = extent.x;
     cached.h = extent.y;
     if (cached.w <= 0 || cached.h <= 0 || !m_fontSurface)
-    {
-        m_stringCache[text] = cached;
-        return m_stringCache[text];
-    }
+        return insert();
 
     CComPtr<IDirectDraw4> pDD;
     if (m_fontSurface->GetDDInterface(reinterpret_cast<void**>(&pDD)) != DD_OK)
-    {
-        m_stringCache[text] = cached;
-        return m_stringCache[text];
-    }
+        return insert();
 
     DDSURFACEDESC2 desc = { 0 };
     desc.dwSize = sizeof(desc);
@@ -198,18 +217,12 @@ TextDrawer::CachedString& TextDrawer::GetCachedString(const std::string& text)
     desc.dwHeight = cached.h;
 
     if (pDD->CreateSurface(&desc, &cached.main, nullptr) != DD_OK)
-    {
-        m_stringCache[text] = cached;
-        return m_stringCache[text];
-    }
+        return insert();
 
     if (m_shadowCol != CLR_INVALID)
     {
         if (pDD->CreateSurface(&desc, &cached.shadow, nullptr) != DD_OK)
-        {
-            m_stringCache[text] = cached;
-            return m_stringCache[text];
-        }
+            return insert();
     }
 
     // DirectDraw does not guarantee the contents of a newly created surface.
@@ -217,10 +230,7 @@ TextDrawer::CachedString& TextDrawer::GetCachedString(const std::string& text)
     // use that same color as the source key. Otherwise the uninitialized area
     // appears as an opaque black rectangle around longer labels.
     if (!FillSurface(cached.main, m_bkCol) || (cached.shadow && !FillSurface(cached.shadow, m_bkCol)))
-    {
-        m_stringCache[text] = cached;
-        return m_stringCache[text];
-    }
+        return insert();
 
     if (RequiresGdiText(text))
     {
@@ -282,8 +292,7 @@ TextDrawer::CachedString& TextDrawer::GetCachedString(const std::string& text)
     if (cached.shadow)
         FSunPackLib::SetColorKey(cached.shadow, m_bkCol);
 
-    m_stringCache[text] = cached;
-    return m_stringCache[text];
+    return insert();
 }
 
 void TextDrawer::RenderText(IDirectDrawSurface4* target, int x, int y, const std::string& text, bool centered)

@@ -8,9 +8,8 @@
 
 namespace
 {
-	constexpr int BuildingTypeCapacity = 0x0F00;
-	std::array<std::vector<BuildingFoundationCell>, BuildingTypeCapacity> Foundations;
-	std::array<bool, BuildingTypeCapacity> CustomFoundations{};
+	std::array<std::vector<BuildingFoundationCell>, TypeTableCapacity> Foundations;
+	std::array<bool, TypeTableCapacity> CustomFoundations{};
 
 	void AddRectangularFoundation(int buildingType, int width, int height)
 	{
@@ -34,7 +33,7 @@ void ClearBuildingFoundations()
 
 void UpdateBuildingFoundation(int buildingType, const CString& artName)
 {
-	if (buildingType < 0 || buildingType >= BuildingTypeCapacity)
+	if (buildingType < 0 || buildingType >= TypeTableCapacity)
 		return;
 
 	auto& cells = Foundations[buildingType];
@@ -103,12 +102,12 @@ void UpdateBuildingFoundation(int buildingType, const CString& artName)
 const std::vector<BuildingFoundationCell>& GetBuildingFoundation(int buildingType)
 {
 	static const std::vector<BuildingFoundationCell> Fallback{ { 0, 0 } };
-	if (buildingType < 0 || buildingType >= BuildingTypeCapacity || Foundations[buildingType].empty())
+	if (buildingType < 0 || buildingType >= TypeTableCapacity || Foundations[buildingType].empty())
 		return Fallback;
 	return Foundations[buildingType];
 }
 
 bool IsCustomBuildingFoundation(int buildingType)
 {
-	return buildingType >= 0 && buildingType < BuildingTypeCapacity && CustomFoundations[buildingType];
+	return buildingType >= 0 && buildingType < TypeTableCapacity && CustomFoundations[buildingType];
 }

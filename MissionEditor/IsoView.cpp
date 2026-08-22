@@ -5771,7 +5771,7 @@ void CIsoView::DrawObjectPreviewAt(int x, int y)
 	RECT previewRedrawRect = { 0, 0, 0, 0 };
 	{
 		const int bid = (pt == PT_STRUCTURE) ? Map->GetUnitTypeID(AD.data_s) : -1;
-		if (bid > -1 && bid < 0x0F00)
+		if (bid > -1 && bid < TypeTableCapacity)
 		{
 			footprintX1 = INT_MAX;
 			footprintY1 = INT_MAX;
@@ -5793,7 +5793,7 @@ void CIsoView::DrawObjectPreviewAt(int x, int y)
 		switch (pt)
 		{
 		case PT_STRUCTURE:
-			if (bid > -1 && bid < 0x0F00)
+			if (bid > -1 && bid < TypeTableCapacity)
 			{
 				const int dir = (7 - dirIdx) % 8;
 				pic = buildinginfo[bid].pic[dir];
@@ -5810,7 +5810,7 @@ void CIsoView::DrawObjectPreviewAt(int x, int y)
 		case PT_TERRAIN:
 		{
 			const int id = Map->GetUnitTypeID(terrainType);
-			if (id > -1 && id < 0x0F00)
+			if (id > -1 && id < TypeTableCapacity)
 				pic = treeinfo[id].pic;
 			break;
 		}
@@ -6187,17 +6187,29 @@ bool CIsoView::RefreshObjectScene(const MapCoords& oldPos, const MapCoords& newP
 	display.right = min<LONG>(surfaceDesc.dwWidth, display.right);
 	display.bottom = min<LONG>(surfaceDesc.dwHeight, display.bottom);
 
-	int spriteWidth = 192;
-	int spriteHeight = 256;
+	// Conservative lower bound for sprites whose picture could not be looked
+	// up (missing art) and margins for art-defined draw offsets. Both dirty
+	// rects below are grown to hold any sprite that may be (re)drawn inside
+	// them; a too-small estimate leaves visible ghosts of large mod sprites.
+	constexpr int MinSpriteWidth = 192;
+	constexpr int MinSpriteHeight = 256;
+	constexpr int SpriteMarginX = 96;
+	constexpr int SpriteMarginTop = 96;
+	constexpr int SpriteMarginBottom = 128;
+
+	int spriteWidth = MinSpriteWidth;
+	int spriteHeight = MinSpriteHeight;
 	const auto includePictureSize = [&](const PICDATA& picture)
 	{
 		if (picture.pic == NULL) return;
 		spriteWidth = max(spriteWidth, max(static_cast<int>(picture.wWidth), static_cast<int>(picture.wMaxWidth)));
 		spriteHeight = max(spriteHeight, max(static_cast<int>(picture.wHeight), static_cast<int>(picture.wMaxHeight)));
 	};
-	if (Map->isInside(newPos))
+	const auto includeFieldPictures = [&](const MapCoords& pos)
 	{
-		const FIELDDATA& field = *Map->GetFielddataAt(newPos);
+		if (!Map->isInside(pos))
+			return;
+		const FIELDDATA& field = *Map->GetFielddataAt(pos);
 		if (field.unit >= 0)
 		{
 			UNIT unit;
@@ -6218,21 +6230,25 @@ bool CIsoView::RefreshObjectScene(const MapCoords& oldPos, const MapCoords& newP
 			const int direction = (7 - atoi(infantry.direction) / 32) % 8;
 			includePictureSize(pics[GetCachedUnitPictureFilename(infantry.type, direction)]);
 		}
-		if (field.terrain >= 0 && field.terraintype >= 0 && field.terraintype < 0x0F00)
+		if (field.terrain >= 0 && field.terraintype >= 0 && field.terraintype < TypeTableCapacity)
 			includePictureSize(treeinfo[field.terraintype].pic);
-	}
+	};
+	// the old cell matters too: erasing the moved-out object redraws the
+	// sprites around it, which can be larger than the moved object itself
+	includeFieldPictures(oldPos);
+	includeFieldPictures(newPos);
 
 	const auto makeDirtyRect = [&](const MapCoords& pos)
 	{
 		const auto draw = GetRenderTargetCoordinates(pos);
-		const int halfWidth = spriteWidth / 2 + 96;
+		const int halfWidth = spriteWidth / 2 + SpriteMarginX;
 		// BMP/voxel units are bottom-anchored while SHPs are centred. Cover both layouts
 		// plus a safety margin for art-defined offsets without approaching a full screen.
 		RECT rect = {
 			draw.x + f_x / 2 - halfWidth,
-			draw.y - spriteHeight - 96,
+			draw.y - spriteHeight - SpriteMarginTop,
 			draw.x + f_x / 2 + halfWidth,
-			draw.y + f_y + 128
+			draw.y + f_y + SpriteMarginBottom
 		};
 		rect.left = max(rect.left, display.left);
 		rect.top = max(rect.top, display.top);
@@ -7453,7 +7469,7 @@ void CIsoView::DrawMapObjectsCell(const MapCoords& mapCoords, const FIELDDATA& m
 
 
 			PICDATA pic;
-			if (id > -1 && id < 0x0F00)
+			if (id > -1 && id < TypeTableCapacity)
 			{
 				int dir = objp.direction / 32;
 
@@ -7603,7 +7619,7 @@ void CIsoView::DrawMapObjectsCell(const MapCoords& mapCoords, const FIELDDATA& m
 
 			int id = m.node.type;
 			PICDATA pic;
-			if (id > -1 && id < 0x0F00)
+			if (id > -1 && id < TypeTableCapacity)
 			{
 				pic = buildinginfo[id].pic[0];
 			}
@@ -7838,7 +7854,7 @@ void CIsoView::DrawMapObjectsCell(const MapCoords& mapCoords, const FIELDDATA& m
 		int id = m.terraintype;
 		int w = 1, h = 1;
 		PICDATA pic;
-		if (id > -1 && id < 0x0F00)
+		if (id > -1 && id < TypeTableCapacity)
 		{
 			w = treeinfo[id].w;
 			h = treeinfo[id].h;
@@ -7895,7 +7911,7 @@ void CIsoView::DrawMapObjectsCell(const MapCoords& mapCoords, const FIELDDATA& m
 		int id = m.smudgetype;
 
 		PICDATA pic;
-		if (id > -1 && id < 0x0F00)
+		if (id > -1 && id < TypeTableCapacity)
 		{
 			pic = smudgeinfo[id].pic;
 		}

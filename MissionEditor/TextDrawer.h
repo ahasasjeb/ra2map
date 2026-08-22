@@ -22,6 +22,7 @@
 #include <afx.h>
 #include <string>
 #include <map>
+#include <list>
 #include "Vec2.h"
 
 // Very simple class that renders text through a prepared DirectDraw surface
@@ -43,6 +44,7 @@ private:
     {
         CComPtr<IDirectDrawSurface4> main;
         CComPtr<IDirectDrawSurface4> shadow;
+        std::list<std::string>::iterator lruPos; // position of the key in m_lruOrder
         int w = 0;
         int h = 0;
     };
@@ -57,7 +59,10 @@ private:
     COLORREF m_shadowCol;
     COLORREF m_bkCol;
 
-    // Cache of fully rendered strings to avoid per-character blits every frame
+    // Cache of fully rendered strings to avoid per-character blits every frame.
+    // Entries are evicted least-recently-used; map node references stay valid
+    // across evictions.
     std::map<std::string, CachedString> m_stringCache;
+    std::list<std::string> m_lruOrder; // front = least recently used, back = most recently used
     static constexpr size_t m_maxCacheEntries = 512;
 };

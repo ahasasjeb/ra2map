@@ -102,10 +102,14 @@ extern vector<CString> rndterrainsrc;
 
 // infos for buildings and trees (should be extended to infantry, units, and aircraft)
 // they are initialized in CIsoView, should be changed to CMapData
-extern BUILDING_INFO buildinginfo[0x0F00];
-extern TREE_INFO treeinfo[0x0F00];
+// type ids are packed into 12 bits in several file formats, so all info tables
+// share the same capacity of 0x0F00 entries
+constexpr int TypeTableCapacity = 0x0F00;
+
+extern BUILDING_INFO buildinginfo[TypeTableCapacity];
+extern TREE_INFO treeinfo[TypeTableCapacity];
 #ifdef SMUDGE_SUPP
-extern SMUDGE_INFO smudgeinfo[0x0F00];
+extern SMUDGE_INFO smudgeinfo[TypeTableCapacity];
 #endif
 
 // the app object:
