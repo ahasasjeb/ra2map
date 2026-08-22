@@ -1307,11 +1307,6 @@ std::optional<FindShpResult> CLoading::FindUnitShp(const CString& image, char pr
 	return std::nullopt;
 }
 
-int lepton_to_screen_y(int leptons)
-{
-	return leptons * f_y / 256;
-}
-
 BOOL CLoading::LoadUnitGraphic(LPCTSTR lpUnittype)
 {
 	errstream << "Loading: " << lpUnittype << endl;
