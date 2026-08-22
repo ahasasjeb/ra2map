@@ -110,6 +110,7 @@ int Tests::run()
 		[this]() { test_ini_malformed_section_is_discarded(); },
 		[this]() { test_snapshot_redraw_flag(); },
 		[this]() { test_property_brush_settings(); },
+		[this]() { test_turret_offset_parsing(); },
 	});
 	for (const auto f : test_functions)
 	{
@@ -135,6 +136,27 @@ void Tests::test_property_brush_settings()
 	settings.values[8] = "GAPOWR";
 	REPORT_TEST(settings.HasSelectedFields());
 	REPORT_TEST(settings.values[8] == "GAPOWR");
+}
+
+void Tests::test_turret_offset_parsing()
+{
+	// vanilla single-value form stays identical to the old atoi handling
+	Vec3f offset = ParseTurretOffset("30");
+	REPORT_TEST(offset[0] == 5.0f && offset[1] == 0.0f && offset[2] == 0.0f);
+
+	// Ares/Phobos F,L,H form: forward, lateral, height (in leptons)
+	offset = ParseTurretOffset("6,-12,24");
+	REPORT_TEST(offset[0] == 1.0f && offset[1] == -2.0f && offset[2] == 4.0f);
+
+	offset = ParseTurretOffset("18, 0, 6");
+	REPORT_TEST(offset[0] == 3.0f && offset[1] == 0.0f && offset[2] == 1.0f);
+
+	// missing components default to zero
+	offset = ParseTurretOffset("6,6");
+	REPORT_TEST(offset[0] == 1.0f && offset[1] == 1.0f && offset[2] == 0.0f);
+
+	offset = ParseTurretOffset("");
+	REPORT_TEST(offset[0] == 0.0f && offset[1] == 0.0f && offset[2] == 0.0f);
 }
 
 void Tests::test_ini_utf8_normalization()

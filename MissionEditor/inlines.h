@@ -26,6 +26,7 @@
 #include "mapdata.h"
 #include "variables.h"
 #include "ovrlinline.h"
+#include "Vec3.h"
 #include <string>
 #include <vector>
 #include <ranges>
@@ -135,6 +136,17 @@ inline std::string GetParam(const std::string& data, const int param)
 inline CString GetParam(const char* data, const int param)
 {
 	return GetParam(CString(data), param);
+}
+
+// art.ini TurretOffset=F,L,H in leptons (forward, lateral, height); the vanilla
+// game only evaluates F. One voxel unit is 6 leptons, hence the divisor.
+inline Vec3f ParseTurretOffset(const CString& value)
+{
+	return Vec3f(
+		atoi(GetParam(value, 0)) / 6.0f,
+		atoi(GetParam(value, 1)) / 6.0f,
+		atoi(GetParam(value, 2)) / 6.0f
+	);
 }
 
 inline std::vector<CString> Split(const CString& data, char separator)

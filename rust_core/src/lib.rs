@@ -431,9 +431,17 @@ fn render_vxl_section_impl(
 
     set_op!(11);
 
+    // The anchor outputs locate the model origin in the render target. They
+    // must NOT include the HVA translation: the game positions each section's
+    // content by that translation, so including it here would cancel it out
+    // when the caller composites this image onto another one (turret on body).
+    // Use the HVA linear part only; for sections with a zero translation
+    // (vanilla TS/RA2 files) this is identical to the previous behavior.
+    let linear_matrix = matrix.set_column(3, Vec3::new(0.0, 0.0, 0.0));
+
     if out_center_x.is_some() || out_center_y.is_some() {
         let s_pixel = center;
-        let mut d_pixel = scaled_matrix.mul_vec(s_pixel);
+        let mut d_pixel = linear_matrix.mul_vec(s_pixel);
         rotation.apply(&mut d_pixel);
         d_pixel = d_pixel + model_offset;
 
@@ -449,7 +457,7 @@ fn render_vxl_section_impl(
 
     if out_center_x_zmax.is_some() || out_center_y_zmax.is_some() {
         let s_pixel = center;
-        let mut d_pixel = scaled_matrix.mul_vec(s_pixel);
+        let mut d_pixel = linear_matrix.mul_vec(s_pixel);
         rotation.apply(&mut d_pixel);
         d_pixel = d_pixel + model_offset;
 
@@ -1570,8 +1578,11 @@ fn old_render_section(
     let mut y_center_zmax = 0i32;
 
     if track_center {
+        // Keep the emulation in sync with the intentional behavior change in
+        // rs_vxl_render_section: the anchor must exclude the HVA translation
+        // so compositing does not cancel out section positioning.
         let s_pixel = OldVec::new(0.0, 0.0, 0.0);
-        let mut d_pixel = scaled_matrix.mul(s_pixel);
+        let mut d_pixel = normal_matrix.mul(s_pixel);
         old_rotate_zxy(&mut d_pixel, rotation);
         d_pixel = d_pixel + model_offset;
         x_center = c_trunc(d_pixel.x + 0.5);

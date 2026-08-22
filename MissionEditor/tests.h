@@ -39,4 +39,5 @@ private:
 	void test_ini_utf8_normalization();
 	void test_ini_malformed_section_is_discarded();
 	void test_property_brush_settings();
+	void test_turret_offset_parsing();
 };

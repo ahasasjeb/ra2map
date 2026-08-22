@@ -1326,7 +1326,7 @@ BOOL CLoading::LoadUnitGraphic(LPCTSTR lpUnittype)
 	BOOL bAlwaysSetChar=FALSE; // second char is always theater, even if NewTheater not specified!
 	WORD wStep=1; // step is 1 for infantry, buildings, etc, and for shp vehicles it specifies the step rate between every direction
 	WORD wStartWalkFrame=0; // for examply cyborg reaper has another walk starting frame
-	int iTurretOffset=0; // used for centering y pos of turret (if existing) (for vehicles)
+	Vec3f turretModelOffset; // art.ini TurretOffset=F,L,H in leptons, applied to turret/barrel voxels
 	const BOOL bStructure=rules.sections["BuildingTypes"].FindValue(lpUnittype)>=0; // is this a structure?
 	const BOOL bVehicle = rules.sections["VehicleTypes"].FindValue(lpUnittype) >= 0; // is this a structure?
 
@@ -1512,8 +1512,7 @@ BOOL CLoading::LoadUnitGraphic(LPCTSTR lpUnittype)
 					HMIXFILE hBarl = FindFileInMix(vxl_barrelanim_filename);
 
 					if (artSection.values.find("TurretOffset") != art.sections[image].values.end())
-						iTurretOffset = atoi(art.sections[image].values["TurretOffset"]);
-					Vec3f turretModelOffset(iTurretOffset / 6.0f, 0.0f, 0.0f);
+						turretModelOffset = ParseTurretOffset(art.sections[image].values["TurretOffset"]);
 
 
 					if (hVXL)
@@ -2169,8 +2168,8 @@ BOOL CLoading::LoadUnitGraphic(LPCTSTR lpUnittype)
 #endif
 
 		if (artSection.values.find("TurretOffset") != art.sections[image].values.end())
-			iTurretOffset = atoi(art.sections[image].values["TurretOffset"]);
-		
+			turretModelOffset = ParseTurretOffset(art.sections[image].values["TurretOffset"]);
+
 		int i;
 
 		for(i=0;i<8;i++)
@@ -2189,8 +2188,7 @@ BOOL CLoading::LoadUnitGraphic(LPCTSTR lpUnittype)
 			// convert
 			const double pi = 3.141592654;
 			Vec3f rotation(r_x / 180.0f * pi, r_y / 180.0f * pi, r_z / 180.0f * pi);
-			Vec3f turretModelOffset(iTurretOffset / 6.0f, 0.0f, 0.0f);
-			
+
 
 			std::vector<BYTE> colors;
 			std::shared_ptr<std::vector<BYTE>> pLighting(new std::vector<BYTE>);
@@ -4193,8 +4191,13 @@ HMIXFILE CLoading::FindFileInMix(LPCTSTR lpFilename, TheaterChar* pTheaterChar)
 		}
 	}
 
-	for(i=100;i>=0; i--)
+	// ra2md.mix is registered in slot 100 (see the mix loading code). The game
+	// mounts expand**/ecache** mixes after ra2md.mix, so files shipped there
+	// override ra2md content (Mental Omega replaces vanilla units this way).
+	// Search the expand slots first and ra2md with its nested mixes last.
+	for(int slot=0; slot<=100; slot++)
 	{
+		i = slot < 100 ? 99 - slot : 100;
 		const EXPANDMIX& cuExp=m_hExpand[i];
 
 		if(cuExp.hExpand!=NULL)
