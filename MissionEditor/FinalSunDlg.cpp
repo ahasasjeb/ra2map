@@ -1298,6 +1298,9 @@ void CFinalSunDlg::SaveMap(CString FileName_, bool interactive)
 
 		
 		WriteFile(hFile, fi, fi.GetLength(), &bwr, NULL);
+		// clear the buffer, otherwise the preview sections are written to the
+		// file a second time together with [Digest] below
+		fi="";
 
 		for (const auto& section : ini.sections)
 		{

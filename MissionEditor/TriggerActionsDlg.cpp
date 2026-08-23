@@ -500,34 +500,43 @@ void CTriggerActionsDlg::UpdateDialog()
 
 	CIniFile& ini=Map->GetIniFile();
 
+	// the action type list only depends on the static FAData/g_data tables
+	// and yuri_mode, so it is cached instead of being rebuilt (including a
+	// translation lookup per entry) on every trigger switch
 	// 9.3.2001: Only support specified section
 #ifndef RA2_MODE
 	CString sec="Actions";
+	int typeListKey=0;
 #else
 	CString sec="ActionsRA2";
+	int typeListKey=yuri_mode?1:2;
 #endif
 
-	while(m_ActionType.DeleteString(0)!=CB_ERR);
-	int i;
-	for(i=0;i<g_data.sections[sec].values.size();i++)
+	if(typeListKey!=m_typeListKey)
 	{
-		CString eventid=*g_data.sections[sec].GetValueName(i); //GetParam(*g_data.sections["Actions"].GetValue(i),13);
-		CString eventdata=*g_data.sections[sec].GetValue(i);
-/*#ifdef RA2_MODE
-		if(g_data.sections["ActionsRA2"].FindName(eventid)>=0)
-			eventdata=g_data.sections["ActionsRA2"].values[eventid];
-#endif*/
-		CString text=eventid+" "+TranslateStringACP(GetParam(eventdata,0));
-		text.Replace("%1",",");
+		m_typeListKey=typeListKey;
 
-#ifdef RA2_MODE
-		if(GetParam(eventdata,12)=="1" && (yuri_mode || !isTrue(GetParam(eventdata, 14))))
-		{		
-#else
-		if(GetParam(eventdata,11)=="1")
+		while(m_ActionType.DeleteString(0)!=CB_ERR);
+		for(int i=0;i<g_data.sections[sec].values.size();i++)
 		{
-#endif
-			m_ActionType.AddString(text);
+			CString eventid=*g_data.sections[sec].GetValueName(i); //GetParam(*g_data.sections["Actions"].GetValue(i),13);
+			CString eventdata=*g_data.sections[sec].GetValue(i);
+	/*#ifdef RA2_MODE
+			if(g_data.sections["ActionsRA2"].FindName(eventid)>=0)
+				eventdata=g_data.sections["ActionsRA2"].values[eventid];
+	#endif*/
+			CString text=eventid+" "+TranslateStringACP(GetParam(eventdata,0));
+			text.Replace("%1",",");
+
+	#ifdef RA2_MODE
+			if(GetParam(eventdata,12)=="1" && (yuri_mode || !isTrue(GetParam(eventdata, 14))))
+			{
+	#else
+			if(GetParam(eventdata,11)=="1")
+			{
+	#endif
+				m_ActionType.AddString(text);
+			}
 		}
 	}
 
@@ -537,12 +546,13 @@ void CTriggerActionsDlg::UpdateDialog()
 	CString Data=ini.sections["Actions"].values[m_currentTrigger];
 	int count=atoi(GetParam(Data,0));
 
-	for(i=0;i<count;i++)
+	CString acLabel=TranslateStringACP("Action");
+	for(int i=0;i<count;i++)
 	{
 		char c[50];
 		itoa(i,c,10);
 
-		CString s=TranslateStringACP("Action");
+		CString s=acLabel;
 		s+=" ";
 		s+=c;
 

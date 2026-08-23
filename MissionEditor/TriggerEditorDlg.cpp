@@ -241,15 +241,16 @@ void CTriggerEditorDlg::OnEditchangeTrigger()
 {
 	CIniFile& ini=Map->GetIniFile();
 
+	// only the visible tab page is refreshed here; the hidden pages are
+	// kept in sync lazily by OnSelchangeTriggertab, so switching trigger
+	// entries (e.g. with the mouse wheel) does not rebuild three dialogs
 	int curSel=m_Trigger.GetCurSel();
-	if(curSel<0) 
+	if(curSel<0)
 	{
 		m_TriggerOptions.m_currentTrigger="";
-		if(m_TriggerOptions.m_hWnd) m_TriggerOptions.UpdateDialog();	
 		m_TriggerEvents.m_currentTrigger="";
-		if(m_TriggerEvents.m_hWnd) m_TriggerEvents.UpdateDialog();
 		m_TriggerActions.m_currentTrigger="";
-		if(m_TriggerActions.m_hWnd) m_TriggerActions.UpdateDialog();		
+		UpdateCurrentPage();
 		return;
 	}
 
@@ -258,11 +259,26 @@ void CTriggerEditorDlg::OnEditchangeTrigger()
 	CString Trigger=*ini.sections["Triggers"].GetValueName(curInd);
 
 	m_TriggerOptions.m_currentTrigger=Trigger;
-	if(m_TriggerOptions.m_hWnd) m_TriggerOptions.UpdateDialog();	
 	m_TriggerEvents.m_currentTrigger=Trigger;
-	if(m_TriggerEvents.m_hWnd) m_TriggerEvents.UpdateDialog();
 	m_TriggerActions.m_currentTrigger=Trigger;
-	if(m_TriggerActions.m_hWnd) m_TriggerActions.UpdateDialog();
+
+	UpdateCurrentPage();
+}
+
+void CTriggerEditorDlg::UpdateCurrentPage()
+{
+	switch(m_tab.GetCurSel())
+	{
+	case 1:
+		if(m_TriggerEvents.m_hWnd) m_TriggerEvents.UpdateDialog();
+		break;
+	case 2:
+		if(m_TriggerActions.m_hWnd) m_TriggerActions.UpdateDialog();
+		break;
+	default:
+		if(m_TriggerOptions.m_hWnd) m_TriggerOptions.UpdateDialog();
+		break;
+	}
 }
 
 void CTriggerEditorDlg::OnSelchangeTriggertab(NMHDR* pNMHDR, LRESULT* pResult) 
@@ -283,7 +299,7 @@ void CTriggerEditorDlg::OnSelchangeTriggertab(NMHDR* pNMHDR, LRESULT* pResult)
 		break;
 	case 2:
 		m_TriggerActions.ShowWindow(SW_SHOW);
-		m_TriggerActions.UpdateData();
+		m_TriggerActions.UpdateDialog();
 		break;
 	}
 	

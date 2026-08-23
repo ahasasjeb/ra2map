@@ -517,39 +517,50 @@ void CTriggerEventsDlg::UpdateDialog()
 	}
 	CIniFile& ini=Map->GetIniFile();
 
-	while(m_EventType.DeleteString(0)!=CB_ERR);
+	// the event type list only depends on the static FAData/g_data tables
+	// and yuri_mode, so it is cached instead of being rebuilt (including a
+	// translation lookup per entry) on every trigger switch
 	int i;
 
 	//9.3.2001: Only use specified section, do not merge
-#ifndef RA2_MODE 
+#ifndef RA2_MODE
 	CString sec="Events";
+	int typeListKey=0;
 #else
 	CString sec="EventsRA2";
+	int typeListKey=yuri_mode?1:2;
 #endif
 
-	for(i=0;i<g_data.sections[sec].values.size();i++)
+	if(typeListKey!=m_typeListKey)
 	{
-		CString eventid = *g_data.sections[sec].GetValueName(i); //GetParam(*g_data.sections["Events"].GetValue(i),8);
-		CString eventdata=*g_data.sections[sec].GetValue(i);
-/*#ifdef RA2_MODE
-		if(g_data.sections["EventsRA2"].FindName(eventid)>=0)
-			eventdata=g_data.sections["EventsRA2"].values[eventid];
-#endif*/
+		m_typeListKey=typeListKey;
 
-		CString text=eventid+" "+TranslateStringACP(GetParam(eventdata,0));
-		text.Replace("%1",",");
-#ifdef RA2_MODE
-		// MW 07/18/01
-		// for yuri mode, only check if it´s for RA2, else support it only if YR isnt´needed...
-		if(GetParam(eventdata, 7)=="1" && ( yuri_mode || !atoi(GetParam(eventdata,9)) ) )
+		while(m_EventType.DeleteString(0)!=CB_ERR);
+
+		for(i=0;i<g_data.sections[sec].values.size();i++)
 		{
+			CString eventid = *g_data.sections[sec].GetValueName(i); //GetParam(*g_data.sections["Events"].GetValue(i),8);
+			CString eventdata=*g_data.sections[sec].GetValue(i);
+	/*#ifdef RA2_MODE
+			if(g_data.sections["EventsRA2"].FindName(eventid)>=0)
+				eventdata=g_data.sections["EventsRA2"].values[eventid];
+	#endif*/
+
+			CString text=eventid+" "+TranslateStringACP(GetParam(eventdata,0));
+			text.Replace("%1",",");
+	#ifdef RA2_MODE
+			// MW 07/18/01
+			// for yuri mode, only check if it´s for RA2, else support it only if YR isnt´needed...
+			if(GetParam(eventdata, 7)=="1" && ( yuri_mode || !atoi(GetParam(eventdata,9)) ) )
+			{
 
 
-#else
-		if(GetParam(eventdata, 6)=="1")
-		{
-#endif
-			m_EventType.AddString(text);
+	#else
+			if(GetParam(eventdata, 6)=="1")
+			{
+	#endif
+				m_EventType.AddString(text);
+			}
 		}
 	}
 
@@ -561,12 +572,13 @@ void CTriggerEventsDlg::UpdateDialog()
 	CString Data=ini.sections["Events"].values[m_currentTrigger];
 	int count=atoi(GetParam(Data,0));
 
+	CString evLabel=TranslateStringACP("Event");
 	for(i=0;i<count;i++)
 	{
 		char c[50];
 		itoa(i,c,10);
 
-		CString s=TranslateStringACP("Event");
+		CString s=evLabel;
 		s+=" ";
 		s+=c;
 

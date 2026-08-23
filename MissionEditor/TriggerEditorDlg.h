@@ -44,6 +44,7 @@ public:
 	CTriggerEventsDlg m_TriggerEvents;
 	CTriggerOptionsDlg m_TriggerOptions;
 	void UpdateDialog();
+	void UpdateCurrentPage();
 	CTriggerEditorDlg(CWnd* pParent = NULL);   // Standardkonstruktor
 
 // Dialogfelddaten

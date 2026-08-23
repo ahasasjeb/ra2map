@@ -59,6 +59,7 @@ public:
 
 // Implementierung
 protected:
+	int m_typeListKey{ -1 };	// cache key of the action type list built last
 
 	// Generierte Nachrichtenzuordnungsfunktionen
 	//{{AFX_MSG(CTriggerActionsDlg)

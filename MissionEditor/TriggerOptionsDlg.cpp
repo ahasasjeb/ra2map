@@ -38,6 +38,28 @@ static char THIS_FILE[] = __FILE__;
 /////////////////////////////////////////////////////////////////////////////
 // Dialogfeld CTriggerOptionsDlg 
 
+// FNV-1a over every key and value of the section. The section map iterates
+// in a canonical order, so the hash changes exactly when the content changes.
+static unsigned int HashIniSection(const CIniFileSection& sec)
+{
+	unsigned int hash=2166136261u;
+
+	auto mix=[&hash](const CString& s)
+	{
+		for(int i=0;i<s.GetLength();i++)
+			hash=(hash ^ (unsigned char)(char)s[i]) * 16777619u;
+		hash=(hash ^ 0x1fu) * 16777619u;
+	};
+
+	for(const auto& entry : sec.values)
+	{
+		mix(entry.first);
+		mix(entry.second);
+	}
+
+	return hash;
+}
+
 
 CTriggerOptionsDlg::CTriggerOptionsDlg(CWnd* pParent /*=NULL*/)
 	: CDialog(CTriggerOptionsDlg::IDD, pParent)
@@ -91,8 +113,19 @@ void CTriggerOptionsDlg::UpdateDialog()
 	if(m_currentTrigger.GetLength()==0) return;
 
 	ListHouses(m_House, FALSE, TRUE, FALSE);
-	ListTriggers(m_AttachedTrigger);
-	m_AttachedTrigger.InsertString(0, "<none>");
+
+	// rebuilding the attached-trigger list is expensive on trigger-rich maps
+	// (every entry is inserted into a sorted combo box), so it is only
+	// rebuilt when the [Triggers] section actually changed
+	unsigned int triggersHash=HashIniSection(ini.sections["Triggers"]);
+	if(!m_attachedListValid || triggersHash!=m_attachedListHash)
+	{
+		m_attachedListValid=TRUE;
+		m_attachedListHash=triggersHash;
+
+		ListTriggers(m_AttachedTrigger);
+		m_AttachedTrigger.InsertString(0, "<none>");
+	}
 
 	RepairTrigger(ini.sections["Triggers"].values[m_currentTrigger]);
 

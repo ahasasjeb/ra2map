@@ -64,6 +64,8 @@ public:
 // Implementierung
 protected:
 	CToolTipCtrl m_tooltip;
+	unsigned int m_attachedListHash{ 0 };	// hash of [Triggers] the list was built from
+	BOOL m_attachedListValid{ FALSE };
 	virtual BOOL OnInitDialog();
 
 	// Generierte Nachrichtenzuordnungsfunktionen
