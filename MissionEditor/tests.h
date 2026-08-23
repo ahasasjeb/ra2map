@@ -40,4 +40,5 @@ private:
 	void test_ini_malformed_section_is_discarded();
 	void test_property_brush_settings();
 	void test_turret_offset_parsing();
+	void test_paletted_image_composition();
 };

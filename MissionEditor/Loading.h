@@ -190,7 +190,8 @@ public:
 	void InitPics(CProgressCtrl* prog=NULL);
 	void Load();
 	BOOL LoadUnitGraphic(LPCTSTR lpUnittype);
-	void LoadBuildingSubGraphic(const CString& subkey, const CIniFileSection& artSection, BOOL bAlwaysSetChar, char theat, HMIXFILE hShpMix, SHPHEADER& shp_h, BYTE*& shp);
+	void LoadBuildingSubGraphic(const CString& subkey, const CIniFileSection& artSection,
+		char theat, SHPHEADER& shp_h, BYTE*& shp);
 	void LoadOverlayGraphic(LPCTSTR lpOvrlName, int iOvrlNum);
 	void InitVoxelNormalTables();
 	HTSPALETTE GetIsoPalette(char theat);

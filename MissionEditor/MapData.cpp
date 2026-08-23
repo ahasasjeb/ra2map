@@ -393,6 +393,11 @@ CIniFile& CMapData::GetIniFile()
 	return m_mapfile;
 }
 
+const CIniFile& CMapData::GetIniFile() const noexcept
+{
+	return m_mapfile;
+}
+
 /*
 UpdateIniFile();
 
@@ -3694,7 +3699,7 @@ void CMapData::UpdateMapFieldData(BOOL bSave)
 
 void CMapData::UpdateBuildingInfo(LPCSTR lpUnitType)
 {
-	CIniFile& ini = GetIniFile();
+	CIniFile& ini = m_mapfile;
 
 	if (!lpUnitType)
 	{

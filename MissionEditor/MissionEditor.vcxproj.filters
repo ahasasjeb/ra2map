@@ -54,6 +54,9 @@
     <ClCompile Include="Building.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="PalettedImageComposition.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="CellTag.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -326,6 +329,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Building.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="PalettedImageComposition.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="CellTag.h">

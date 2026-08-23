@@ -32,6 +32,7 @@
 #include "WaypointCodec.h"
 #include "MapSnapshots.h"
 #include "PropertyBrushTool.h"
+#include "PalettedImageComposition.h"
 
 class TestError : public std::runtime_error
 {
@@ -111,6 +112,7 @@ int Tests::run()
 		[this]() { test_snapshot_redraw_flag(); },
 		[this]() { test_property_brush_settings(); },
 		[this]() { test_turret_offset_parsing(); },
+		[this]() { test_paletted_image_composition(); },
 	});
 	for (const auto f : test_functions)
 	{
@@ -157,6 +159,59 @@ void Tests::test_turret_offset_parsing()
 
 	offset = ParseTurretOffset("");
 	REPORT_TEST(offset[0] == 0.0f && offset[1] == 0.0f && offset[2] == 0.0f);
+}
+
+void Tests::test_paletted_image_composition()
+{
+	using namespace PalettedImageComposition;
+
+	// The building origin remains at the result center even when an off-center
+	// voxel projects beyond the original SHP canvas.
+	const std::vector<std::uint8_t> base(16, 1);
+	const std::vector<std::uint8_t> turret = { 9, 0, 0, 0, 0, 0 };
+	const std::vector<std::uint8_t> normals = { 22, 0, 0, 0, 0, 0 };
+	const Layer layers[] = {
+		{ base, {}, 4, 4, 2, 2, 0, 0 },
+		{ turret, normals, 3, 2, 0, 1, 0, 0 },
+	};
+	const auto composite = Compose(layers, CanvasMode::CenteredOrigin);
+	REPORT_TEST(composite.width == 5 && composite.height == 4);
+	REPORT_TEST(composite.colors[2 + 1 * composite.width] == 9);
+	REPORT_TEST(composite.lighting[2 + 1 * composite.width] == 22);
+	REPORT_TEST(composite.colors[1 + 1 * composite.width] == 1);
+	REPORT_TEST(composite.lighting[1 + 1 * composite.width] == 46);
+
+	// SHP turrets use the center of their own canvas as the anchor. Rules pixel
+	// offsets therefore move that center relative to the building center.
+	const std::vector<std::uint8_t> shpTurret(4, 7);
+	const Layer shpLayers[] = {
+		{ base, {}, 4, 4, 2, 2, 0, 0 },
+		{ shpTurret, {}, 2, 2, 1, 1, 3, -2 },
+	};
+	const auto shpComposite = Compose(shpLayers, CanvasMode::CenteredOrigin);
+	REPORT_TEST(shpComposite.width == 7 && shpComposite.height == 6);
+	REPORT_TEST(shpComposite.colors[5 + 0 * shpComposite.width] == 7);
+
+	// VXL bodies, turrets and barrels use independently projected canvases. Tight
+	// composition must retain layers beyond every body edge and translate the
+	// body's original anchor into the expanded result.
+	const std::vector<std::uint8_t> vxlTurret = { 9, 0, 0, 0, 0, 0 };
+	const std::vector<std::uint8_t> vxlTurretNormals = { 21, 0, 0, 0, 0, 0 };
+	const std::vector<std::uint8_t> vxlBarrel = { 7, 0, 0, 0, 0, 0 };
+	const std::vector<std::uint8_t> vxlBarrelNormals = { 35, 0, 0, 0, 0, 0 };
+	const std::vector<std::uint8_t> vxlBodyNormals(16, 46);
+	const Layer vxlLayers[] = {
+		{ base, vxlBodyNormals, 4, 4, 2, 2, 0, 0 },
+		{ vxlTurret, vxlTurretNormals, 3, 2, 1, 1, -3, -2 },
+		{ vxlBarrel, vxlBarrelNormals, 2, 3, 0, 0, 4, 3 },
+	};
+	const auto vxlComposite = Compose(vxlLayers, CanvasMode::Tight);
+	REPORT_TEST(vxlComposite.width == 10 && vxlComposite.height == 9);
+	REPORT_TEST(vxlComposite.anchorX == 4 && vxlComposite.anchorY == 3);
+	REPORT_TEST(vxlComposite.colors[0] == 9 && vxlComposite.lighting[0] == 21);
+	REPORT_TEST(vxlComposite.colors[8 + 6 * vxlComposite.width] == 7);
+	REPORT_TEST(vxlComposite.lighting[8 + 6 * vxlComposite.width] == 35);
+	REPORT_TEST(vxlComposite.colors[2 + 1 * vxlComposite.width] == 1);
 }
 
 void Tests::test_ini_utf8_normalization()
@@ -278,6 +333,8 @@ void Tests::test_inlines()
 	REPORT_TEST(SetParam("SOME,,Value,0,", 1, "NOTSOME") == "SOME,NOTSOME,Value,0,");
 	REPORT_TEST(SetParam("SOME,,Value,0,", 3, "1") == "SOME,,Value,1,");
 	REPORT_TEST(SetParam("SOME,,Value,0,", 10, "A") == "SOME,,Value,0,,,,,,,A");
+	REPORT_TEST(GetVoxelTurretFilename("YGGGUN", "YAGGUN") == "YAGGUN.vxl");
+	REPORT_TEST(GetVoxelTurretFilename("GTGCAN", "") == "GTGCANtur.vxl");
 
 	// rewritten helpers (previously fixed-buffer strcpy/strcat)
 	REPORT_TEST(TranslateStringVariables(9, "Hello %9", "FinalAlert") == CString("Hello FinalAlert"));
@@ -429,6 +486,43 @@ void Tests::test_iso()
 		~MapPointerRestorer() { Map = const_cast<CMapData*>(previous); }
 	} restoreMap{ previousMap };
 	Map = &d;
+
+	// Rendered pictures use the logical type as cache identity. Types sharing an
+	// Image= must not reuse or overwrite each other's turret composition.
+	const CString overrideType = "TEST_MAP_IMAGE_OVERRIDE_A";
+	const CString secondType = "TEST_MAP_IMAGE_OVERRIDE_B";
+	const CString globalImage = "TEST_GLOBAL_IMAGE";
+	const CString mapImage = "TEST_MAP_IMAGE";
+	rules.sections[overrideType].values["Image"] = globalImage;
+	rules.sections[secondType].values["Image"] = globalImage;
+	d.GetIniFile().sections[overrideType].values["Image"] = mapImage;
+	const CString overrideKey = MakeUnitPictureCacheKey(overrideType, 3);
+	const CString secondKey = MakeUnitPictureCacheKey(secondType, 3);
+	const CString bitmapKey = mapImage + ".bmp";
+	pics[overrideKey].pic = reinterpret_cast<void*>(1);
+	pics[bitmapKey].pic = reinterpret_cast<void*>(1);
+	struct PictureOverrideRestorer
+	{
+		CString type;
+		CString secondType;
+		CString globalImage;
+		CString mapImage;
+		CString cacheKey;
+		CString bitmapKey;
+		~PictureOverrideRestorer()
+		{
+			rules.sections.erase(type);
+			rules.sections.erase(secondType);
+			art.sections.erase(globalImage);
+			art.sections.erase(mapImage);
+			pics.erase(cacheKey);
+			pics.erase(bitmapKey);
+		}
+	} restorePictureOverride{ overrideType, secondType, globalImage, mapImage, overrideKey, bitmapKey };
+	REPORT_TEST(overrideKey != secondKey);
+	REPORT_TEST(GetUnitPictureFilename(overrideType, 3) == overrideKey);
+	REPORT_TEST(GetUnitPictureFilename(overrideType, 4) == bitmapKey);
+	REPORT_TEST(GetUnitPictureFilename(secondType, 3).IsEmpty());
 
 	REPORT_TEST(d.ProjectCoords3d(MapCoords(0, 0)) == ProjectedCoords((26 - 2) * f_x / 2, 0));
 	REPORT_TEST(d.ProjectCoords3d(MapCoords(1, 0)) == ProjectedCoords((26 - 2 - 1) * f_x / 2, f_y / 2));

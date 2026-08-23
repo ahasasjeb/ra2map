@@ -564,6 +564,7 @@ public:
 	BOOL LoadMap(const std::string& file);
 	void UpdateIniFile(DWORD dwFlags = MAPDATA_UPDATE_TO_INI);
 	CIniFile& GetIniFile();
+	const CIniFile& GetIniFile() const noexcept;
 	CString GetAITriggerTypeID(DWORD dwAITriggerType);
 	DWORD GetAITriggerTypeIndex(LPCTSTR lpID);
 	WORD GetHouseIndex(LPCTSTR lpHouse);

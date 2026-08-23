@@ -255,6 +255,7 @@
     <ClCompile Include="Basic.cpp" />
     <ClCompile Include="Bitmap2MapConverter.cpp" />
     <ClCompile Include="Building.cpp" />
+    <ClCompile Include="PalettedImageComposition.cpp" />
     <ClCompile Include="CellTag.cpp" />
     <ClCompile Include="ChangeSizeDlg.cpp" />
     <ClCompile Include="CliffModifier.cpp" />
@@ -366,6 +367,7 @@
     <ClInclude Include="Basic.h" />
     <ClInclude Include="Bitmap2MapConverter.h" />
     <ClInclude Include="Building.h" />
+    <ClInclude Include="PalettedImageComposition.h" />
     <ClInclude Include="CellTag.h" />
     <ClInclude Include="ChangeSizeDlg.h" />
     <ClInclude Include="CliffModifier.h" />

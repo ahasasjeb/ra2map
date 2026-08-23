@@ -48,53 +48,56 @@ inline BOOL isFalse(CString expr)
 	return FALSE;
 }
 
-// retrieve the picture filename of a unit (as it is saved in the pics map). The returned file may not exist in the pics map (you need to do a check!).
+// Rendered unit pictures depend on the logical type (turret, offsets and map-local
+// rules), not only on the underlying Image=. Keep the cache identity type-specific
+// so two types sharing one body image cannot overwrite each other's composition.
+inline CString MakeUnitPictureCacheKey(LPCTSTR lpUnitName, DWORD dwPicIndex)
+{
+	CString key = "@unit:";
+	key += lpUnitName;
+	key += ':';
+	key += std::to_string(dwPicIndex).c_str();
+	return key;
+}
+
+// TurretAnim names the voxel resource directly. It is independent from the
+// building art section's Image= redirect, which only selects the body SHP.
+inline CString GetVoxelTurretFilename(const CString& bodyImage, const CString& turretAnim)
+{
+	CString filename = turretAnim.IsEmpty() ? bodyImage + "tur" : turretAnim;
+	filename += ".vxl";
+	return filename;
+}
+
+// Retrieve the picture key of a unit. A BMP with the resolved art name remains a
+// fallback for the legacy pics2 override directory.
 inline CString GetUnitPictureFilename(LPCTSTR lpUnitName, DWORD dwPicIndex)
 {
-	CIniFile& ini = Map->GetIniFile();
+	const CString cacheKey = MakeUnitPictureCacheKey(lpUnitName, dwPicIndex);
+	if (pics.find(cacheKey) != pics.end())
+		return cacheKey;
+
+	const CIniFile& ini = static_cast<const CMapData&>(*Map).GetIniFile();
 
 	CString UnitName = lpUnitName;
 
 	UnitName = rules.sections[lpUnitName].GetValueByName("Image", lpUnitName);
 
-	if (ini.sections.find(lpUnitName) != ini.sections.end())
-		UnitName = ini.sections[lpUnitName].GetValueByName("Image", UnitName);
-
-	if (rules.sections[lpUnitName].values.find("Image") != rules.sections[lpUnitName].values.end())
-		UnitName = rules.sections[lpUnitName].values["Image"];
+	if (const auto* mapSection = ini.GetSection(lpUnitName))
+		UnitName = mapSection->GetValueByName("Image", UnitName);
 
 	CString artname = UnitName;
 
-	if (art.sections[UnitName].values.find("Image") != art.sections[UnitName].values.end())
+	const auto& artSection = art.sections[UnitName];
+	if (const auto value = artSection.GetValueByName("Image"); !value.IsEmpty())
 	{
-		if (!isTrue(g_data.sections["IgnoreArtImage"].AccessValueByName(UnitName)))
-			artname = art.sections[UnitName].AccessValueByName("Image");
+		if (!isTrue(g_data.sections["IgnoreArtImage"].GetValueByName(UnitName)))
+			artname = value;
 	}
 		
 
-	CString filename = UnitName;
-
-	if (art.sections[UnitName].FindName("NewTheater") >= 0 && art.sections[UnitName].AccessValueByName("DemandLoad") != "yes")
-		if (art.sections[UnitName].AccessValueByName("NewTheater") == "yes")
-			filename.SetAt(1, 'T');
-
-	char n[50];
-	itoa(dwPicIndex, n, 10);
-
-
-	if (pics.find(artname + n) != pics.end())
-	{
-		filename = artname; // yes, found
-		filename += n;
-	}
-	else if (pics.find(artname + ".bmp") != pics.end()) // since June, 15th (Matze): Only use BMP if no SHP/VXL exists
-	{
-		filename = (CString)artname + ".bmp";
-	}
-	else
-		filename = "";
-
-	return filename;
+	const CString bitmapKey = artname + ".bmp";
+	return pics.find(bitmapKey) != pics.end() ? bitmapKey : CString();
 }
 
 inline CString GetParam(const CString& data, const int param)
