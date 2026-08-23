@@ -90,6 +90,8 @@ END_MESSAGE_MAP()
 
 void CTaskForce::UpdateDialog()
 {
+	ApplyEditorUIFont(this);
+
 	CIniFile& ini=Map->GetIniFile();
 
 	int sel=m_TaskForces.GetCurSel();

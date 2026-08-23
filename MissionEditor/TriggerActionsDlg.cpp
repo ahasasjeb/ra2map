@@ -487,6 +487,8 @@ void CTriggerActionsDlg::OnDeleteaction()
 
 void CTriggerActionsDlg::UpdateDialog()
 {
+	ApplyEditorUIFont(this);
+
 	// MW 07/20/01
 	Clear();
 

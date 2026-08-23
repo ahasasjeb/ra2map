@@ -26,6 +26,7 @@
 #include "AITriggerAddDlg.h"
 #include "Variables.h"
 #include "inlines.h"
+#include "functions.h"
 
 
 #ifdef _DEBUG
@@ -67,6 +68,7 @@ END_MESSAGE_MAP()
 BOOL CAITriggerAddDlg::OnInitDialog() 
 {
 	CDialog::OnInitDialog();
+	ApplyEditorUIFont(this);
 
 	CListBox* lb=(CListBox*)GetDlgItem(IDC_AITRIGGERS);
 

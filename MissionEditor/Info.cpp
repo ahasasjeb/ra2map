@@ -24,6 +24,7 @@
 #include "stdafx.h"
 #include "FinalSun.h"
 #include "Info.h"
+#include "functions.h"
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -68,6 +69,7 @@ END_MESSAGE_MAP()
 BOOL CInfo::OnInitDialog()
 {
 	CDialog::OnInitDialog();
+	ApplyEditorUIFont(this);
 
 #ifdef YR_MODE
 	CStringA license = R"(FinalAlert 2: Yuri's Revenge Mission Editor

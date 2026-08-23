@@ -67,6 +67,7 @@ END_MESSAGE_MAP()
 BOOL CNewRA2HouseDlg::OnInitDialog() 
 {
 	CDialog::OnInitDialog();
+	ApplyEditorUIFont(this);
 
 	CComboBox* country=(CComboBox*)GetDlgItem(IDC_COUNTRY);
 	

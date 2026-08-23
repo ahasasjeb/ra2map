@@ -171,6 +171,7 @@ BOOL CAircraft::OnInitDialog()
 	
 	ListHouses(*house, FALSE);
 	ListTags(*tag, TRUE);
+	if(m_tag=="None") m_tag=GetLanguageStringACP("None");
 
 	ListYesNo(*(CComboBox*)GetDlgItem(IDC_P3));
 	
@@ -204,6 +205,7 @@ void CAircraft::OnOK()
 
 	UpdateData();
 	m_house=TranslateHouse(m_house, FALSE);
+	if(m_tag==GetLanguageStringACP("None")) m_tag="None";
 	TruncSpace(m_tag);
 	TruncSpace(m_flag1);
 	TruncSpace(m_flag2);

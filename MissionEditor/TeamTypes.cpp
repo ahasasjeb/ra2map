@@ -200,6 +200,8 @@ CString btos(BOOL b)
 // Behandlungsroutinen für Nachrichten CTeamTypes 
 void CTeamTypes::UpdateDialog()
 {
+	ApplyEditorUIFont(this);
+
 	if(!yuri_mode)
 	{
 		GetDlgItem(IDC_MINDCONTROLDECISION)->ShowWindow(SW_HIDE);

@@ -505,13 +505,13 @@ void CViewObjects::OnSelchanged(NMHDR* pNMHDR, LRESULT* pResult)
 				if(subpos==1)
 				{
 					AD.data=31;
-					AD.data2=atoi(InputBox("Please enter the value (0-255) of the overlay. Don´t exceed this range.","Set overlay manually"));
+					AD.data2=atoi(InputBox(TranslateStringACP("Please enter the value (0-255) of the overlay. Don´t exceed this range."), TranslateStringACP("Set overlay manually")));
 
 				}
 				else if(subpos==2)
 				{
 					AD.data=32;
-					AD.data2=atoi(InputBox("Please enter the value (0-255) of the overlay-data. Don´t exceed this range.","Set overlay manually"));
+					AD.data2=atoi(InputBox(TranslateStringACP("Please enter the value (0-255) of the overlay-data. Don´t exceed this range."), TranslateStringACP("Set overlay manually")));
 
 				}
 				

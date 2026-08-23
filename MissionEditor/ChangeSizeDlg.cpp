@@ -25,6 +25,7 @@
 #include "finalsun.h"
 #include "ChangeSizeDlg.h"
 #include "variables.h"
+#include "functions.h"
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -61,6 +62,13 @@ void CChangeSizeDlg::DoDataExchange(CDataExchange* pDX)
 	DDX_Text(pDX, IDC_WIDTH, m_Width);
 	DDV_MinMaxInt(pDX, m_Width, 0, 400);
 	//}}AFX_DATA_MAP
+}
+
+BOOL CChangeSizeDlg::OnInitDialog()
+{
+	CDialog::OnInitDialog();
+	ApplyEditorUIFont(this);
+	return TRUE;
 }
 
 

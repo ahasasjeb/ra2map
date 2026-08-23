@@ -160,6 +160,8 @@ END_MESSAGE_MAP()
 
 void CTriggers::UpdateDialog()
 {
+	ApplyEditorUIFont(this);
+
 	CIniFile& ini=Map->GetIniFile();
 	
 

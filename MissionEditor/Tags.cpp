@@ -81,6 +81,8 @@ END_MESSAGE_MAP()
 
 void CTags::UpdateDialog()
 {
+	ApplyEditorUIFont(this);
+
 	CIniFile& ini=Map->GetIniFile();
 
 	int sel=m_Tag.GetCurSel();

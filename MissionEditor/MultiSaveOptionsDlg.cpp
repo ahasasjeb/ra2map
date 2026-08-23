@@ -24,6 +24,7 @@
 #include "stdafx.h"
 #include "finalsun.h"
 #include "MultiSaveOptionsDlg.h"
+#include "functions.h"
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -50,6 +51,13 @@ void CMultiSaveOptionsDlg::DoDataExchange(CDataExchange* pDX)
 	//{{AFX_DATA_MAP(CMultiSaveOptionsDlg)
 	DDX_Radio(pDX, IDC_MMX, m_mmx);
 	//}}AFX_DATA_MAP
+}
+
+BOOL CMultiSaveOptionsDlg::OnInitDialog()
+{
+	CDialog::OnInitDialog();
+	ApplyEditorUIFont(this);
+	return TRUE;
 }
 
 

@@ -357,7 +357,7 @@ BOOL CFinalSunApp::InitInstance()
 
 	if (opts.bDoNotLoadTemperateGraphics && opts.bDoNotLoadSnowGraphics)
 	{
-		MessageBox(0, "You have turned off loading of both snow and temperate terrain in 'FinalAlert.ini'. At least one of these must be loaded. The application will now quit.", "Error", 0);
+		MessageBox(0, TranslateStringACP("You have turned off loading of both snow and temperate terrain in 'FinalAlert.ini'. At least one of these must be loaded. The application will now quit."), TranslateStringACP("Error"), 0);
 		exit(-982);
 	}
 

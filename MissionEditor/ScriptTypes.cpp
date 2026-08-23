@@ -454,7 +454,7 @@ void CScriptTypes::OnSelchangeAction()
 	else
 	{
 		m_DescriptionEx.SetWindowText(TranslateStringACP(GetScriptMissionHelp(type)));
-		m_Desc.SetWindowText("Parameter of action:");
+		m_Desc.SetWindowText(TranslateStringACP("Parameter of action:"));
 	}
 
 	m_Param.SetWindowText(GetParam(ini.sections[(LPCTSTR)Scripttype].values[action],1));
@@ -519,7 +519,7 @@ void CScriptTypes::OnEditchangeType()
 	{
 	case 0:
 		ListTargets(m_Param);
-		m_Desc.SetWindowText("Target:");
+		m_Desc.SetWindowText(TranslateStringACP("Target:"));
 		break;
 	case 39:
 	case 40:
@@ -533,22 +533,22 @@ void CScriptTypes::OnEditchangeType()
 	case 3:
 	case 16:
 		ListWaypoints(m_Param);
-		m_Desc.SetWindowText("Waypoint:");
+		m_Desc.SetWindowText(TranslateStringACP("Waypoint:"));
 		break;
 	case 4:
-		m_Desc.SetWindowText("Cell:");
+		m_Desc.SetWindowText(TranslateStringACP("Cell:"));
 		break;
 	case 5:
-		m_Desc.SetWindowText("Time units to guard:");
+		m_Desc.SetWindowText(TranslateStringACP("Time units to guard:"));
 		break;
 	case 6:
-		m_Desc.SetWindowText("Script action #:");
+		m_Desc.SetWindowText(TranslateStringACP("Script action #:"));
 		while(m_Param.DeleteString(0)!=CB_ERR);
 		for(i=1;i<=ini.sections[(LPCTSTR)Scripttype].values.size()-1;i++)
 			m_Param.AddString(itoa(i,tmp,10));			
 		break;
 	case 8:
-		m_Desc.SetWindowText("Split groups:");
+		m_Desc.SetWindowText(TranslateStringACP("Split groups:"));
 		while(m_Param.DeleteString(0)!=CB_ERR);
 		int i;
 		for(i=0;i<UNLOAD_COUNT;i++)
@@ -558,7 +558,7 @@ void CScriptTypes::OnEditchangeType()
 			itoa(i,c,10);
 			p=c;
 			p+=" - ";
-			p+=UnloadTypeNames[i];
+			p+=TranslateStringACP(UnloadTypeNames[i]);
 
 			m_Param.AddString(p);
 		}
@@ -566,19 +566,19 @@ void CScriptTypes::OnEditchangeType()
 	case 9:
 	case 14:
 	case 37:
-		m_Desc.SetWindowText("Use 0:");
+		m_Desc.SetWindowText(TranslateStringACP("Use 0:"));
 		break;
 	case 12:
-		m_Desc.SetWindowText("Global:");
+		m_Desc.SetWindowText(TranslateStringACP("Global:"));
 		break;
 	case 20:
 		ListHouses(m_Param, TRUE);
-		m_Desc.SetWindowText("House:");
+		m_Desc.SetWindowText(TranslateStringACP("House:"));
 		break;
 	case 46:
 	case 47:
 		{
-			m_Desc.SetWindowText("Type to move/attack:");
+			m_Desc.SetWindowText(TranslateStringACP("Type to move/attack:"));
 
 			for(i=0;i<rules.sections["BuildingTypes"].values.size();i++)
 			{
@@ -595,7 +595,7 @@ void CScriptTypes::OnEditchangeType()
 			break;
 		}
 	default:
-		m_Desc.SetWindowText("Parameter of action:");
+		m_Desc.SetWindowText(TranslateStringACP("Parameter of action:"));
 	}
 	
 	itoa(m_Action.GetCurSel(), action, 10);
@@ -755,36 +755,36 @@ void CScriptTypes::ListBehaviours(CComboBox &cb)
 {
 	while(cb.DeleteString(0)!=CB_ERR);
 
-	cb.AddString("0 - Sleep");
-	cb.AddString("1 - Attack nearest enemy");
-	cb.AddString("2 - Move");
-	cb.AddString("3 - QMove");
-	cb.AddString("4 - Retreat home for R&R");
-	cb.AddString("5 - Guard");
-	cb.AddString("6 - Sticky (never recruit)");
-	cb.AddString("7 - Enter object");
-	cb.AddString("8 - Capture object");
-	cb.AddString("9 - Move into & get eaten");
-	cb.AddString("10 - Harvest");
-	cb.AddString("11 - Area Guard");
-	cb.AddString("12 - Return (to refinery)");
-	cb.AddString("13 - Stop");
-	cb.AddString("14 - Ambush (wait until discovered)");
-	cb.AddString("15 - Hunt");
-	cb.AddString("16 - Unload");
-	cb.AddString("17 - Sabotage (move in & destroy)");
-	cb.AddString("18 - Construction");
-	cb.AddString("19 - Deconstruction");
-	cb.AddString("20 - Repair");
-	cb.AddString("21 - Rescue");
-	cb.AddString("22 - Missile");
-	cb.AddString("23 - Harmless");
-	cb.AddString("24 - Open");
-	cb.AddString("25 - Patrol");
-	cb.AddString("26 - Paradrop approach drop zone");
-	cb.AddString("27 - Paradrop overlay drop zone");
-	cb.AddString("28 - Wait");
-	cb.AddString("29 - Attack move");
+	cb.AddString(TranslateStringACP("0 - Sleep"));
+	cb.AddString(TranslateStringACP("1 - Attack nearest enemy"));
+	cb.AddString(TranslateStringACP("2 - Move"));
+	cb.AddString(TranslateStringACP("3 - QMove"));
+	cb.AddString(TranslateStringACP("4 - Retreat home for R&R"));
+	cb.AddString(TranslateStringACP("5 - Guard"));
+	cb.AddString(TranslateStringACP("6 - Sticky (never recruit)"));
+	cb.AddString(TranslateStringACP("7 - Enter object"));
+	cb.AddString(TranslateStringACP("8 - Capture object"));
+	cb.AddString(TranslateStringACP("9 - Move into & get eaten"));
+	cb.AddString(TranslateStringACP("10 - Harvest"));
+	cb.AddString(TranslateStringACP("11 - Area Guard"));
+	cb.AddString(TranslateStringACP("12 - Return (to refinery)"));
+	cb.AddString(TranslateStringACP("13 - Stop"));
+	cb.AddString(TranslateStringACP("14 - Ambush (wait until discovered)"));
+	cb.AddString(TranslateStringACP("15 - Hunt"));
+	cb.AddString(TranslateStringACP("16 - Unload"));
+	cb.AddString(TranslateStringACP("17 - Sabotage (move in & destroy)"));
+	cb.AddString(TranslateStringACP("18 - Construction"));
+	cb.AddString(TranslateStringACP("19 - Deconstruction"));
+	cb.AddString(TranslateStringACP("20 - Repair"));
+	cb.AddString(TranslateStringACP("21 - Rescue"));
+	cb.AddString(TranslateStringACP("22 - Missile"));
+	cb.AddString(TranslateStringACP("23 - Harmless"));
+	cb.AddString(TranslateStringACP("24 - Open"));
+	cb.AddString(TranslateStringACP("25 - Patrol"));
+	cb.AddString(TranslateStringACP("26 - Paradrop approach drop zone"));
+	cb.AddString(TranslateStringACP("27 - Paradrop overlay drop zone"));
+	cb.AddString(TranslateStringACP("28 - Wait"));
+	cb.AddString(TranslateStringACP("29 - Attack move"));
 	if(yuri_mode)
 	{
 	//	cb.AddString("30 - Spyplane approach");
@@ -805,7 +805,7 @@ BOOL CScriptTypes::OnInitDialog()
 	{
 		if(strlen(TMissions[i])>0)
 		{
-			const int index=m_Type.AddString(TMissions[i]);
+			const int index=m_Type.AddString(TranslateStringACP(TMissions[i]));
 			m_Type.SetItemData(index, i);
 		}
 	}

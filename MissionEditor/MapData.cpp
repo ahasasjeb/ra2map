@@ -499,7 +499,7 @@ BOOL CMapData::LoadMap(const std::string& file)
 	{
 		errstream << "LoadMap() could not read map INI data\n";
 		errstream.flush();
-		MessageBox(0, "The map cannot be loaded because its INI data could not be read.", "Invalid Map", MB_OK | MB_ICONERROR);
+		MessageBox(0, TranslateStringACP("The map cannot be loaded because its INI data could not be read."), TranslateStringACP("Invalid Map"), MB_OK | MB_ICONERROR);
 		return FALSE;
 	}
 
@@ -510,7 +510,7 @@ BOOL CMapData::LoadMap(const std::string& file)
 	{
 		errstream << "LoadMap() rejected missing or unsupported map theater\n";
 		errstream.flush();
-		MessageBox(0, "The map cannot be loaded because it has no supported [Map] Theater entry.", "Invalid Map", MB_OK | MB_ICONERROR);
+		MessageBox(0, TranslateStringACP("The map cannot be loaded because it has no supported [Map] Theater entry."), TranslateStringACP("Invalid Map"), MB_OK | MB_ICONERROR);
 		return FALSE;
 	}
 
@@ -842,7 +842,7 @@ BOOL CMapData::LoadMap(const std::string& file)
 		theApp.m_loading->FreeAll();
 		CString s = "Fatal error! %9 doesn´t support the theater of this map!";
 		s = TranslateStringACP(s);
-		MessageBox(0, s, "Error", 0);
+		MessageBox(0, s, TranslateStringACP("Error"), 0);
 		dlg.DestroyWindow();
 		return FALSE;
 	}
@@ -4400,7 +4400,7 @@ void CMapData::CreateMap(DWORD dwWidth, DWORD dwHeight, LPCTSTR lpTerrainType, D
 			theApp.m_loading->FreeAll();
 			CString s = "Fatal error! %9 doesn´t support the theater of this map!";
 			s = TranslateStringACP(s);
-			MessageBox(0, s, "Error", 0);
+			MessageBox(0, s, TranslateStringACP("Error"), 0);
 			exit(0);
 		}
 	}
@@ -5958,7 +5958,7 @@ void CMapData::Copy(int left, int top, int right, int bottom)
 
 	if (!lpVoid)
 	{
-		MessageBox(0, "Failed to lock memory", "Error", 0);
+		MessageBox(0, TranslateStringACP("Failed to lock memory"), TranslateStringACP("Error"), 0);
 		GlobalFree(hGlob);
 		return;
 	}
@@ -6039,7 +6039,7 @@ void CMapData::Copy(int left, int top, int right, int bottom)
 
 	if (!SetClipboardData(theApp.m_cf, hGlob))
 	{
-		MessageBox(0, "Failed to set clipboard data", "Error", 0);
+		MessageBox(0, TranslateStringACP("Failed to set clipboard data"), TranslateStringACP("Error"), 0);
 		GlobalFree(hGlob);
 	}
 

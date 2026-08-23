@@ -101,7 +101,7 @@ int CUserScript::LoadFile(const char *setupfile)
 	int file=_open(setupfile, _O_RDONLY);
 	if(file==-1)
 	{
-		MessageBox(0, "Error opening script file", "Error", MB_ICONERROR);
+		MessageBox(0, TranslateStringACP("Error opening script file"), TranslateStringACP("Error"), MB_ICONERROR);
 		return -1;
 	}
 
@@ -966,7 +966,7 @@ void CUserScriptsDlg::OnOK()
 				}
 			}
 
-			int res=MessageBox(params[0], "Continue?", MB_YESNO);
+			int res=MessageBox(params[0], TranslateStringACP("Continue?"), MB_YESNO);
 			if(res==IDNO) break;
 		}
 		else if(name==ID_MESSAGE)
@@ -1143,12 +1143,9 @@ void CUserScriptsDlg::OnOK()
 
 			if(!enabled)
 			{
-				CString s;
-				s="This script wants to disable INI protection. For some scripts this may be necessary, but it can seriously damage your Map-> Reason why script wants to disable INI protection:\n";
-				s+=params[1];
-				s+="\n\nDisable INI protection?";
+				CString s=TranslateStringVariables(1, TranslateStringACP("This script wants to disable INI protection. For some scripts this may be necessary, but it can seriously damage your map. Reason why script wants to disable INI protection: %1. Disable INI protection?"), params[1]);
 
-				int res=MessageBox(s, "Disable INI protection?", MB_YESNO | MB_DEFBUTTON2);
+				int res=MessageBox(s, TranslateStringACP("Disable INI protection?"), MB_YESNO | MB_DEFBUTTON2);
 				if(res==IDNO) goto nextline;
 			}
 
@@ -1381,7 +1378,7 @@ void CUserScriptsDlg::OnOK()
 
 			if(atoi(params[1])>=variables[params[0]].GetLength() || atoi(params[1])<0 || atoi(params[2])<0)
 			{
-				MessageBox("Invalid index or length for remove command, script cancelled.","Error");
+				MessageBox(TranslateStringACP("Invalid index or length for remove command, script cancelled."), TranslateStringACP("Error"));
 				delete[] params;
 				break;
 			}
@@ -1408,7 +1405,7 @@ void CUserScriptsDlg::OnOK()
 
 			if(atoi(params[2])>=params[1].GetLength() || atoi(params[2])<0)
 			{
-				MessageBox("Invalid index for GetChar command, script cancelled.","Error");
+				MessageBox(TranslateStringACP("Invalid index for GetChar command, script cancelled."), TranslateStringACP("Error"));
 				delete[] params;
 				break;
 			}
@@ -1491,7 +1488,7 @@ void CUserScriptsDlg::OnOK()
 
 			if(n2==0)
 			{
-				MessageBox("Division through 0, script cancelled", "Division through 0");
+				MessageBox(TranslateStringACP("Division through 0, script cancelled"), TranslateStringACP("Division through 0"));
 				delete[] params;
 				break;
 			}
@@ -1525,7 +1522,7 @@ void CUserScriptsDlg::OnOK()
 
 			if(n2==0)
 			{
-				MessageBox("Division through 0, script cancelled", "Division through 0");
+				MessageBox(TranslateStringACP("Division through 0, script cancelled"), TranslateStringACP("Division through 0"));
 				delete[] params;
 				break;
 			}
@@ -1600,7 +1597,7 @@ void CUserScriptsDlg::OnOK()
 
 			if(Map->IsMultiplayer()==FALSE)
 			{
-				MessageBox("This script requires a multiplayer map and cannot be used with singleplayer maps", "Error");
+				MessageBox(TranslateStringACP("This script requires a multiplayer map and cannot be used with singleplayer maps"), TranslateStringACP("Error"));
 				break;
 			}
 		}
@@ -1617,7 +1614,7 @@ void CUserScriptsDlg::OnOK()
 
 			if(Map->IsMultiplayer()==TRUE)
 			{
-				MessageBox("This script requires a singleplayer map and cannot be used with multiplayer maps", "Error");
+				MessageBox(TranslateStringACP("This script requires a singleplayer map and cannot be used with multiplayer maps"), TranslateStringACP("Error"));
 				break;
 			}
 		}
@@ -1706,13 +1703,13 @@ void CUserScriptsDlg::OnOK()
 				}
 			}
 
-			int res=MessageBox("This script wants to resize the map. Resize map?", "Resize map?", MB_YESNO);
+			int res=MessageBox(TranslateStringACP("This script wants to resize the map. Resize map?"), TranslateStringACP("Resize map?"), MB_YESNO);
 			if(res==IDNO) goto nextline;
 
 
 			if(atoi(params[2])>200 || atoi(params[3])>200)
 			{
-				MessageBox("Resizing map failed. Script cancelled.", "Error");
+				MessageBox(TranslateStringACP("Resizing map failed. Script cancelled."), TranslateStringACP("Error"));
 				break;
 			}
 
@@ -1908,7 +1905,7 @@ void CUserScriptsDlg::OnOK()
 			int n=0;
 			while(!ok)
 			{
-				CString s=InputBox(params[1], "Enter Integer");	
+				CString s=InputBox(params[1], TranslateStringACP("Enter Integer"));	
 				ok=TRUE;
 
 				if(s.GetLength()==0) ok=FALSE;
@@ -1952,7 +1949,7 @@ void CUserScriptsDlg::OnOK()
 			CString s;
 			while(!ok)
 			{
-				s=InputBox(params[1], "Enter String");	
+				s=InputBox(params[1], TranslateStringACP("Enter String"));	
 				ok=TRUE;
 
 				if (s.GetLength()==0) ok=FALSE;
@@ -2113,7 +2110,7 @@ void CUserScriptsDlg::OnOK()
 			
 			if(!bAllowLoop) 
 			{
-				int res=MessageBox("This script tries to use loops. Some scripts may require this. However, this holds the risk of infinite loops, which may cause the FinalSun/FinalAlert2 to crash. Do you want to allow looping for this script?", "Allow looping?", MB_YESNO);
+				int res=MessageBox(TranslateStringACP("This script tries to use loops. Some scripts may require this. However, this holds the risk of infinite loops, which may cause the FinalSun/FinalAlert2 to crash. Do you want to allow looping for this script?"), TranslateStringACP("Allow looping?"), MB_YESNO);
 				if(res==IDYES)
 				{
 					bAllowLoop=TRUE;
@@ -2128,7 +2125,7 @@ void CUserScriptsDlg::OnOK()
 
 				if(loop_count>300)
 				{
-					int res=MessageBox("This script has exceeded the 300 loops limit. Do you want to remove the loop limit (not recommended, inherits risk of infinite loops if script has bugs)? If you press no, the script will stop after another 300 loops to ask you again. If you press cancel, the script will be cancelled.", "Loop Limit exceeded", MB_YESNOCANCEL | MB_DEFBUTTON2);
+					int res=MessageBox(TranslateStringACP("This script has exceeded the 300 loops limit. Do you want to remove the loop limit (not recommended, inherits risk of infinite loops if script has bugs)? If you press no, the script will stop after another 300 loops to ask you again. If you press cancel, the script will be cancelled."), TranslateStringACP("Loop Limit exceeded"), MB_YESNOCANCEL | MB_DEFBUTTON2);
 					if(res==IDYES) bIgnoreLoopCounts=TRUE;
 					if(res==IDNO) loop_count=0;
 					if(res==IDCANCEL)
@@ -2405,12 +2402,9 @@ void CUserScriptsDlg::OnOK()
 
 			
 			{
-				CString s;
-				s="This script wants to delete objects or triggers from your map. For some scripts this may be necessary, but it can seriously damage your map. Reason why script wants to delete objects:\n";
-				s+=params[0];
-				s+="\n\nDo you want to allow the script to do this?";
+				CString s=TranslateStringVariables(1, TranslateStringACP("This script wants to delete objects or triggers from your map. For some scripts this may be necessary, but it can seriously damage your map. Reason why script wants to delete objects: %1. Do you want to allow the script to do this?"), params[0]);
 
-				int res=MessageBox(s, "Allow deletion of objects?", MB_YESNO | MB_DEFBUTTON2);
+				int res=MessageBox(s, TranslateStringACP("Allow deletion of objects?"), MB_YESNO | MB_DEFBUTTON2);
 				if(res==IDNO) goto nextline;
 			}
 
@@ -2436,12 +2430,9 @@ void CUserScriptsDlg::OnOK()
 
 			
 			{
-				CString s;
-				s="This script wants to add objects or triggers to your map. For some scripts this may be necessary, but it can seriously damage your map. Reason why script wants to add objects:\n";
-				s+=params[0];
-				s+="\n\nDo you want to allow the script to do this?";
+				CString s=TranslateStringVariables(1, TranslateStringACP("This script wants to add objects or triggers to your map. For some scripts this may be necessary, but it can seriously damage your map. Reason why script wants to add objects: %1. Do you want to allow the script to do this?"), params[0]);
 
-				int res=MessageBox(s, "Allow adding of objects?", MB_YESNO | MB_DEFBUTTON2);
+				int res=MessageBox(s, TranslateStringACP("Allow adding of objects?"), MB_YESNO | MB_DEFBUTTON2);
 				if(res==IDNO) goto nextline;
 			}
 
@@ -3179,5 +3170,5 @@ void CUserScriptsDlg::ReportScriptError(int line)
 	char c[50];
 	itoa(line, c, 10);
 
-	MessageBox("Script error in line " + (CString)c + ". Probably wrong parameter count or unknown function call.","Error");
+	MessageBox(TranslateStringVariables(1, TranslateStringACP("Script error in line %1. Probably wrong parameter count or unknown function call."), c), TranslateStringACP("Error"));
 }

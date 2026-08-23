@@ -148,6 +148,9 @@ CString DetectPreferredLanguageName();
 // apply a CJK-capable UI font when Simplified Chinese is selected
 void ApplyEditorUIFont(CWnd* root);
 
+// translate a dialog caption and its static/button labels using the active language table
+void LocalizeDialogText(CWnd* root);
+
 /****************************************
  sound functions [03/16/2001]
  ****************************************/

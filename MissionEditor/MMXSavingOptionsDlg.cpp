@@ -25,6 +25,7 @@
 #include "finalsun.h"
 #include "MMXSavingOptionsDlg.h"
 #include "variables.h"
+#include "functions.h"
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -73,6 +74,13 @@ void CMMXSavingOptionsDlg::DoDataExchange(CDataExchange* pDX)
 	DDX_Check(pDX, IDC_NUKEWAR, m_NukeWar);
 	DDX_Check(pDX, IDC_STANDARD, m_Standard);
 	//}}AFX_DATA_MAP
+}
+
+BOOL CMMXSavingOptionsDlg::OnInitDialog()
+{
+	CDialog::OnInitDialog();
+	ApplyEditorUIFont(this);
+	return TRUE;
 }
 
 

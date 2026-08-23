@@ -150,6 +150,7 @@ BOOL CInfantrie::OnInitDialog()
 	
 	ListHouses(*house, FALSE);
 	ListTags(*tag, TRUE);
+	if(m_tag=="None") m_tag=GetLanguageStringACP("None");
 	
 	
 	UpdateData(FALSE);
@@ -180,6 +181,7 @@ void CInfantrie::OnOK()
 	m_strength=GetText(&m_strength_ctrl);
 
 	UpdateData();	
+	if(m_tag==GetLanguageStringACP("None")) m_tag="None";
 	TruncSpace(m_tag);
 	m_house=TranslateHouse(m_house);
 	

@@ -68,6 +68,7 @@ END_MESSAGE_MAP()
 BOOL CComboUInputDlg::OnInitDialog() 
 {
 	CDialog::OnInitDialog();
+	ApplyEditorUIFont(this);
 	
 	CComboBox* box=(CComboBox*)GetDlgItem(IDC_COMBO1);
 

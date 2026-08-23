@@ -58,6 +58,7 @@ public:
 	//{{AFX_VIRTUAL(CMMXSavingOptionsDlg)
 	protected:
 	virtual void DoDataExchange(CDataExchange* pDX);    // DDX/DDV-Unterstützung
+	virtual BOOL OnInitDialog();
 	//}}AFX_VIRTUAL
 
 // Implementierung

@@ -75,6 +75,7 @@ END_MESSAGE_MAP()
 BOOL CRTPDlg::OnInitDialog() 
 {
 	CDialog::OnInitDialog();
+	ApplyEditorUIFont(this);
 
 	int i;
 	const CString randomTerrainSetting = g_data.GetValueByName(

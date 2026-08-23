@@ -81,6 +81,7 @@ void CImportINI::OnSpecifysections()
 BOOL CImportINI::OnInitDialog() 
 {
 	CDialog::OnInitDialog();
+	ApplyEditorUIFont(this);
 	
 	CButton* all;
 	all=(CButton*)GetDlgItem(IDC_ALLSECTIONS);

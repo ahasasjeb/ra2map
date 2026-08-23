@@ -86,6 +86,8 @@ END_MESSAGE_MAP()
 
 void CAll::UpdateDialog()
 {
+	ApplyEditorUIFont(this);
+
 	//m_Sections.Clear();
 
 	while(m_Sections.DeleteString(0)!=-1);
@@ -173,7 +175,7 @@ void CAll::OnUpdateValue()
 
 void CAll::OnAddsection() 
 {
-	CString name=InputBox("Please set the name of the new section (the section may already exist)", "Insert Section");
+	CString name=InputBox(TranslateStringACP("Please set the name of the new section (the section may already exist)"), TranslateStringACP("Insert Section"));
 	
 	CIniFile& ini=Map->GetIniFile();
 
@@ -245,7 +247,7 @@ void CAll::OnAddkey()
 	m_Sections.GetLBText(cusection, sec);
 
 	CString key, value;
-	key=InputBox("Please set the name and value for the current key here: (for example, setting a new key ""Strength"" with the value 200 can be written as ""Strength=200"". You don´t need to specify a value.)", "Create key");
+	key=InputBox(TranslateStringACP("Please set the name and value for the current key here: (for example, setting a new key ""Strength"" with the value 200 can be written as ""Strength=200"". You don´t need to specify a value.)"), TranslateStringACP("Create key"));
 
 	if(key.Find("=")!=-1)
 	{

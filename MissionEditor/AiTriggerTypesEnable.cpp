@@ -28,6 +28,7 @@
 #include "variables.h"
 #include "inlines.h"
 #include "aitriggeradddlg.h"
+#include "functions.h"
 
 
 #ifdef _DEBUG
@@ -75,6 +76,8 @@ END_MESSAGE_MAP()
 
 void CAiTriggerTypesEnable::UpdateDialog()
 {
+	ApplyEditorUIFont(this);
+
 	int sel=m_AITriggerType.GetCurSel();
 	if(sel<0) sel=0;
 

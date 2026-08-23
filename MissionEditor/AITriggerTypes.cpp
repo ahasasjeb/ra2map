@@ -265,6 +265,8 @@ void ListObjects(CComboBox& cb)
 
 void CAITriggerTypes::UpdateDialog()
 {
+	ApplyEditorUIFont(this);
+
 	int sel=m_AITriggerType.GetCurSel();
 	m_AITriggerType.SetRedraw(FALSE);
 

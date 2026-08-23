@@ -136,7 +136,7 @@ void CHouses::UpdateDialog()
 	}
 	else
 	{
-		m_HumanPlayer.AddString("None");
+		m_HumanPlayer.AddString(GetLanguageStringACP("None"));
 		m_HumanPlayer.SetCurSel(0);
 		for(i=0;i<ini.sections[MAPHOUSES].values.size();i++)
 		{
@@ -759,7 +759,7 @@ void CHouses::OnSelchangeHumanplayer()
 	m_HumanPlayer.GetLBText(m_HumanPlayer.GetCurSel(),pl);
 	pl=TranslateHouse(pl);
 
-	if(pl.GetLength()==0 || pl=="None")
+	if(pl.GetLength()==0 || pl==GetLanguageStringACP("None"))
 	{
 		ini.sections["Basic"].values.erase("Player");
 	}

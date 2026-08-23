@@ -83,6 +83,8 @@ END_MESSAGE_MAP()
 
 void CTriggerOptionsDlg::UpdateDialog()
 {
+	ApplyEditorUIFont(this);
+
 	// MW 07/20/01
 
 	CIniFile& ini=Map->GetIniFile();

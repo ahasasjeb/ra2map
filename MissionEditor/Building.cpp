@@ -189,6 +189,7 @@ void CBuilding::OnOK()
 
 	m_strength=GetText(&m_strength_ctrl);
 	UpdateData();
+	if(m_tag==GetLanguageStringACP("None")) m_tag="None";
 
 	char d[50];
 	TruncSpace(m_spotlight);
@@ -221,6 +222,7 @@ BOOL CBuilding::OnInitDialog()
 	
 	ListHouses(*chouse, FALSE);
 	ListTags(*ctag, TRUE);
+	if(m_tag=="None") m_tag=GetLanguageStringACP("None");
 	
 	
 	

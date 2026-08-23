@@ -367,7 +367,7 @@ BOOL CFinalSunDlg::OnInitDialog()
 	// September 6th, CLoading will not free itself as it is a member of CFinalSunApp
 	if(theApp.m_loading->m_hWnd ==NULL)
 	{
-		MessageBox("Loading dialog could not be created. Please close any programs and start again.");
+		MessageBox(TranslateStringACP("Loading dialog could not be created. Please close any programs and start again."));
 		exit(-99);
 	}
 	theApp.m_loading->ShowWindow(SW_SHOW);
@@ -987,7 +987,7 @@ void CFinalSunDlg::SaveMap(CString FileName_, bool interactive)
 				CString s="The maximum filename length for MMX files is 8 chars, do you want to save the map as ";
 				s+=CoreName;
 				s+=".mmx?";
-				int res=MessageBox(s,"Error", MB_YESNO);
+				int res=MessageBox(s,TranslateStringACP("Error"), MB_YESNO);
 				if(res!=IDYES) return;
 			}
 
@@ -2284,7 +2284,7 @@ void CFinalSunDlg::OnEditBasicsettings()
 	{		
 		if(!m_basic.Create(CBasic::IDD, NULL))
 		{
-			MessageBox(GetLanguageStringACP("Err_CreateErr"), "Error");
+			MessageBox(GetLanguageStringACP("Err_CreateErr"), TranslateStringACP("Error"));
 		}
 		
 	}
@@ -2304,7 +2304,7 @@ void CFinalSunDlg::OnEditSingleplayersettings()
 	{		
 		if(!m_singleplayersettings.Create(CSingleplayerSettings::IDD, NULL))
 		{
-			MessageBox(GetLanguageStringACP("Err_CreateErr"), "Error");
+			MessageBox(GetLanguageStringACP("Err_CreateErr"), TranslateStringACP("Error"));
 		}
 	}
 
@@ -2346,7 +2346,7 @@ void CFinalSunDlg::OnEditHouses()
 	{		
 		if(!m_houses.Create(CHouses::IDD, NULL))
 		{
-			MessageBox(GetLanguageStringACP("Err_CreateErr"), "Error");
+			MessageBox(GetLanguageStringACP("Err_CreateErr"), TranslateStringACP("Error"));
 		}
 	}
 
@@ -2365,7 +2365,7 @@ void CFinalSunDlg::OnEditAitriggers()
 	{		
 		if(!m_aitriggertypes.Create(CAITriggerTypes::IDD, NULL))
 		{
-			MessageBox(GetLanguageStringACP("Err_CreateErr"), "Error");
+			MessageBox(GetLanguageStringACP("Err_CreateErr"), TranslateStringACP("Error"));
 		}
 	}
 
@@ -2386,7 +2386,7 @@ void CFinalSunDlg::OnEditAitriggerenabling()
 	{		
 		if(!m_aitriggertypesenable.Create(CAiTriggerTypesEnable::IDD, NULL))
 		{
-			MessageBox(GetLanguageStringACP("Err_CreateErr"), "Error");
+			MessageBox(GetLanguageStringACP("Err_CreateErr"), TranslateStringACP("Error"));
 		}
 	}
 
@@ -2406,7 +2406,7 @@ void CFinalSunDlg::OnEditIniediting()
 	{		
 		if(!m_all.Create(CAll::IDD, NULL))
 		{
-			MessageBox(GetLanguageStringACP("Err_CreateErr"), "Error");
+			MessageBox(GetLanguageStringACP("Err_CreateErr"), TranslateStringACP("Error"));
 		}
 	}
 
@@ -2425,7 +2425,7 @@ void CFinalSunDlg::OnEditLighting()
 	{		
 		if(!m_lighting.Create(CLighting::IDD, NULL))
 		{
-			MessageBox(GetLanguageStringACP("Err_CreateErr"), "Error");
+			MessageBox(GetLanguageStringACP("Err_CreateErr"), TranslateStringACP("Error"));
 		}
 	}
 
@@ -2445,7 +2445,7 @@ void CFinalSunDlg::OnEditMap()
 	{		
 		if(!m_map.Create(CMapD::IDD, NULL))
 		{
-			MessageBox(GetLanguageStringACP("Err_CreateErr"), "Error");
+			MessageBox(GetLanguageStringACP("Err_CreateErr"), TranslateStringACP("Error"));
 		}
 	}
 
@@ -2464,7 +2464,7 @@ void CFinalSunDlg::OnEditScripts()
 	{		
 		if(!m_Scripttypes.Create(CScriptTypes::IDD, NULL))
 		{
-			MessageBox(GetLanguageStringACP("Err_CreateErr"), "Error");
+			MessageBox(GetLanguageStringACP("Err_CreateErr"), TranslateStringACP("Error"));
 		}
 	}
 
@@ -2483,7 +2483,7 @@ void CFinalSunDlg::OnEditSpecialflags()
 	{		
 		if(!m_specialflags.Create(CSpecialFlags::IDD, NULL))
 		{
-			MessageBox(GetLanguageStringACP("Err_CreateErr"), "Error");
+			MessageBox(GetLanguageStringACP("Err_CreateErr"), TranslateStringACP("Error"));
 		}
 	}
 
@@ -2502,7 +2502,7 @@ void CFinalSunDlg::OnEditTags()
 	{		
 		if(!m_tags.Create(CTags::IDD, NULL))
 		{
-			MessageBox(GetLanguageStringACP("Err_CreateErr"), "Error");
+			MessageBox(GetLanguageStringACP("Err_CreateErr"), TranslateStringACP("Error"));
 		}
 	}
 
@@ -2521,7 +2521,7 @@ void CFinalSunDlg::OnEditTaskforces()
 	{		
 		if(!m_taskforces.Create(CTaskForce::IDD, NULL))
 		{
-			MessageBox(GetLanguageStringACP("Err_CreateErr"), "Error");
+			MessageBox(GetLanguageStringACP("Err_CreateErr"), TranslateStringACP("Error"));
 		}
 	}
 
@@ -2540,7 +2540,7 @@ void CFinalSunDlg::OnEditTeams()
 	{		
 		if(!m_teamtypes.Create(CTeamTypes::IDD, NULL))
 		{
-			MessageBox(GetLanguageStringACP("Err_CreateErr"), "Error");
+			MessageBox(GetLanguageStringACP("Err_CreateErr"), TranslateStringACP("Error"));
 		}
 	}
 
@@ -2559,7 +2559,7 @@ void CFinalSunDlg::OnEditTriggers()
 	{		
 		if(!m_triggers.Create(CTriggers::IDD, NULL))
 		{
-			MessageBox(GetLanguageStringACP("Err_CreateErr"), "Error");
+			MessageBox(GetLanguageStringACP("Err_CreateErr"), TranslateStringACP("Error"));
 		}
 	}
 
@@ -2827,7 +2827,7 @@ void CFinalSunDlg::OnEditTriggereditor()
 	{		
 		if(!m_triggereditor.Create(CTriggerEditorDlg::IDD, NULL))
 		{
-			MessageBox(GetLanguageStringACP("Err_CreateErr"), "Error");
+			MessageBox(GetLanguageStringACP("Err_CreateErr"), TranslateStringACP("Error"));
 		}
 	}
 
@@ -2987,7 +2987,7 @@ void CFinalSunDlg::OnHelpManual()
 	Sound(SOUND_POSITIVE);
 	if(ShellExecuteW(0, NULL, (utf8ToUtf16(AppPath)+L"\\HelpManual.pdf").c_str(), NULL, NULL, SW_NORMAL) == 0)
 	{
-		MessageBox((CString)"Could not open HelpManual.pdf! Try opening "+(CString)AppPath+(CString)"\\HelpManual manually.");
+		MessageBox(TranslateStringVariables(1, TranslateStringACP("Could not open HelpManual.pdf! Try opening %1\\HelpManual manually."), AppPath));
 	}
 }
 
@@ -3151,7 +3151,7 @@ LONG __stdcall ExceptionHandler(
 
 	
 
-	if(MessageBox(0,s3,"Fatal error",MB_OKCANCEL)==IDOK)
+	if(MessageBox(0,s3,TranslateStringACP("Fatal error"),MB_OKCANCEL)==IDOK)
 	{
 		return EXCEPTION_CONTINUE_EXECUTION;
 	}

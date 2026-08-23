@@ -505,6 +505,8 @@ void CTriggerEventsDlg::OnEditchangeParamvalue()
 
 void CTriggerEventsDlg::UpdateDialog()
 {
+	ApplyEditorUIFont(this);
+
 	// MW 07/20/01
 	Clear();
 

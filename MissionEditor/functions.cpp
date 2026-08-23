@@ -544,6 +544,46 @@ static BOOL CALLBACK ApplyEditorUIFontProc(HWND hwnd, LPARAM lParam)
 	return TRUE;
 }
 
+static BOOL CALLBACK LocalizeDialogTextProc(HWND hwnd, LPARAM)
+{
+	char className[32]{};
+	if (::GetClassNameA(hwnd, className, _countof(className)) == 0)
+		return TRUE;
+
+	if (_stricmp(className, "Static") != 0 && _stricmp(className, "Button") != 0)
+		return TRUE;
+
+	const int length = ::GetWindowTextLengthA(hwnd);
+	if (length <= 0)
+		return TRUE;
+
+	CString original;
+	LPSTR buffer = original.GetBuffer(length + 1);
+	const int copied = ::GetWindowTextA(hwnd, buffer, length + 1);
+	original.ReleaseBuffer(copied);
+	if (!isValidUtf8(original))
+		return TRUE;
+
+	const CString translated = TranslateStringACP(original);
+	if (translated != original)
+		::SetWindowTextA(hwnd, translated);
+
+	return TRUE;
+}
+
+void LocalizeDialogText(CWnd* root)
+{
+	if (root == NULL)
+		return;
+
+	const HWND hRoot = root->GetSafeHwnd();
+	if (!::IsWindow(hRoot))
+		return;
+
+	LocalizeDialogTextProc(hRoot, 0);
+	::EnumChildWindows(hRoot, LocalizeDialogTextProc, 0);
+}
+
 void ApplyEditorUIFont(CWnd* root)
 {
 	if (root == NULL)
@@ -559,6 +599,7 @@ void ApplyEditorUIFont(CWnd* root)
 
 	::SendMessage(hRoot, WM_SETFONT, reinterpret_cast<WPARAM>(hFont), FALSE);
 	::EnumChildWindows(hRoot, ApplyEditorUIFontProc, reinterpret_cast<LPARAM>(hFont));
+	LocalizeDialogText(root);
 }
 
 // change all %n (where n is an int) in an string, to another specified string
@@ -631,6 +672,16 @@ CString TranslateStringACP(WCHAR* u16EnglishString)
 	return TranslateStringACP(utf16ToUtf8(u16EnglishString).c_str());
 }
 
+static CString GetTranslationLookupKey(CString source)
+{
+	// CIniFile uses '=' and ';' as syntax, so literal source strings that
+	// contain either character are stored with these unambiguous escape tokens.
+	source.TrimRight();
+	source.Replace("=", "__EQUALS__");
+	source.Replace(";", "__SEMICOLON__");
+	return source;
+}
+
 // tranlate a string/word by using the table from english to the current language
 CString TranslateStringACP(CString u8EnglishString)
 {
@@ -640,31 +691,33 @@ CString TranslateStringACP(CString u8EnglishString)
 		return u8EnglishString;
 	}
 
+	const CString lookupKey = GetTranslationLookupKey(u8EnglishString);
+
 #ifdef RA2_MODE
 	CString sec2=theApp.m_Options.LanguageName+"-TranslationsRA2";
-	if(language.sections[sec2].values.end()==language.sections[sec2].values.find(u8EnglishString))
+	if(language.sections[sec2].values.end()==language.sections[sec2].values.find(lookupKey))
 	{
-		if(language.sections["English-TranslationsRA2"].FindName(u8EnglishString)>=0)
+		if(language.sections["English-TranslationsRA2"].FindName(lookupKey)>=0)
 		{
-			CString s=language.sections["English-TranslationsRA2"].values[u8EnglishString];
+			CString s=language.sections["English-TranslationsRA2"].values[lookupKey];
 			return ToACP(s);
 		}
 	}
 	else
-		return ToACP(language.sections[sec2].values[u8EnglishString]);
+		return ToACP(language.sections[sec2].values[lookupKey]);
 #endif
 	
 	
 	CString sec=theApp.m_Options.LanguageName+"-Translations";
 	
 	// check if the string can be translated
-	if(language.sections[sec].values.end()==language.sections[sec].values.find(u8EnglishString))
+	if(language.sections[sec].values.end()==language.sections[sec].values.find(lookupKey))
 	{
 		CString seceng;
 		seceng="English-Translations";
-		if(language.sections[seceng].FindName(u8EnglishString)>=0)
+		if(language.sections[seceng].FindName(lookupKey)>=0)
 		{
-			CString s=language.sections[seceng].values[u8EnglishString];
+			CString s=language.sections[seceng].values[lookupKey];
 #ifndef RA2_MODE
 			s=TranslateStringVariables(9, s, "FinalSun");
 #else
@@ -687,7 +740,7 @@ CString TranslateStringACP(CString u8EnglishString)
 #endif
 	}
 
-	CString s=language.sections[sec].values[u8EnglishString];
+	CString s=language.sections[sec].values[lookupKey];
 #ifndef RA2_MODE
 	s=TranslateStringVariables(9,s,"FinalSun");
 #else
@@ -1347,7 +1400,7 @@ void ListTags(CComboBox& cb, BOOL bListNone)
 
 	while(cb.DeleteString(0)!=CB_ERR);
 
-	if(bListNone) cb.AddString("None");
+	if(bListNone) cb.AddString(GetLanguageStringACP("None"));
 	const CIniFileSection* sec = ini.GetSection("Tags");
 	if(sec)
 	{

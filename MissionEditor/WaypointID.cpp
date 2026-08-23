@@ -26,6 +26,7 @@
 #include "WaypointID.h"
 #include "mapdata.h"
 #include "variables.h"
+#include "functions.h"
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -102,6 +103,7 @@ void CWaypointID::OnOK()
 BOOL CWaypointID::OnInitDialog() 
 {
 	CDialog::OnInitDialog();
+	ApplyEditorUIFont(this);
 	
 	OnFree();
 	

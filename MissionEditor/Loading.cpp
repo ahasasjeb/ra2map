@@ -5751,7 +5751,7 @@ BOOL CLoading::InitDirectDraw()
 		errstream << "DirectDrawCreate() failed\n";
 		errstream.flush();
 		ShowWindow(SW_HIDE);
-		MessageBox("DirectDraw could not be initialized! Quitting...");
+		MessageBox(TranslateStringACP("DirectDraw could not be initialized! Quitting..."));
 		exit(-1);
 
 		return FALSE;
@@ -5778,7 +5778,7 @@ BOOL CLoading::InitDirectDraw()
 
 		if(v.dd_1->QueryInterface(IID_IDirectDraw4, (void**)&v.dd)!=DD_OK)
 		{
-			MessageBox("You need at least DirectX 6.0 to run this program", "Error");
+			MessageBox(TranslateStringACP("You need at least DirectX 6.0 to run this program"), TranslateStringACP("Error"));
 			exit(-1);
 			return FALSE;
 		}
@@ -5792,7 +5792,7 @@ BOOL CLoading::InitDirectDraw()
 		errstream << "SetCooperativeLevel() failed\n";
 		errstream.flush();
 		ShowWindow(SW_HIDE);
-		MessageBox("Cooperative Level could not be set! Quitting...");
+		MessageBox(TranslateStringACP("Cooperative Level could not be set! Quitting..."));
 		v.dd->Release();
 		v.dd=NULL;
 		exit(-2);
@@ -5833,7 +5833,7 @@ BOOL CLoading::InitDirectDraw()
 			
 			errstream.flush();
 			ShowWindow(SW_HIDE);
-			MessageBox("Primary surface could not be initialized! Quitting...");
+			MessageBox(TranslateStringACP("Primary surface could not be initialized! Quitting..."));
 			v.dd->Release();
 			v.dd=NULL;
 			exit(-3);
@@ -5859,7 +5859,7 @@ BOOL CLoading::InitDirectDraw()
 	if(!pf.dwBBitMask || !pf.dwRBitMask || !pf.dwGBitMask)
 	{
 		ShowWindow(SW_HIDE);
-		MessageBox("You must not use a palette color mode like 8 bit in order to run FinalSun/FinalAlert 2. Please check readme.txt","Error",MB_OK);
+		MessageBox(TranslateStringACP("You must not use a palette color mode like 8 bit in order to run FinalSun/FinalAlert 2. Please check readme.txt"), TranslateStringACP("Error"),MB_OK);
 
 		v.lpds->Release();
 		v.lpds=NULL;
@@ -5890,7 +5890,7 @@ BOOL CLoading::InitDirectDraw()
 		errstream << "CreateSurface() failed\n";
 		errstream.flush();
 		ShowWindow(SW_HIDE);
-		MessageBox("Backbuffer surface could not be initialized! Quitting...");
+		MessageBox(TranslateStringACP("Backbuffer surface could not be initialized! Quitting..."));
 		v.lpds->Release();
 		v.lpds=NULL;
 		v.dd->Release();
@@ -5907,7 +5907,7 @@ BOOL CLoading::InitDirectDraw()
 		errstream << "CreateSurface() failed\n";
 		errstream.flush();
 		ShowWindow(SW_HIDE);
-		MessageBox("Tempbuffer surface could not be initialized! Quitting...");
+		MessageBox(TranslateStringACP("Tempbuffer surface could not be initialized! Quitting..."));
 		v.lpdsBack->Release();
 		v.lpdsBack=NULL;
 		if (v.lpdsBackHighRes)
@@ -5931,7 +5931,7 @@ BOOL CLoading::InitDirectDraw()
 		errstream << "CreateClipper() failed\n";
 		errstream.flush();
 		ShowWindow(SW_HIDE);
-		MessageBox("Clipper could not be created! Quitting...");
+		MessageBox(TranslateStringACP("Clipper could not be created! Quitting..."));
 		v.lpdsTemp->Release();
 		v.lpdsTemp=NULL;
 		v.lpdsBack->Release();
@@ -6294,7 +6294,7 @@ void CLoading::LoadStrings()
 		}
 		else
 		{
-			MessageBox("String file not found, using rules.ini names","Error");
+			MessageBox(TranslateStringACP("String file not found, using rules.ini names"),TranslateStringACP("Error"));
 			return;
 		}
 		
