@@ -299,7 +299,8 @@ void Tests::test_ini_malformed_section_is_discarded()
 		"Theater=TEMPERATE\r\n"
 		"[\r\n"
 		"[Basic]\r\n"
-		"Name=Clean map\r\n";
+		"Name=Clean map\r\n"
+		"Translation key [Map] Theater=Localized text\r\n";
 	{
 		std::ofstream input(inputPath, std::ios::binary | std::ios::trunc);
 		input.write(malformedMap.data(), static_cast<std::streamsize>(malformedMap.size()));
@@ -309,6 +310,7 @@ void Tests::test_ini_malformed_section_is_discarded()
 	REPORT_TEST(ini.LoadFile(inputPath.string()) == 0);
 	REPORT_TEST(ini.GetValueByName("Map", "Theater", CString()) == CString("TEMPERATE"));
 	REPORT_TEST(ini.GetValueByName("Basic", "Name", CString()) == CString("Clean map"));
+	REPORT_TEST(ini.GetValueByName("Basic", "Translation key [Map] Theater", CString()) == CString("Localized text"));
 	REPORT_TEST(ini.SaveFile(outputPath.string()));
 
 	std::ifstream savedFile(outputPath, std::ios::binary);

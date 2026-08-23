@@ -259,7 +259,10 @@ WORD CIniFile::InsertFile(const std::string& filename, const char* Section, BOOL
 		cLine.erase(std::find_if(cLine.begin(), cLine.end(), [](const char c) { return c == '\r' || c == '\n' || c == ';'; }), cLine.end());
 
 		const auto equals = cLine.find('=');
-		const auto openBracket = cLine.find('[');
+		const auto firstNonSpace = cLine.find_first_not_of(" \t");
+		const auto openBracket = firstNonSpace != npos && cLine[firstNonSpace] == '['
+			? firstNonSpace
+			: npos;
 
 		if (openBracket != npos && (equals == npos || equals > openBracket))
 		{
