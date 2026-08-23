@@ -1125,10 +1125,11 @@ void CIsoView::OnMouseMove(UINT nFlags, CPoint point)
 			rscroll = FALSE;
 			m_bPanFastPath = FALSE;
 			ShowCursor(TRUE);
+			RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_NOERASE);
 
 			CMyViewFrame& dlg = *(CMyViewFrame*)owner;
 			dlg.m_minimap.RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW);
-
+			return;
 		}
 		else
 		{
@@ -2192,34 +2193,9 @@ void CIsoView::OnRButtonUp(UINT nFlags, CPoint point)
 
 		if (!b_IsLoading)
 		{
-			// A timer tick may have changed the logical offset without getting a
-			// chance to present it. Keep the clean cached scene and offset aligned.
-			if (m_lastFrameValid && m_viewOffset != m_lastViewOffset)
-			{
-				m_viewOffset = m_lastViewOffset;
-				SetScroll(m_viewOffset.x, m_viewOffset.y);
-			}
-
-			bool presentedCleanFrame = false;
-			if (m_lastFrameValid && lpdsTemp != nullptr && lpdsBack != nullptr &&
-				lpdsBack->Blt(NULL, lpdsTemp, NULL, DDBLT_WAIT, NULL) == DD_OK)
-			{
-				if (m_cellCursor != MapCoords(-1, -1))
-				{
-					SurfaceLocker locker(lpdsBack);
-					auto desc = locker.ensure_locked();
-					if (desc)
-						DrawCellCursor(m_cellCursor, *desc);
-				}
-
-				BlitBackbufferToHighRes();
-				RenderUIOverlay();
-				FlipHighResBuffer();
-				presentedCleanFrame = true;
-			}
-
-			if (!presentedCleanFrame)
-				InvalidateRect(NULL, FALSE);
+			// Preview frames deliberately leave the clean scene at the last patched
+			// offset. Render the final position once now that interaction has stopped.
+			RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_NOERASE);
 
 			CMyViewFrame& dlg = *(CMyViewFrame*)owner;
 			dlg.m_minimap.Invalidate(FALSE);
@@ -3908,6 +3884,20 @@ void CIsoView::OnDraw(CDC* pDC)
 		FlipHighResBuffer(&m_lastPresentSourceRect);
 		return;
 	}
+	if (m_bPanFastPath && bIncrementalPan && rscroll &&
+		(GetAsyncKeyState(VK_RBUTTON) & 0x8000) != 0 && m_lastFrameValid)
+	{
+		const ProjectedVec delta = m_viewOffset - m_lastViewOffset;
+		const float scaleX = max(0.1f, m_viewScale.x);
+		const float scaleY = max(0.1f, m_viewScale.y);
+		constexpr float maxPreviewShift = 128.0f;
+		if (abs(delta.x) / scaleX < maxPreviewShift &&
+			abs(delta.y) / scaleY < maxPreviewShift && PresentPanPreview())
+		{
+			m_bPanFastPath = FALSE;
+			return;
+		}
+	}
 
 	DrawMap();
 }
@@ -5169,6 +5159,288 @@ void CIsoView::FlipHighResBuffer(const RECT* sourceRectOverride)
 	lpds->Blt(&destinationRect, presentSurface, &sourceRect, DDBLT_WAIT, 0);
 	if (sourceRectOverride == nullptr)
 		m_lastPresentSourceRect = sourceRect;
+}
+
+bool CIsoView::PresentPanPreview()
+{
+	if (!m_lastFrameValid || lpdsTemp == nullptr || lpdsBack == nullptr)
+		return false;
+
+	DDSURFACEDESC2 desc{};
+	desc.dwSize = sizeof(desc);
+	desc.dwFlags = DDSD_WIDTH | DDSD_HEIGHT;
+	if (lpdsBack->GetSurfaceDesc(&desc) != DD_OK)
+		return false;
+
+	RECT sourceArea = GetScaledDisplayRect();
+	sourceArea.left = max(0L, sourceArea.left);
+	sourceArea.top = max(0L, sourceArea.top);
+	sourceArea.right = min(static_cast<LONG>(desc.dwWidth), sourceArea.right);
+	sourceArea.bottom = min(static_cast<LONG>(desc.dwHeight), sourceArea.bottom);
+	if (sourceArea.right <= sourceArea.left || sourceArea.bottom <= sourceArea.top)
+		return false;
+
+	DDBLTFX fill{};
+	fill.dwSize = sizeof(fill);
+	fill.dwFillColor = RGB(255, 255, 255);
+	if (lpdsBack->Blt(&sourceArea, nullptr, nullptr, DDBLT_COLORFILL | DDBLT_WAIT, &fill) != DD_OK)
+		return false;
+
+	const ProjectedVec delta = m_viewOffset - m_lastViewOffset;
+	const int shiftX = -delta.x;
+	const int shiftY = -delta.y;
+	const size_t baseTextCount = m_texts_to_render.size();
+	for (size_t i = 0; i < baseTextCount; ++i)
+	{
+		TextToRender& text = m_texts_to_render[i];
+		if (!text.fixedScreenPos)
+		{
+			text.drawx -= delta.x;
+			text.drawy -= delta.y;
+		}
+	}
+	const auto restoreBaseTexts = [&]()
+	{
+		m_texts_to_render.resize(baseTextCount);
+		for (size_t i = 0; i < baseTextCount; ++i)
+		{
+			TextToRender& text = m_texts_to_render[i];
+			if (!text.fixedScreenPos)
+			{
+				text.drawx += delta.x;
+				text.drawy += delta.y;
+			}
+		}
+	};
+
+	RECT shiftedArea = sourceArea;
+	OffsetRect(&shiftedArea, shiftX, shiftY);
+	RECT destination{};
+	if (IntersectRect(&destination, &sourceArea, &shiftedArea))
+	{
+		RECT source = destination;
+		OffsetRect(&source, -shiftX, -shiftY);
+		if (lpdsBack->Blt(&destination, lpdsTemp, &source, DDBLT_WAIT, nullptr) != DD_OK)
+		{
+			restoreBaseTexts();
+			return false;
+		}
+	}
+
+	RECT stripX = { sourceArea.left, sourceArea.top, sourceArea.left, sourceArea.bottom };
+	if (shiftX > 0)
+	{
+		stripX.right = min(sourceArea.right, sourceArea.left + shiftX);
+	}
+	else if (shiftX < 0)
+	{
+		stripX.left = max(sourceArea.left, sourceArea.right + shiftX);
+		stripX.right = sourceArea.right;
+	}
+
+	RECT stripY = { sourceArea.left, sourceArea.top, sourceArea.right, sourceArea.top };
+	if (shiftY > 0)
+	{
+		stripY.bottom = min(sourceArea.bottom, sourceArea.top + shiftY);
+	}
+	else if (shiftY < 0)
+	{
+		stripY.top = max(sourceArea.top, sourceArea.bottom + shiftY);
+		stripY.bottom = sourceArea.bottom;
+	}
+
+	// The shifted cache cannot contain pixels that have just entered the
+	// viewport. Rebuild only those narrow bands so preview frames stay complete
+	// without returning to a full map traversal on every timer tick.
+	if (!PatchPanPreviewBands(stripX, stripY))
+	{
+		restoreBaseTexts();
+		return false;
+	}
+
+	auto cursor = pics.find("SCROLLCURSOR");
+	if (cursor != pics.end() && cursor->second.pic != nullptr)
+	{
+		const PICDATA& graphic = cursor->second;
+		const int cursorX = rclick_x * m_viewScale.x + sourceArea.left - graphic.wWidth / 2;
+		const int cursorY = rclick_y * m_viewScale.y + sourceArea.top - graphic.wHeight / 2;
+		const std::array<ProjectedCoords, 1> positions = { ProjectedCoords(cursorX + 1, cursorY + 1) };
+		if (!CompositeColorKeySurface(lpdsBack, (LPDIRECTDRAWSURFACE4)graphic.pic, positions, 0,
+			[](const ProjectedCoords& position) { return position; }))
+		{
+			Blit((LPDIRECTDRAWSURFACE4)graphic.pic, cursorX, cursorY);
+		}
+	}
+
+	// The clean scene cache intentionally excludes text. Rebuild the lightweight
+	// UI layer after shifting its cached coordinates, so waypoints do not lose
+	// their number labels and appear as pale standalone diamonds while panning.
+	BlitBackbufferToHighRes();
+	RenderUIOverlay();
+	FlipHighResBuffer();
+	restoreBaseTexts();
+	last_succeeded_operation = 10101;
+	return true;
+}
+
+bool CIsoView::PatchPanPreviewBands(const RECT& stripX, const RECT& stripY)
+{
+	const bool hasStripX = stripX.right > stripX.left && stripX.bottom > stripX.top;
+	const bool hasStripY = stripY.right > stripY.left && stripY.bottom > stripY.top;
+	if (!hasStripX && !hasStripY)
+		return true;
+
+	SurfaceLocker locker(lpdsBack);
+	DDSURFACEDESC2* desc = locker.ensure_locked();
+	if (desc == nullptr || desc->lpSurface == nullptr)
+		return false;
+
+	struct CellRange
+	{
+		int left = 0;
+		int right = 0;
+		int top = 0;
+		int bottom = 0;
+		bool valid = false;
+	};
+
+	RECT windowRect{};
+	GetWindowRect(&windowRect);
+	const auto mapAtScreen = [&](LONG screenX, LONG screenY)
+	{
+		const CPoint client(
+			static_cast<int>((screenX - windowRect.left) / max(0.1f, m_viewScale.x)),
+			static_cast<int>((screenY - windowRect.top) / max(0.1f, m_viewScale.y)));
+		return GetMapCoordinatesFromClientCoordinates(client, false, true);
+	};
+
+	const auto makeCellRange = [&](const RECT& band)
+	{
+		CellRange range;
+		if (band.right <= band.left || band.bottom <= band.top)
+			return range;
+
+		// A cell outside the band can own a wide bridge or tall cliff whose art
+		// reaches into it. Expand before reverse projection to include those owners.
+		RECT expanded = band;
+		InflateRect(&expanded, 8 * f_x, 8 * f_y);
+		const MapCoords corners[4] = {
+			mapAtScreen(expanded.left, expanded.top),
+			mapAtScreen(expanded.right, expanded.top),
+			mapAtScreen(expanded.left, expanded.bottom),
+			mapAtScreen(expanded.right, expanded.bottom)
+		};
+
+		range.left = corners[0].x;
+		range.right = corners[0].x;
+		range.top = corners[0].y;
+		range.bottom = corners[0].y;
+		for (int i = 1; i < 4; ++i)
+		{
+			range.left = min(range.left, static_cast<int>(corners[i].x));
+			range.right = max(range.right, static_cast<int>(corners[i].x));
+			range.top = min(range.top, static_cast<int>(corners[i].y));
+			range.bottom = max(range.bottom, static_cast<int>(corners[i].y));
+		}
+
+		const int isoSize = static_cast<int>(Map->GetIsoSize());
+		range.left = max(0, range.left - 2);
+		range.top = max(0, range.top - 2);
+		range.right = min(isoSize, range.right + 3);
+		range.bottom = min(isoSize, range.bottom + 3);
+		range.valid = range.right > range.left && range.bottom > range.top;
+		return range;
+	};
+
+	const CellRange rangeX = makeCellRange(stripX);
+	const CellRange rangeY = makeCellRange(stripY);
+	const int mapWidth = Map->GetWidth();
+	const int mapHeight = Map->GetHeight();
+	const auto cellInBounds = [&](int u, int v)
+	{
+		return !(u < 1 || v < 1 || u + v < mapWidth + 1 || u + v > mapWidth + mapHeight * 2 ||
+			(v + 1 > mapWidth && u - 1 < v - mapWidth) ||
+			(u + 1 > mapWidth && v + mapWidth - 1 < u));
+	};
+
+	const DWORD heightStart = tilesets_start[atoi((*tiles).sections["General"].values["HeightBase"])];
+	const DrawMapCellContext ctxX = { *desc, stripX, heightStart, TRUE, true };
+	const DrawMapCellContext ctxY = { *desc, stripY, heightStart, TRUE, true };
+
+	const auto forEachCell = [&](const CellRange& range, const auto& callback)
+	{
+		if (!range.valid)
+			return;
+		for (int u = range.left; u < range.right; ++u)
+		{
+			for (int v = range.top; v < range.bottom; ++v)
+			{
+				if (cellInBounds(u, v))
+					callback(MapCoords(u, v));
+			}
+		}
+	};
+
+	const auto drawBaseTerrain = [&](const CellRange& range, const DrawMapCellContext& ctx)
+	{
+		forEachCell(range, [&](const MapCoords& pos)
+			{
+				const FIELDDATA& field = *Map->GetFielddataAt(pos);
+				if (!field.bRedrawTerrain)
+					DrawMapTerrainCell(field, GetRenderTargetCoordinates(pos), ctx);
+			});
+	};
+
+	const size_t oldWaypointCount = m_waypoints_to_render.size();
+	const size_t oldCelltagCount = m_celltags_to_render.size();
+
+	// Preserve the normal two-pass ordering across both strips: all base terrain
+	// first, followed by redraw terrain, animations and objects.
+	drawBaseTerrain(rangeX, ctxX);
+	drawBaseTerrain(rangeY, ctxY);
+
+	const auto drawObjects = [&](const CellRange& range, const DrawMapCellContext& ctx)
+	{
+		forEachCell(range, [&](const MapCoords& pos)
+			{
+				const FIELDDATA& field = *Map->GetFielddataAt(pos);
+				const auto draw = GetRenderTargetCoordinates(pos);
+				const DWORD originalGround = field.wGround == 0xFFFF ? 0 : field.wGround;
+				if (field.bRedrawTerrain)
+					DrawMapTerrainCell(field, draw, ctx);
+				DrawMapTerrainAnim(field, draw, ctx, originalGround);
+				DrawMapObjectsCell(pos, field, draw, ctx);
+			});
+	};
+
+	drawObjects(rangeX, ctxX);
+	drawObjects(rangeY, ctxY);
+
+	// Tube lines are inexpensive and may enter a band from endpoints far beyond
+	// the sprite margin. Drawing their current positions also refreshes the bands.
+	for (const auto& tube : Map->GetTubes())
+		DrawTube(*tube, desc);
+
+	locker.ensure_unlocked();
+	const bool celltagsComposited = CompositeColorKeySurface(
+		lpdsBack,
+		(LPDIRECTDRAWSURFACE4)pics["CELLTAG"].pic,
+		m_celltags_to_render,
+		oldCelltagCount,
+		[](const ProjectedCoords& position) { return position; });
+	const bool waypointsComposited = CompositeColorKeySurface(
+		lpdsBack,
+		(LPDIRECTDRAWSURFACE4)pics["FLAG"].pic,
+		m_waypoints_to_render,
+		oldWaypointCount,
+		[](const WaypointToRender& waypoint)
+		{
+			return ProjectedCoords(waypoint.drawx + 1, waypoint.drawy + 1);
+		});
+
+	m_waypoints_to_render.resize(oldWaypointCount);
+	m_celltags_to_render.resize(oldCelltagCount);
+	return celltagsComposited && waypointsComposited;
 }
 
 bool CIsoView::InitializeVulkanRenderer()
@@ -8545,6 +8817,7 @@ void CIsoView::OnKillFocus(CWnd* pNewWnd)
 		ShowCursor(TRUE);
 		rscroll = FALSE;
 		bDoNotAllowScroll = TRUE;
+		InvalidateRect(NULL, FALSE);
 	}
 
 }

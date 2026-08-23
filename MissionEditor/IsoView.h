@@ -172,6 +172,8 @@ public:
 	void GetScroll(int& xscroll, int& yscroll) const;
 	void SetScroll(int xscroll, int yscroll);
 	void DrawMap();
+	bool PresentPanPreview();
+	bool PatchPanPreviewBands(const RECT& stripX, const RECT& stripY);
 	bool DrawMapPan(int left, int right, int top, int bottom, DWORD MM_heightstart, BOOL bMarbleHeight);
 	struct DrawMapCellContext
 	{
