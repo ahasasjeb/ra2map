@@ -590,13 +590,37 @@ void Tests::test_snapshot_redraw_flag()
 {
 	FIELDDATA fielddata[1];
 	fielddata[0].bRedrawTerrain = TRUE;
+	fielddata[0].bHeight = 7;
+	fielddata[0].bMapData = 0x1234;
+	fielddata[0].bSubTile = 5;
+	fielddata[0].bMapData2 = 6;
+	fielddata[0].wGround = 0x5678;
+	fielddata[0].overlay = 9;
+	fielddata[0].overlaydata = 10;
+	fielddata[0].bRNDImage = 11;
 
 	CMapSnapshots snapshots;
 	snapshots.TakeSnapshot(fielddata, 1, TRUE, 0, 0, 1, 1);
 	fielddata[0].bRedrawTerrain = FALSE;
+	fielddata[0].bHeight = 0;
+	fielddata[0].bMapData = 0;
+	fielddata[0].bSubTile = 0;
+	fielddata[0].bMapData2 = 0;
+	fielddata[0].wGround = 0;
+	fielddata[0].overlay = 0;
+	fielddata[0].overlaydata = 0;
+	fielddata[0].bRNDImage = 0;
 
 	TEST(snapshots.Undo(fielddata, 1, {}, {}));
 	REPORT_TEST(fielddata[0].bRedrawTerrain == TRUE);
+	REPORT_TEST(fielddata[0].bHeight == 7);
+	REPORT_TEST(fielddata[0].bMapData == 0x1234);
+	REPORT_TEST(fielddata[0].bSubTile == 5);
+	REPORT_TEST(fielddata[0].bMapData2 == 6);
+	REPORT_TEST(fielddata[0].wGround == 0x5678);
+	REPORT_TEST(fielddata[0].overlay == 9);
+	REPORT_TEST(fielddata[0].overlaydata == 10);
+	REPORT_TEST(fielddata[0].bRNDImage == 11);
 
 	// The history must stay bounded and discarding a redo branch must not
 	// retain buffers from the removed snapshots.

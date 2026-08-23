@@ -55,6 +55,15 @@ extern "C"
 {
 #endif
 
+// Compact undo-snapshot codec. Call pack with a null output first to obtain
+// the required size. Unpack succeeds only when it fills output_len exactly.
+int rs_snapshot_pack(
+    const unsigned char* input, size_t input_len,
+    unsigned char* output, size_t output_cap, size_t* output_len);
+int rs_snapshot_unpack(
+    const unsigned char* input, size_t input_len,
+    unsigned char* output, size_t output_len);
+
 // Mirrors the fields of t_vxl_section_tailer that the renderer needs.
 typedef struct rs_vxl_tailer
 {
