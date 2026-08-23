@@ -79,6 +79,7 @@ public:
 	CAiTriggerTypesEnable m_aitriggertypesenable;
 	void SetText(const char* text);
 	void SaveMap(CString FileName, bool interactive = true);
+	void ApplyAutomaticSaveSettings();
 	void SetReady();
 	CScriptTypes m_Scripttypes;
 	CTriggers m_triggers;
@@ -241,7 +242,8 @@ private:
 	void UnloadAll();
 	void RefreshMapWriteTime();
 	void CreateAutomaticSave();
-	void PruneAutomaticSaves(const std::filesystem::path& directory);
+	void PruneAutomaticSaves(const std::filesystem::path& directory,
+		const std::wstring& filePrefix, const std::wstring& extension);
 	std::filesystem::file_time_type m_knownMapWriteTime{};
 	bool m_hasKnownMapWriteTime = false;
 	bool m_externalChangeReported = false;

@@ -16,6 +16,20 @@ namespace
 			target = settings.values[index];
 	}
 
+	void ApplyDirection(CString& target, const PropertyBrushSettings& settings, size_t index)
+	{
+		if (!settings.selected[index])
+			return;
+		if (!settings.randomDirection)
+		{
+			ApplyValue(target, settings, index);
+			return;
+		}
+
+		constexpr const char* directions[] = { "0", "32", "64", "96", "128", "160", "192", "224" };
+		target = directions[rand() % std::size(directions)];
+	}
+
 	bool IsSameCell(const MapCoords& first, const MapCoords& second)
 	{
 		return first.x == second.x && first.y == second.y;
@@ -60,7 +74,7 @@ bool PropertyBrushTool::ApplyStructure(DWORD position)
 
 	ApplyValue(structure.house, m_settings, 0);
 	ApplyValue(structure.strength, m_settings, 1);
-	ApplyValue(structure.direction, m_settings, 2);
+	ApplyDirection(structure.direction, m_settings, 2);
 	ApplyValue(structure.flag1, m_settings, 3);
 	ApplyValue(structure.flag2, m_settings, 4);
 	ApplyValue(structure.energy, m_settings, 5);
@@ -94,7 +108,7 @@ bool PropertyBrushTool::ApplyInfantry(DWORD position)
 		ApplyValue(infantry.house, m_settings, 0);
 		ApplyValue(infantry.strength, m_settings, 1);
 		ApplyValue(infantry.action, m_settings, 2);
-		ApplyValue(infantry.direction, m_settings, 3);
+		ApplyDirection(infantry.direction, m_settings, 3);
 		ApplyValue(infantry.flag1, m_settings, 4);
 		ApplyValue(infantry.flag2, m_settings, 5);
 		ApplyValue(infantry.flag3, m_settings, 6);
@@ -121,7 +135,7 @@ bool PropertyBrushTool::ApplyUnit(DWORD position)
 	ApplyValue(unit.house, m_settings, 0);
 	ApplyValue(unit.strength, m_settings, 1);
 	ApplyValue(unit.action, m_settings, 2);
-	ApplyValue(unit.direction, m_settings, 3);
+	ApplyDirection(unit.direction, m_settings, 3);
 	ApplyValue(unit.flag1, m_settings, 4);
 	ApplyValue(unit.flag2, m_settings, 5);
 	ApplyValue(unit.flag3, m_settings, 6);
@@ -146,7 +160,7 @@ bool PropertyBrushTool::ApplyAircraft(DWORD position)
 
 	ApplyValue(aircraft.house, m_settings, 0);
 	ApplyValue(aircraft.strength, m_settings, 1);
-	ApplyValue(aircraft.direction, m_settings, 2);
+	ApplyDirection(aircraft.direction, m_settings, 2);
 	ApplyValue(aircraft.action, m_settings, 3);
 	ApplyValue(aircraft.flag1, m_settings, 4);
 	ApplyValue(aircraft.flag2, m_settings, 5);

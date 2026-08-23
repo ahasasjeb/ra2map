@@ -19,6 +19,7 @@ struct PropertyBrushSettings
 	PropertyBrushObjectType objectType = PropertyBrushObjectType::Structure;
 	std::array<CString, PROPERTY_BRUSH_FIELD_COUNT> values{};
 	std::array<bool, PROPERTY_BRUSH_FIELD_COUNT> selected{};
+	bool randomDirection = false;
 
 	bool HasSelectedFields() const;
 };

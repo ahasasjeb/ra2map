@@ -101,6 +101,8 @@ PropertyBrushSettings CAircraft::GetPropertyBrushSettings() const
 	settings.values = { m_house, m_strength, m_direction, m_action, m_flag1, m_flag2, m_flag3, m_flag4, m_tag };
 	for (size_t i = 0; i < m_propertyBrushFields.size(); ++i)
 		settings.selected[i] = m_propertyBrushFields[i] != FALSE;
+	settings.randomDirection = settings.selected[2] &&
+		m_direction == GetLanguageStringACP("PropertyBrushRandomDirection");
 	return settings;
 }
 
@@ -123,6 +125,8 @@ void CAircraft::UpdatePropertyBrushControls()
 	{
 		SetWindowText(GetLanguageStringACP("PropertyBrushCap"));
 		SetDlgItemText(IDC_LDESC, GetLanguageStringACP("PropertyBrushDesc"));
+		if (auto* direction = static_cast<CComboBox*>(GetDlgItem(IDC_DIRECTION)))
+			direction->AddString(GetLanguageStringACP("PropertyBrushRandomDirection"));
 	}
 }
 

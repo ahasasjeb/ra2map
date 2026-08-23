@@ -129,6 +129,7 @@ void Tests::test_property_brush_settings()
 {
 	PropertyBrushSettings settings;
 	REPORT_TEST(!settings.HasSelectedFields());
+	REPORT_TEST(!settings.randomDirection);
 	REPORT_TEST(GetPropertyBrushFieldCount(PropertyBrushObjectType::Structure) == 14);
 	REPORT_TEST(GetPropertyBrushFieldCount(PropertyBrushObjectType::Infantry) == 10);
 	REPORT_TEST(GetPropertyBrushFieldCount(PropertyBrushObjectType::Unit) == 11);
@@ -557,6 +558,10 @@ void Tests::test_iso()
 	TEST(d.MoveInfantry(infantryIndex, infantryPosB));
 	REPORT_TEST(d.GetInfantryAt(infantryPosA) == -1);
 	REPORT_TEST(d.GetInfantryAt(infantryPosB) == infantryIndex);
+	TEST(d.AddInfantry(NULL, "TEST_INFANTRY_2", "Neutral", infantryPosB));
+	TEST(d.AddInfantry(NULL, "TEST_INFANTRY_3", "Neutral", infantryPosB));
+	REPORT_TEST(d.GetInfantryCountAt(infantryPosB) == SUBPOS_COUNT);
+	REPORT_TEST(!d.AddInfantry(NULL, "TEST_INFANTRY_4", "Neutral", infantryPosB));
 
 	const DWORD aircraftPosA = 5 + 6 * d.GetIsoSize();
 	const DWORD aircraftPosB = 6 + 6 * d.GetIsoSize();

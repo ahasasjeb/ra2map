@@ -1145,7 +1145,9 @@ void CIsoView::OnMouseMove(UINT nFlags, CPoint point)
 			// yes, begin scrolling!
 
 			rscroll = TRUE;
-			SetTimer(11, 25, NULL);
+			// 16 ms targets a visually smooth 60 Hz pan. The timer path uses the
+			// incremental renderer, so a full map redraw is not needed per frame.
+			SetTimer(11, 16, NULL);
 			SetCapture();
 			//while(ShowCursor(FALSE)>0);
 			isMoving = FALSE;
@@ -2062,12 +2064,17 @@ void CIsoView::OnMouseMove(UINT nFlags, CPoint point)
 		}
 		else
 		{
-			// Windows can deliver dozens of mouse-move messages while the pointer remains
-			// in one isometric cell. Place and schedule a redraw at most once per cell.
-			if (m_lastPlacementCell != mapCoords)
+			// Most objects are placed once per cell. Infantry can fill the cell's three
+			// sub-positions as the held pointer moves, without reacting to duplicate messages.
+			const bool enteredAnotherCell = m_lastPlacementCell != mapCoords;
+			const bool movedInsideInfantryCell = AD.mode == ACTIONMODE_PLACE && AD.type == 1 &&
+				!enteredAnotherCell && m_lastPlacementPoint != point &&
+				Map->GetInfantryCountAt(x + y * Map->GetIsoSize()) < SUBPOS_COUNT;
+			if (enteredAnotherCell || movedInsideInfantryCell)
 			{
 				PlaceCurrentObjectAt(x, y);
 				m_lastPlacementCell = mapCoords;
+				m_lastPlacementPoint = point;
 				const bool supportsFastCommit =
 					(AD.mode == ACTIONMODE_RANDOMTERRAIN) ||
 					(AD.mode == ACTIONMODE_PLACE && (AD.type == 1 || AD.type == 3 || AD.type == 4 || AD.type == 5));
@@ -2530,7 +2537,10 @@ void CIsoView::OnLButtonDown(UINT nFlags, CPoint point)
 	if (Map->GetIsoSize() == 0) return;
 	if (b_IsLoading == TRUE) return;
 	if (AD.mode == ACTIONMODE_PLACE || AD.mode == ACTIONMODE_RANDOMTERRAIN)
+	{
 		m_lastPlacementCell = MapCoords(-1, -1);
+		m_lastPlacementPoint = CPoint(-1, -1);
+	}
 
 
 	CIniFile& ini = Map->GetIniFile();
@@ -6586,7 +6596,9 @@ void CIsoView::OnTimer(UINT_PTR nIDEvent)
 		//if(b_IsLoading) return;	
 		// 
 		const ProjectedVec oldOffset = m_viewOffset;
-		m_viewOffset += ProjectedVec((cur_x_mouse - rclick_x) / 2, (cur_y_mouse - rclick_y) / 2);
+		// At 16 ms, dividing by three keeps the previous pan speed (25 ms / 2)
+		// while increasing the visual update rate from about 40 Hz to about 60 Hz.
+		m_viewOffset += ProjectedVec((cur_x_mouse - rclick_x) / 3, (cur_y_mouse - rclick_y) / 3);
 
 		SetScroll(m_viewOffset.x, m_viewOffset.y);
 
@@ -6595,7 +6607,7 @@ void CIsoView::OnTimer(UINT_PTR nIDEvent)
 			return;
 
 		m_bPanFastPath = TRUE;
-		InvalidateRect(NULL, FALSE);
+		RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_NOERASE);
 	}
 	else
 	{

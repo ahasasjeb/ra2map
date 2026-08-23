@@ -616,6 +616,19 @@
 #define IDC_PROPERTYBRUSH_CHECK12       1488
 #define IDC_PROPERTYBRUSH_CHECK13       1489
 #define IDC_PROPERTYBRUSH_CHECK14       1490
+#define IDC_AUTOSAVE_GROUP              1491
+#define IDC_AUTOSAVE_ENABLED            1492
+#define IDC_AUTOSAVE_INTERVAL_LABEL     1493
+#define IDC_AUTOSAVE_INTERVAL           1494
+#define IDC_AUTOSAVE_MINUTES_LABEL      1495
+#define IDC_AUTOSAVE_LOCATION_LABEL     1496
+#define IDC_AUTOSAVE_LOCATION           1497
+#define IDC_AUTOSAVE_PATH               1498
+#define IDC_AUTOSAVE_BROWSE             1499
+#define IDC_AUTOSAVE_VERSIONED          1500
+#define IDC_AUTOSAVE_MAXCOUNT_LABEL     1501
+#define IDC_AUTOSAVE_MAXCOUNT           1502
+#define IDC_FILE_WATCHER                1503
 
 // Next default values for new objects
 // 
@@ -623,7 +636,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        300
 #define _APS_NEXT_COMMAND_VALUE         40144
-#define _APS_NEXT_CONTROL_VALUE         1474
+#define _APS_NEXT_CONTROL_VALUE         1504
 #define _APS_NEXT_SYMED_VALUE           111
 #endif
 #endif

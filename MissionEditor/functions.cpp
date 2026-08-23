@@ -382,6 +382,21 @@ void ShowOptionsDialog()
 	theApp.m_Options.bPreferLocalTheaterFiles = opt.m_PreferLocalTheaterFiles ? true : false;
 	optini.sections[app].values["PreferLocalTheaterFiles"] = theApp.m_Options.bPreferLocalTheaterFiles ? "1" : "0";
 
+	theApp.m_Options.autoSaveEnabled = opt.m_AutoSaveEnabled != FALSE;
+	theApp.m_Options.autoSaveIntervalMinutes = opt.m_AutoSaveIntervalMinutes;
+	theApp.m_Options.autoSaveLocation = opt.m_AutoSaveLocation;
+	theApp.m_Options.autoSaveCustomDirectory = opt.m_AutoSaveDirectory;
+	theApp.m_Options.autoSaveVersioned = opt.m_AutoSaveVersioned != FALSE;
+	theApp.m_Options.autoSaveMaxCount = opt.m_AutoSaveMaxCount;
+	theApp.m_Options.bFileWatcher = opt.m_FileWatcher != FALSE;
+	optini.sections["AutoSave"].values["Enabled"] = theApp.m_Options.autoSaveEnabled ? "1" : "0";
+	optini.sections["AutoSave"].values["IntervalMinutes"] = std::to_string(theApp.m_Options.autoSaveIntervalMinutes).c_str();
+	optini.sections["AutoSave"].values["Location"] = std::to_string(theApp.m_Options.autoSaveLocation).c_str();
+	optini.sections["AutoSave"].values["CustomDirectory"] = theApp.m_Options.autoSaveCustomDirectory;
+	optini.sections["AutoSave"].values["Versioned"] = theApp.m_Options.autoSaveVersioned ? "1" : "0";
+	optini.sections["AutoSave"].values["MaxCount"] = std::to_string(theApp.m_Options.autoSaveMaxCount).c_str();
+	optini.sections["AutoSave"].values["FileWatcher"] = theApp.m_Options.bFileWatcher ? "1" : "0";
+
 
 	if (
 		(
@@ -397,6 +412,8 @@ void ShowOptionsDialog()
 		((CFinalSunDlg*)theApp.m_pMainWnd)->UpdateStrings();
 
 	optini.SaveFile(iniFile);
+	if (theApp.m_pMainWnd != nullptr && theApp.m_pMainWnd->GetSafeHwnd() != nullptr)
+		static_cast<CFinalSunDlg*>(theApp.m_pMainWnd)->ApplyAutomaticSaveSettings();
 }
 
 

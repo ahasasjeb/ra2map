@@ -35,6 +35,13 @@ class CTSOptions : public CDialog
 // Konstruktion
 public:
 	BOOL m_PreferLocalTheaterFiles;
+	BOOL m_AutoSaveEnabled = FALSE;
+	BOOL m_AutoSaveVersioned = TRUE;
+	BOOL m_FileWatcher = TRUE;
+	int m_AutoSaveIntervalMinutes = 5;
+	int m_AutoSaveMaxCount = 10;
+	int m_AutoSaveLocation = 0;
+	CString m_AutoSaveDirectory;
 	CString m_LanguageName;
 	CString m_TSEXE;
 	CTSOptions(CWnd* pParent = NULL);   // Standardkonstruktor
@@ -43,6 +50,7 @@ public:
 	//{{AFX_DATA(CTSOptions)
 	enum { IDD = IDD_TSOPTIONS };
 	CComboBox	m_Language;
+	CComboBox	m_AutoSaveLocationControl;
 	CEdit	m_TSExe;
 	int		m_LikeTS;
 	//}}AFX_DATA
@@ -61,11 +69,14 @@ protected:
 	// Generierte Nachrichtenzuordnungsfunktionen
 	//{{AFX_MSG(CTSOptions)
 	afx_msg void OnChoose();
+	afx_msg void OnChooseAutoSaveDirectory();
+	afx_msg void OnAutoSaveSettingChanged();
 	virtual void OnOK();
 	virtual BOOL OnInitDialog();
 	//}}AFX_MSG
 	DECLARE_MESSAGE_MAP()
 private:	
+	void UpdateAutoSaveControlState();
 };
 
 //{{AFX_INSERT_LOCATION}}

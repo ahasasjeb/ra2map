@@ -56,9 +56,19 @@ void CTSOptions::DoDataExchange(CDataExchange* pDX)
 	CDialog::DoDataExchange(pDX);
 	//{{AFX_DATA_MAP(CTSOptions)
 	DDX_Control(pDX, IDC_LANGUAGE, m_Language);
+	DDX_Control(pDX, IDC_AUTOSAVE_LOCATION, m_AutoSaveLocationControl);
 	DDX_Control(pDX, IDC_EDIT1, m_TSExe);
 	DDX_Radio(pDX, IDC_RULESLIKETS, m_LikeTS);
 	DDX_Check(pDX, IDC_PREFER_LOCAL_THEATER_FILES, m_PreferLocalTheaterFiles);
+	DDX_Check(pDX, IDC_AUTOSAVE_ENABLED, m_AutoSaveEnabled);
+	DDX_Text(pDX, IDC_AUTOSAVE_INTERVAL, m_AutoSaveIntervalMinutes);
+	DDV_MinMaxInt(pDX, m_AutoSaveIntervalMinutes, 1, 1440);
+	DDX_CBIndex(pDX, IDC_AUTOSAVE_LOCATION, m_AutoSaveLocation);
+	DDX_Text(pDX, IDC_AUTOSAVE_PATH, m_AutoSaveDirectory);
+	DDX_Check(pDX, IDC_AUTOSAVE_VERSIONED, m_AutoSaveVersioned);
+	DDX_Text(pDX, IDC_AUTOSAVE_MAXCOUNT, m_AutoSaveMaxCount);
+	DDV_MinMaxInt(pDX, m_AutoSaveMaxCount, 1, 1000);
+	DDX_Check(pDX, IDC_FILE_WATCHER, m_FileWatcher);
 	//}}AFX_DATA_MAP	
 }
 
@@ -66,6 +76,10 @@ void CTSOptions::DoDataExchange(CDataExchange* pDX)
 BEGIN_MESSAGE_MAP(CTSOptions, CDialog)
 	//{{AFX_MSG_MAP(CTSOptions)
 	ON_BN_CLICKED(IDC_CHOOSE, OnChoose)
+	ON_BN_CLICKED(IDC_AUTOSAVE_BROWSE, OnChooseAutoSaveDirectory)
+	ON_BN_CLICKED(IDC_AUTOSAVE_ENABLED, OnAutoSaveSettingChanged)
+	ON_BN_CLICKED(IDC_AUTOSAVE_VERSIONED, OnAutoSaveSettingChanged)
+	ON_CBN_SELCHANGE(IDC_AUTOSAVE_LOCATION, OnAutoSaveSettingChanged)
 	//}}AFX_MSG_MAP
 END_MESSAGE_MAP()
 
@@ -80,15 +94,58 @@ void CTSOptions::OnChoose()
 	CFileDialog fd(TRUE, NULL, "ra2.exe", OFN_FILEMUSTEXIST, "Red Alert 2 EXE|ra2.exe|");
 #endif
 
-	fd.DoModal();
+	if (fd.DoModal() == IDOK)
+		GetDlgItem(IDC_EDIT1)->SetWindowText(fd.GetPathName());
+}
 
-	this->GetDlgItem(IDC_EDIT1)->SetWindowText((LPCTSTR)fd.GetPathName());
+void CTSOptions::OnChooseAutoSaveDirectory()
+{
+	CString currentPath;
+	GetDlgItemText(IDC_AUTOSAVE_PATH, currentPath);
+	CFolderPickerDialog dialog(currentPath, OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR, this);
+	if (dialog.DoModal() == IDOK)
+		SetDlgItemText(IDC_AUTOSAVE_PATH, dialog.GetPathName());
+}
 
-	delete fd;
+void CTSOptions::OnAutoSaveSettingChanged()
+{
+	UpdateAutoSaveControlState();
+}
+
+void CTSOptions::UpdateAutoSaveControlState()
+{
+	const BOOL enabled = IsDlgButtonChecked(IDC_AUTOSAVE_ENABLED) == BST_CHECKED;
+	const int location = m_AutoSaveLocationControl.GetCurSel();
+	const BOOL customLocation = enabled && location == 2;
+	const BOOL versioned = enabled && IsDlgButtonChecked(IDC_AUTOSAVE_VERSIONED) == BST_CHECKED;
+
+	for (int controlId : { IDC_AUTOSAVE_INTERVAL_LABEL, IDC_AUTOSAVE_INTERVAL,
+		IDC_AUTOSAVE_MINUTES_LABEL, IDC_AUTOSAVE_LOCATION_LABEL, IDC_AUTOSAVE_LOCATION,
+		IDC_AUTOSAVE_VERSIONED })
+	{
+		if (auto* control = GetDlgItem(controlId))
+			control->EnableWindow(enabled);
+	}
+	GetDlgItem(IDC_AUTOSAVE_PATH)->EnableWindow(customLocation);
+	GetDlgItem(IDC_AUTOSAVE_BROWSE)->EnableWindow(customLocation);
+	GetDlgItem(IDC_AUTOSAVE_MAXCOUNT_LABEL)->EnableWindow(versioned);
+	GetDlgItem(IDC_AUTOSAVE_MAXCOUNT)->EnableWindow(versioned);
 }
 
 void CTSOptions::OnOK() 
 {
+	if (!UpdateData(TRUE))
+		return;
+	if (m_AutoSaveEnabled && m_AutoSaveLocation == 2)
+	{
+		m_AutoSaveDirectory.Trim();
+		if (m_AutoSaveDirectory.IsEmpty())
+		{
+			AfxMessageBox(GetLanguageStringACP("OptAutoSaveCustomRequired"), MB_ICONWARNING);
+			GetDlgItem(IDC_AUTOSAVE_PATH)->SetFocus();
+			return;
+		}
+	}
 	this->GetDlgItem(IDC_EDIT1)->GetWindowText(m_TSEXE);
 	int n=m_Language.GetItemData(m_Language.GetCurSel()); 
 	
@@ -113,6 +170,15 @@ BOOL CTSOptions::OnInitDialog()
 	SetDlgItemText(IDC_RULESLIKETS, GetLanguageStringACP("OptSupportMods"));
 	SetDlgItemText(IDC_ONLYORIGINAL, GetLanguageStringACP("OptOnlyOriginal"));
 	SetDlgItemText(IDC_PREFER_LOCAL_THEATER_FILES, GetLanguageStringACP("OptPreferLocalTheater"));
+	SetDlgItemText(IDC_AUTOSAVE_GROUP, GetLanguageStringACP("OptAutoSaveGroup"));
+	SetDlgItemText(IDC_AUTOSAVE_ENABLED, GetLanguageStringACP("OptAutoSaveEnabled"));
+	SetDlgItemText(IDC_AUTOSAVE_INTERVAL_LABEL, GetLanguageStringACP("OptAutoSaveInterval"));
+	SetDlgItemText(IDC_AUTOSAVE_MINUTES_LABEL, GetLanguageStringACP("OptAutoSaveMinutes"));
+	SetDlgItemText(IDC_AUTOSAVE_LOCATION_LABEL, GetLanguageStringACP("OptAutoSaveLocation"));
+	SetDlgItemText(IDC_AUTOSAVE_BROWSE, GetLanguageStringACP("OptBrowse"));
+	SetDlgItemText(IDC_AUTOSAVE_VERSIONED, GetLanguageStringACP("OptAutoSaveVersioned"));
+	SetDlgItemText(IDC_AUTOSAVE_MAXCOUNT_LABEL, GetLanguageStringACP("OptAutoSaveMaxCount"));
+	SetDlgItemText(IDC_FILE_WATCHER, GetLanguageStringACP("OptFileWatcher"));
 	SetDlgItemText(IDOK, GetLanguageStringACP("OK"));
 	SetDlgItemText(IDCANCEL, GetLanguageStringACP("Cancel"));
 	
@@ -122,8 +188,19 @@ BOOL CTSOptions::OnInitDialog()
 	else m_LikeTS=1;
 
 	m_PreferLocalTheaterFiles = theApp.m_Options.bPreferLocalTheaterFiles ? TRUE : FALSE;
+	m_AutoSaveEnabled = theApp.m_Options.autoSaveEnabled ? TRUE : FALSE;
+	m_AutoSaveIntervalMinutes = theApp.m_Options.autoSaveIntervalMinutes;
+	m_AutoSaveLocation = theApp.m_Options.autoSaveLocation;
+	m_AutoSaveDirectory = theApp.m_Options.autoSaveCustomDirectory;
+	m_AutoSaveVersioned = theApp.m_Options.autoSaveVersioned ? TRUE : FALSE;
+	m_AutoSaveMaxCount = theApp.m_Options.autoSaveMaxCount;
+	m_FileWatcher = theApp.m_Options.bFileWatcher ? TRUE : FALSE;
+	m_AutoSaveLocationControl.AddString(GetLanguageStringACP("OptAutoSaveLocationAppData"));
+	m_AutoSaveLocationControl.AddString(GetLanguageStringACP("OptAutoSaveLocationMap"));
+	m_AutoSaveLocationControl.AddString(GetLanguageStringACP("OptAutoSaveLocationCustom"));
 
 	UpdateData(FALSE);
+	UpdateAutoSaveControlState();
 
 	int i;
 	for(i=0;i<language.sections["Languages"].values.size();i++)

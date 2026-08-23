@@ -70,8 +70,12 @@ struct OPTIONS{
 	float viewScaleSpeed = 15.0f;
 	bool useDefaultMouseCursor = false;
 	bool bFileWatcher = true;
+	bool autoSaveEnabled = false;
 	int autoSaveIntervalMinutes = 5;
 	int autoSaveMaxCount = 10;
+	int autoSaveLocation = 0; // 0: editor user data, 1: beside the map, 2: custom directory
+	CString autoSaveCustomDirectory;
+	bool autoSaveVersioned = true;
 
 public:
 	BOOL bSearchLikeTS;

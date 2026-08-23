@@ -143,6 +143,8 @@ PropertyBrushSettings CBuilding::GetPropertyBrushSettings() const
 		m_upgradecount, m_spotlight, m_upgrade1, m_upgrade2, m_upgrade3, m_flag3, m_flag4, m_tag };
 	for (size_t i = 0; i < m_propertyBrushFields.size(); ++i)
 		settings.selected[i] = m_propertyBrushFields[i] != FALSE;
+	settings.randomDirection = settings.selected[2] &&
+		m_direction == GetLanguageStringACP("PropertyBrushRandomDirection");
 	return settings;
 }
 
@@ -165,6 +167,8 @@ void CBuilding::UpdatePropertyBrushControls()
 	{
 		SetWindowText(GetLanguageStringACP("PropertyBrushCap"));
 		SetDlgItemText(IDC_LDESC, GetLanguageStringACP("PropertyBrushDesc"));
+		if (auto* direction = static_cast<CComboBox*>(GetDlgItem(IDC_DIRECTION)))
+			direction->AddString(GetLanguageStringACP("PropertyBrushRandomDirection"));
 	}
 }
 

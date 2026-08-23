@@ -243,9 +243,7 @@ BOOL CFinalSunDlg::OnInitDialog()
 {
 
 	CDialog::OnInitDialog();
-	SetTimer(0xFA21, 2000, nullptr);
-	if (theApp.m_Options.autoSaveIntervalMinutes > 0)
-		SetTimer(0xFA22, static_cast<UINT>(theApp.m_Options.autoSaveIntervalMinutes) * 60U * 1000U, nullptr);
+	ApplyAutomaticSaveSettings();
 
 	m_hArrowCursor = theApp.m_Options.useDefaultMouseCursor ? LoadCursor(NULL, IDC_ARROW) : m_hGameCursor;
 
@@ -4013,13 +4011,31 @@ void CFinalSunDlg::RefreshMapWriteTime()
 	m_hasKnownMapWriteTime = !error;
 }
 
-void CFinalSunDlg::PruneAutomaticSaves(const std::filesystem::path& directory)
+void CFinalSunDlg::ApplyAutomaticSaveSettings()
+{
+	KillTimer(0xFA21);
+	KillTimer(0xFA22);
+	if (theApp.m_Options.bFileWatcher)
+		SetTimer(0xFA21, 2000, nullptr);
+	if (theApp.m_Options.autoSaveEnabled && theApp.m_Options.autoSaveIntervalMinutes > 0)
+	{
+		const UINT interval = static_cast<UINT>(theApp.m_Options.autoSaveIntervalMinutes) * 60U * 1000U;
+		SetTimer(0xFA22, interval, nullptr);
+	}
+}
+
+void CFinalSunDlg::PruneAutomaticSaves(const std::filesystem::path& directory,
+	const std::wstring& filePrefix, const std::wstring& extension)
 {
 	std::error_code error;
 	std::vector<std::filesystem::directory_entry> files;
 	for (std::filesystem::directory_iterator it(directory, error), end; !error && it != end; it.increment(error))
 	{
-		if (it->is_regular_file(error))
+		const std::wstring fileName = it->path().filename().wstring();
+		const bool matchesMap = fileName.size() >= filePrefix.size() &&
+			_wcsnicmp(fileName.c_str(), filePrefix.c_str(), filePrefix.size()) == 0;
+		const bool matchesExtension = _wcsicmp(it->path().extension().c_str(), extension.c_str()) == 0;
+		if (it->is_regular_file(error) && matchesMap && matchesExtension)
 			files.push_back(*it);
 	}
 	std::sort(files.begin(), files.end(), [](const auto& left, const auto& right)
@@ -4034,26 +4050,52 @@ void CFinalSunDlg::PruneAutomaticSaves(const std::filesystem::path& directory)
 
 void CFinalSunDlg::CreateAutomaticSave()
 {
-	if (m_automaticSaveInProgress || currentMapFile.IsEmpty() || Map->GetIsoSize() == 0)
+	if (!theApp.m_Options.autoSaveEnabled || m_automaticSaveInProgress ||
+		currentMapFile.IsEmpty() || Map->GetIsoSize() == 0)
+		return;
+
+	const std::filesystem::path source(utf8ToUtf16(currentMapFile.GetString()));
+	std::filesystem::path directory;
+	switch (theApp.m_Options.autoSaveLocation)
+	{
+	case 1:
+		directory = source.parent_path() / L"Autosaves";
+		break;
+	case 2:
+		directory = std::filesystem::path(utf8ToUtf16(theApp.m_Options.autoSaveCustomDirectory.GetString()));
+		break;
+	default:
+		directory = std::filesystem::path(utf8ToUtf16(u8AppDataPath)) / L"Autosaves";
+		break;
+	}
+	if (directory.empty())
 		return;
 
 	std::error_code error;
-	const std::filesystem::path directory = std::filesystem::path(utf8ToUtf16(u8AppDataPath)) / L"Autosaves";
 	std::filesystem::create_directories(directory, error);
 	if (error)
 		return;
 
-	SYSTEMTIME now{};
-	GetLocalTime(&now);
-	wchar_t timestamp[32]{};
-	swprintf_s(timestamp, L"%04u%02u%02u-%02u%02u%02u", now.wYear, now.wMonth, now.wDay, now.wHour, now.wMinute, now.wSecond);
-	const std::filesystem::path source(utf8ToUtf16(currentMapFile.GetString()));
-	std::filesystem::path destination = directory / (source.stem().wstring() + L"-" + timestamp + source.extension().wstring());
+	const std::wstring filePrefix = source.stem().wstring() + L"-autosave-";
+	std::filesystem::path destination;
+	if (theApp.m_Options.autoSaveVersioned)
+	{
+		SYSTEMTIME now{};
+		GetLocalTime(&now);
+		wchar_t timestamp[32]{};
+		swprintf_s(timestamp, L"%04u%02u%02u-%02u%02u%02u", now.wYear, now.wMonth, now.wDay, now.wHour, now.wMinute, now.wSecond);
+		destination = directory / (filePrefix + timestamp + source.extension().wstring());
+	}
+	else
+	{
+		destination = directory / (source.stem().wstring() + L"-autosave" + source.extension().wstring());
+	}
 
 	m_automaticSaveInProgress = true;
 	SaveMap(utf16ToUtf8(destination.wstring()).c_str(), false);
 	m_automaticSaveInProgress = false;
-	PruneAutomaticSaves(directory);
+	if (theApp.m_Options.autoSaveVersioned)
+		PruneAutomaticSaves(directory, filePrefix, source.extension().wstring());
 }
 
 void CFinalSunDlg::OnTimer(UINT_PTR nIDEvent)
