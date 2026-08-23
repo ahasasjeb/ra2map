@@ -25,6 +25,7 @@
 mod codec;
 mod csf;
 mod minilzo;
+mod snapshot;
 mod vulkan;
 
 pub use vulkan::{

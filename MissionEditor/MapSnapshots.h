@@ -38,18 +38,10 @@ struct SNAPSHOTDATA
 	int bottom;
 	int right;
 
-	// FIELDDATA::bRedrawTerrain is a one-bit flag.  Keeping it as a byte in a
-	// snapshot preserves its 0/1 value while avoiding the four-byte Win32 BOOL
-	// representation for every captured cell.
-	std::vector<BYTE> bRedrawTerrain;
-	std::vector<BYTE> overlay;
-	std::vector<BYTE> overlaydata;
-	std::vector<WORD> wGround;
-	std::vector<WORD> bMapData;
-	std::vector<BYTE> bSubTile;
-	std::vector<BYTE> bHeight;
-	std::vector<BYTE> bMapData2;
-	std::vector<BYTE> bRNDData;
+	// Eleven canonical bytes per cell are run-length compressed by the Rust
+	// core. This replaces nine heap allocations and substantially reduces the
+	// retained size of the 64-entry undo history on typical maps.
+	std::vector<BYTE> packedFields;
 	//CIniFile mapfile;
 };
 

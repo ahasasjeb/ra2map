@@ -20,6 +20,12 @@
 
 #include "stdafx.h"
 #include "MapSnapshots.h"
+#include "RustCore.h"
+
+namespace
+{
+	constexpr std::size_t SNAPSHOT_CELL_SIZE = 11;
+}
 
 CMapSnapshots::CMapSnapshots()
 {
@@ -56,6 +62,8 @@ void CMapSnapshots::TakeSnapshot(FIELDDATA* fielddata, DWORD isoSize, BOOL bEras
 
 	if (right == 0) right = (int)isoSize;
 	if (bottom == 0) bottom = (int)isoSize;
+	if (right <= left || bottom <= top || fielddata == nullptr)
+		return;
 
 	if (bEraseFollowing)
 	{
@@ -88,15 +96,7 @@ void CMapSnapshots::TakeSnapshot(FIELDDATA* fielddata, DWORD isoSize, BOOL bEras
 	ss.top = top;
 	ss.right = right;
 	ss.bottom = bottom;
-	ss.bHeight.resize(size);
-	ss.bMapData.resize(size);
-	ss.bSubTile.resize(size);
-	ss.bMapData2.resize(size);
-	ss.wGround.resize(size);
-	ss.overlay.resize(size);
-	ss.overlaydata.resize(size);
-	ss.bRedrawTerrain.resize(size);
-	ss.bRNDData.resize(size);
+	std::vector<BYTE> fields(size * SNAPSHOT_CELL_SIZE);
 	int i;
 	int e;
 	for (e = 0;e < height;e++)
@@ -106,18 +106,33 @@ void CMapSnapshots::TakeSnapshot(FIELDDATA* fielddata, DWORD isoSize, BOOL bEras
 			int pos_w, pos_r;
 			pos_w = i + e * width;
 			pos_r = left + i + (top + e) * (int)isoSize;
-			ss.bHeight[pos_w] = fielddata[pos_r].bHeight;
-			ss.bMapData[pos_w] = fielddata[pos_r].bMapData;
-			ss.bSubTile[pos_w] = fielddata[pos_r].bSubTile;
-			ss.bMapData2[pos_w] = fielddata[pos_r].bMapData2;
-			ss.wGround[pos_w] = fielddata[pos_r].wGround;
-			ss.overlay[pos_w] = fielddata[pos_r].overlay;
-			ss.overlaydata[pos_w] = fielddata[pos_r].overlaydata;
-			ss.bRedrawTerrain[pos_w] = fielddata[pos_r].bRedrawTerrain;
-			ss.bRNDData[pos_w] = fielddata[pos_r].bRNDImage;
+			const std::size_t pos = static_cast<std::size_t>(pos_w);
+			fields[0 * size + pos] = fielddata[pos_r].bHeight;
+			fields[1 * size + pos] = static_cast<BYTE>(fielddata[pos_r].bMapData);
+			fields[2 * size + pos] = static_cast<BYTE>(fielddata[pos_r].bMapData >> 8);
+			fields[3 * size + pos] = fielddata[pos_r].bSubTile;
+			fields[4 * size + pos] = fielddata[pos_r].bMapData2;
+			fields[5 * size + pos] = static_cast<BYTE>(fielddata[pos_r].wGround);
+			fields[6 * size + pos] = static_cast<BYTE>(fielddata[pos_r].wGround >> 8);
+			fields[7 * size + pos] = fielddata[pos_r].overlay;
+			fields[8 * size + pos] = fielddata[pos_r].overlaydata;
+			fields[9 * size + pos] = static_cast<BYTE>(fielddata[pos_r].bRedrawTerrain);
+			fields[10 * size + pos] = static_cast<BYTE>(fielddata[pos_r].bRNDImage);
 		}
 	}
-
+	std::size_t packedSize = 0;
+	if (rs_snapshot_pack(fields.data(), fields.size(), nullptr, 0, &packedSize) != RS_ERR_SMALL_BUFFER)
+	{
+		m_snapshots.pop_back();
+		m_cursnapshot = static_cast<int>(m_snapshots.size()) - 1;
+		return;
+	}
+	ss.packedFields.resize(packedSize);
+	if (rs_snapshot_pack(fields.data(), fields.size(), ss.packedFields.data(), ss.packedFields.size(), &packedSize) != RS_OK)
+	{
+		m_snapshots.pop_back();
+		m_cursnapshot = static_cast<int>(m_snapshots.size()) - 1;
+	}
 }
 
 void CMapSnapshots::RestoreSnapshot(FIELDDATA* fielddata, DWORD isoSize, const SNAPSHOTDATA& ss,
@@ -128,6 +143,10 @@ void CMapSnapshots::RestoreSnapshot(FIELDDATA* fielddata, DWORD isoSize, const S
 	const int top = ss.top;
 	const int width = ss.right - left;
 	const int height = ss.bottom - top;
+	const std::size_t cellCount = static_cast<std::size_t>(width) * height;
+	std::vector<BYTE> fields(cellCount * SNAPSHOT_CELL_SIZE);
+	if (rs_snapshot_unpack(ss.packedFields.data(), ss.packedFields.size(), fields.data(), fields.size()) != RS_OK)
+		return;
 
 	int i, e;
 	for (e = 0;e < height;e++)
@@ -141,15 +160,16 @@ void CMapSnapshots::RestoreSnapshot(FIELDDATA* fielddata, DWORD isoSize, const S
 			if (onBeforeRestore)
 				onBeforeRestore(left + i, top + e);
 
-			fielddata[pos_w].bHeight = ss.bHeight[pos_r];
-			fielddata[pos_w].bMapData = ss.bMapData[pos_r];
-			fielddata[pos_w].bSubTile = ss.bSubTile[pos_r];
-			fielddata[pos_w].bMapData2 = ss.bMapData2[pos_r];
-			fielddata[pos_w].wGround = ss.wGround[pos_r];
-			fielddata[pos_w].overlay = ss.overlay[pos_r];
-			fielddata[pos_w].overlaydata = ss.overlaydata[pos_r];
-			fielddata[pos_w].bRedrawTerrain = ss.bRedrawTerrain[pos_r];
-			fielddata[pos_w].bRNDImage = ss.bRNDData[pos_r];
+			const std::size_t pos = static_cast<std::size_t>(pos_r);
+			fielddata[pos_w].bHeight = fields[0 * cellCount + pos];
+			fielddata[pos_w].bMapData = static_cast<WORD>(fields[1 * cellCount + pos] | (fields[2 * cellCount + pos] << 8));
+			fielddata[pos_w].bSubTile = fields[3 * cellCount + pos];
+			fielddata[pos_w].bMapData2 = fields[4 * cellCount + pos];
+			fielddata[pos_w].wGround = static_cast<WORD>(fields[5 * cellCount + pos] | (fields[6 * cellCount + pos] << 8));
+			fielddata[pos_w].overlay = fields[7 * cellCount + pos];
+			fielddata[pos_w].overlaydata = fields[8 * cellCount + pos];
+			fielddata[pos_w].bRedrawTerrain = fields[9 * cellCount + pos];
+			fielddata[pos_w].bRNDImage = fields[10 * cellCount + pos];
 
 			if (onAfterRestore)
 				onAfterRestore(left + i, top + e);
