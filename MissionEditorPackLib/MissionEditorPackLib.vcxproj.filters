@@ -22,6 +22,9 @@
     <ClInclude Include="MissionEditorPackLib.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="RustCore.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="Vec3.h">
       <Filter>Header Files</Filter>
     </ClInclude>
