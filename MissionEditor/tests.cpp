@@ -33,6 +33,7 @@
 #include "MapSnapshots.h"
 #include "PropertyBrushTool.h"
 #include "PalettedImageComposition.h"
+#include "AlliesEditorDlg.h"
 
 class TestError : public std::runtime_error
 {
@@ -113,6 +114,7 @@ int Tests::run()
 		[this]() { test_property_brush_settings(); },
 		[this]() { test_turret_offset_parsing(); },
 		[this]() { test_paletted_image_composition(); },
+		[this]() { test_alliance_sync(); },
 	});
 	for (const auto f : test_functions)
 	{
@@ -160,6 +162,31 @@ void Tests::test_turret_offset_parsing()
 
 	offset = ParseTurretOffset("");
 	REPORT_TEST(offset[0] == 0.0f && offset[1] == 0.0f && offset[2] == 0.0f);
+}
+
+void Tests::test_alliance_sync()
+{
+	// splitting trims entries and drops empty ones
+	auto parts = SplitAlliesValue("GDI, Nod,,Neutral");
+	REPORT_TEST(parts.size() == 3);
+	REPORT_TEST(parts[0] == "GDI" && parts[1] == "Nod" && parts[2] == "Neutral");
+
+	parts = SplitAlliesValue("");
+	REPORT_TEST(parts.empty());
+
+	parts = SplitAlliesValue(" GDI ");
+	REPORT_TEST(parts.size() == 1 && parts[0] == "GDI");
+
+	// adding a house appends it exactly once and keeps existing entries
+	REPORT_TEST(UpdateAlliesValue("GDI", "Nod", TRUE) == "GDI,Nod");
+	REPORT_TEST(UpdateAlliesValue("GDI,Nod", "Nod", TRUE) == "GDI,Nod");
+	REPORT_TEST(UpdateAlliesValue("", "GDI", TRUE) == "GDI");
+
+	// removing a house leaves all other entries intact
+	REPORT_TEST(UpdateAlliesValue("GDI,Nod,Neutral", "Nod", FALSE) == "GDI,Neutral");
+	REPORT_TEST(UpdateAlliesValue("GDI , Nod", "Nod", FALSE) == "GDI");
+	REPORT_TEST(UpdateAlliesValue("GDI", "Nod", FALSE) == "GDI");
+	REPORT_TEST(UpdateAlliesValue("GDI,GDI,Nod", "GDI", FALSE) == "Nod");
 }
 
 void Tests::test_paletted_image_composition()

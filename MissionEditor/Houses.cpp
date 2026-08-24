@@ -30,6 +30,7 @@
 #include "variables.h"
 #include "functions.h"
 #include "newra2housedlg.h"
+#include "AlliesEditorDlg.h"
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -95,6 +96,7 @@ BEGIN_MESSAGE_MAP(CHouses, CDialog)
 	ON_CBN_SELCHANGE(IDC_HUMANPLAYER, OnSelchangeHumanplayer)
 	ON_CBN_SELCHANGE(IDC_ACTSLIKE, OnSelchangeActslike)
 	ON_EN_SETFOCUS(IDC_ALLIES, OnSetfocusAllies)
+	ON_BN_CLICKED(IDC_ALLIES_BROWSE, OnBnClickedAlliesBrowse)
 	//}}AFX_MSG_MAP
 END_MESSAGE_MAP()
 
@@ -302,120 +304,131 @@ void CHouses::OnPreparehouses()
 	}
 }
 
-void CHouses::AddHouse(const char *name)
+void CHouses::AddHouse(const CString& requestedName)
 {
 	CIniFile& ini=Map->GetIniFile();
+	CString houseName=TranslateHouse(requestedName);
+	houseName.Trim();
 
-	if(ini.sections.find(name)!=ini.sections.end())
+	if(houseName.IsEmpty() || ini.sections.find(houseName)!=ini.sections.end())
 	{
-		MessageBox(TranslateStringVariables(1, GetLanguageStringACP("HouseNameTaken"), name));
-		return;
-	}
-	if(ini.sections.find(TranslateHouse(name))!=ini.sections.end())
-	{
-		MessageBox(TranslateStringVariables(1, GetLanguageStringACP("HouseNameTaken"), name));
+		MessageBox(TranslateStringVariables(1, GetLanguageStringACP("HouseNameTaken"), houseName));
 		return;
 	}
 #ifdef RA2_MODE
-	CNewRA2HouseDlg dlg;
-	if(dlg.DoModal()==IDCANCEL) return;
-#endif
+	CNewRA2HouseDlg dlg(this);
+	if(dlg.DoModal()!=IDOK)
+		return;
 
-	int c;
-	
-	//okay, get a free slot
-	int pos=-1;
-#ifdef RA2_MODE
-	int pos2=-1;
-#endif
-	for(c=0;c>-1;c++)
+	const CString parentCountryId=dlg.m_Country;
+	const CIniFileSection* parentCountry=rules.GetSection(parentCountryId);
+	if(!parentCountry)
 	{
-		char k[50];
-		itoa(c,k,10);
-		if(ini.sections[MAPHOUSES].values.find(k)==ini.sections[MAPHOUSES].values.end())
-			pos=c;
-		if(pos!=-1) break;
-	}
-#ifdef RA2_MODE
-	for(c=0;c>-1;c++)
-	{
-		char k[50];
-		itoa(c,k,10);
-		if(ini.sections[HOUSES].values.find(k)==ini.sections[HOUSES].values.end())
-			pos2=c;
-		if(pos2!=-1) break;
+		MessageBox(GetLanguageStringACP("HouseParentCountryMissing"));
+		return;
 	}
 #endif
-	
-	char k[50];
-	itoa(pos,k,10);
-	
-	ini.sections[MAPHOUSES].values[k]=TranslateHouse(name);
 
-	CString country;
-	country=name; 
-	country.Replace(" House", "");
-	country.Replace("House","");
-	if(country.Find(" ")>=0) country.Replace(" ", "_"); //=country.Left(country.Find(" "));
+	auto findFreeIndex=[](const CIniFileSection* section)
+	{
+		for(int index=0;index<INT_MAX;index++)
+		{
+			CString key;
+			key.Format("%d", index);
+			if(!section || section->values.find(key)==section->values.end())
+				return index;
+		}
+		return -1;
+	};
+
+	const CIniFileSection* mapHouses=ini.GetSection(MAPHOUSES);
+	const int houseIndex=findFreeIndex(mapHouses);
+	if(houseIndex<0)
+		return;
 
 #ifdef RA2_MODE
-	itoa(pos2, k, 10);
-	ini.sections[HOUSES].values[k]=country;
-#endif
-	
-	ini.sections[TranslateHouse(name)].values["IQ"]="0";
-	ini.sections[TranslateHouse(name)].values["Edge"]="West";
-	ini.sections[TranslateHouse(name)].values["Allies"]=TranslateHouse(name);
+	CString countryId=houseName;
+	if(countryId.GetLength()>=6 && countryId.Right(6).CompareNoCase(" House")==0)
+		countryId=countryId.Left(countryId.GetLength()-6);
+	countryId.Trim();
+	countryId.Replace(" ", "_");
+	if(countryId.IsEmpty() || ini.sections.find(countryId)!=ini.sections.end())
+	{
+		MessageBox(TranslateStringVariables(1, GetLanguageStringACP("HouseNameTaken"), countryId));
+		return;
+	}
 
-	CString side=name;
+	const CIniFileSection* mapCountries=ini.GetSection(HOUSES);
+	const int countryIndex=findFreeIndex(mapCountries);
+	if(countryIndex<0)
+		return;
+#endif
+
+	CString key;
+	key.Format("%d", houseIndex);
+	ini.sections[MAPHOUSES].values[key]=houseName;
+
 #ifdef RA2_MODE
-	side=rules.sections[TranslateHouse(dlg.m_Country)].values["Side"];
+	key.Format("%d", countryIndex);
+	ini.sections[HOUSES].values[key]=countryId;
 #endif
 
-	if(strstr(name, "Nod")!=NULL)
+	CIniFileSection& house=ini.sections[houseName];
+	house.values["IQ"]="0";
+	house.values["Edge"]="West";
+	house.values["Allies"]=houseName;
+
+	if(houseName.Find("Nod")!=-1)
 	{
 #ifndef RA2_MODE
-		ini.sections[TranslateHouse(name)].values["Side"]="Nod";
+		house.values["Side"]="Nod";
+		if(houseName.CompareNoCase("Nod")!=0) house.values["Allies"]+=",Nod";
 #endif
-		ini.sections[TranslateHouse(name)].values["Color"]="DarkRed";
-		if(name!="Nod") ini.sections[name].values["Allies"]+=",Nod";
+		house.values["Color"]="DarkRed";
 	}
 	else
 	{
 #ifndef RA2_MODE
-		ini.sections[TranslateHouse(name)].values["Side"]="GDI";
+		house.values["Side"]="GDI";
+		if(houseName.CompareNoCase("GDI")!=0) house.values["Allies"]+=",GDI";
 #endif
-		ini.sections[TranslateHouse(name)].values["Color"]="Gold";
-		if(name!="GDI") ini.sections[TranslateHouse(name)].values["Allies"]+=",GDI";
+		house.values["Color"]="Gold";
 	}
-	ini.sections[TranslateHouse(name)].values["Credits"]="0";
+	house.values["Credits"]="0";
 #ifndef RA2_MODE
-	ini.sections[TranslateHouse(name)].values["ActsLike"]="0";
+	house.values["ActsLike"]="0";
 #else
-	ini.sections[TranslateHouse(name)].values["Country"]=TranslateHouse(country);
+	house.values["Country"]=countryId;
 #endif
-	ini.sections[TranslateHouse(name)].values["NodeCount"]="0";
-	ini.sections[TranslateHouse(name)].values["TechLevel"]="10";
-	ini.sections[TranslateHouse(name)].values["PercentBuilt"]="100";
-	ini.sections[TranslateHouse(name)].values["PlayerControl"]="no";
+	house.values["NodeCount"]="0";
+	house.values["TechLevel"]="10";
+	house.values["PercentBuilt"]="100";
+	house.values["PlayerControl"]="no";
 
 #ifdef RA2_MODE
-	dlg.m_Country=TranslateHouse(dlg.m_Country); // just to make sure...
-	country=TranslateHouse(country);
-    ini.sections[country].values["ParentCountry"]=dlg.m_Country;
-	ini.sections[country].values["Name"]=country;
-	ini.sections[country].values["Suffix"]=rules.sections[dlg.m_Country].values["Suffix"];
-	ini.sections[country].values["Prefix"]=rules.sections[dlg.m_Country].values["Prefix"];
-	ini.sections[country].values["Color"]=rules.sections[dlg.m_Country].values["Color"];
-	ini.sections[country].values["Side"]=rules.sections[dlg.m_Country].values["Side"];
-	ini.sections[country].values["SmartAI"]=rules.sections[dlg.m_Country].values["SmartAI"];
-	ini.sections[country].values["CostUnitsMult"]="1";
+	CIniFileSection& country=ini.sections[countryId];
+	country.values["ParentCountry"]=parentCountryId;
+	country.values["Name"]=countryId;
+	country.values["Suffix"]=parentCountry->GetValueByName("Suffix");
+	country.values["Prefix"]=parentCountry->GetValueByName("Prefix");
+	country.values["Color"]=parentCountry->GetValueByName("Color");
+	country.values["Side"]=parentCountry->GetValueByName("Side");
+	country.values["SmartAI"]=parentCountry->GetValueByName("SmartAI");
+	country.values["CostUnitsMult"]="1";
 #endif
 
-	int cusel=m_houses.GetCurSel();
-	UpdateDialog();
-	((CFinalSunDlg*)theApp.m_pMainWnd)->UpdateDialogs();
-	if(cusel!=-1)m_houses.SetCurSel(cusel);
+	CFinalSunDlg* mainDialog=static_cast<CFinalSunDlg*>(theApp.m_pMainWnd);
+	if(mainDialog && ::IsWindow(mainDialog->GetSafeHwnd()))
+		mainDialog->UpdateDialogs(FALSE, TRUE);
+	else
+		UpdateDialog();
+
+	const int selection=m_houses.FindStringExact(-1, TranslateHouse(houseName, TRUE));
+	if(selection!=CB_ERR)
+	{
+		m_houses.SetCurSel(selection);
+		OnSelchangeHouses();
+	}
 }
 
 void CHouses::OnShowWindow(BOOL bShow, UINT nStatus) 
@@ -821,6 +834,22 @@ void CHouses::UpdateStrings()
 void CHouses::OnSetfocusAllies() 
 {
 	SetMainStatusBar(GetLanguageStringACP("HousesAlliesHelp"));	
+}
+
+void CHouses::OnBnClickedAlliesBrowse() 
+{
+	int cusel;
+	cusel=m_houses.GetCurSel();
+	if(cusel==-1) return;
+
+	CAlliesEditorDlg dlg(this);
+	m_houses.GetLBText(cusel, dlg.m_CurrentHouse);
+
+	if(dlg.DoModal()==IDOK)
+	{
+		m_Allies.SetWindowText(dlg.m_AlliesResult);
+		OnKillfocusAllies();
+	}
 }
 
 void CHouses::PostNcDestroy() 

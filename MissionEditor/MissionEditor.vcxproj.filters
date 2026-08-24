@@ -42,6 +42,9 @@
     <ClCompile Include="All.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="AlliesEditorDlg.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="BackCliffModifier.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -317,6 +320,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="All.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="AlliesEditorDlg.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="BackCliffModifier.h">

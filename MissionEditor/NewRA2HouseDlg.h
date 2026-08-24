@@ -48,6 +48,7 @@ public:
 	//{{AFX_VIRTUAL(CNewRA2HouseDlg)
 	protected:
 	virtual void DoDataExchange(CDataExchange* pDX);    // DDX/DDV-Unterstützung
+	virtual void OnOK();
 	//}}AFX_VIRTUAL
 
 // Implementierung

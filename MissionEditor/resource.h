@@ -89,6 +89,7 @@
 #define IDD_SEARCHWAYPOINT              285
 #define IDD_USERSCRIPTS                 288
 #define IDD_COMBO_UINPUT                289
+#define IDD_ALLIES_EDITOR               300
 #define IDC_EDITOR_ARROW                299
 #define IDC_BULB                        1000
 #define IDC_TAB                         1007
@@ -629,14 +630,24 @@
 #define IDC_AUTOSAVE_MAXCOUNT_LABEL     1501
 #define IDC_AUTOSAVE_MAXCOUNT           1502
 #define IDC_FILE_WATCHER                1503
+#define IDC_ALLIES_BROWSE               1504
+#define IDC_ALLYED_ENEMIES              1505
+#define IDC_ALLYED_ALLIES               1506
+#define IDC_ALLYED_TO_ALLIES            1507
+#define IDC_ALLYED_TO_ENEMIES           1508
+#define IDC_ALLYED_CURHOUSE             1509
+#define IDC_ALLYED_LENEMIES             1510
+#define IDC_ALLYED_LALLIES              1511
+#define IDC_ALLYED_LHOUSE               1512
+#define IDC_ALLYED_BIDIRECTIONAL        1513
 
 // Next default values for new objects
-// 
+//
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
-#define _APS_NEXT_RESOURCE_VALUE        300
+#define _APS_NEXT_RESOURCE_VALUE        301
 #define _APS_NEXT_COMMAND_VALUE         40144
-#define _APS_NEXT_CONTROL_VALUE         1504
+#define _APS_NEXT_CONTROL_VALUE         1514
 #define _APS_NEXT_SYMED_VALUE           111
 #endif
 #endif

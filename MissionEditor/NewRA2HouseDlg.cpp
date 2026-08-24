@@ -68,17 +68,50 @@ BOOL CNewRA2HouseDlg::OnInitDialog()
 {
 	CDialog::OnInitDialog();
 	ApplyEditorUIFont(this);
+	SetWindowText(GetLanguageStringACP("AddHouseCap"));
 
 	CComboBox* country=(CComboBox*)GetDlgItem(IDC_COUNTRY);
-	
-	int i;
-	for(i=0;i<rules.sections[HOUSES].values.size();i++)
+	const CIniFileSection* countries=rules.GetSection(HOUSES);
+	if(countries)
 	{
-		country->AddString(TranslateHouse(*rules.sections[HOUSES].GetValue(i), TRUE));
+		DWORD_PTR countryIndex=0;
+		for(const auto& entry : countries->values)
+		{
+			if(countries->value_orig_pos.find(entry.first)==countries->value_orig_pos.end())
+			{
+				countryIndex++;
+				continue;
+			}
+
+			const int comboIndex=country->AddString(TranslateHouse(entry.second, TRUE));
+			if(comboIndex!=CB_ERR && comboIndex!=CB_ERRSPACE)
+				country->SetItemData(comboIndex, countryIndex);
+			countryIndex++;
+		}
 	}
 
-	country->SetCurSel(0);
+	if(country->GetCount()>0)
+		country->SetCurSel(0);
+	else
+		GetDlgItem(IDOK)->EnableWindow(FALSE);
 	
 	return TRUE;  // return TRUE unless you set the focus to a control
 	              // EXCEPTION: OCX-Eigenschaftenseiten sollten FALSE zurückgeben
+}
+
+void CNewRA2HouseDlg::OnOK()
+{
+	CComboBox* country=(CComboBox*)GetDlgItem(IDC_COUNTRY);
+	const int selection=country->GetCurSel();
+	const CIniFileSection* countries=rules.GetSection(HOUSES);
+	if(selection==CB_ERR || !countries)
+		return;
+
+	const DWORD_PTR countryIndex=country->GetItemData(selection);
+	const CString* countryId=countryIndex==CB_ERR ? nullptr : countries->GetValue(countryIndex);
+	if(!countryId || countryId->IsEmpty())
+		return;
+
+	m_Country=*countryId;
+	EndDialog(IDOK);
 }

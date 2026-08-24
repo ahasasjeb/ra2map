@@ -32,14 +32,15 @@
 /////////////////////////////////////////////////////////////////////////////
 // Dialogfeld CInputBox 
 
-CString InputBox(const char* Sentence, const char* Caption);
+CString InputBox(const CString& sentence, const CString& caption);
 
 class CInputBox : public CDialog
 {
 // Konstruktion
 public:
-	void SetSentence(CString Sentence);
-	void SetCaption(CString Caption);
+	const CString& GetValue() const;
+	void SetSentence(const CString& sentence);
+	void SetCaption(const CString& caption);
 	CInputBox(CWnd* pParent = NULL);   // Standardkonstruktor
 
 // Dialogfelddaten
@@ -68,6 +69,7 @@ protected:
 private:
 	CString m_Text;
 	CString m_Caption;
+	CString m_Value;
 };
 
 //{{AFX_INSERT_LOCATION}}

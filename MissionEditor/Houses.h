@@ -37,7 +37,7 @@ class CHouses : public CDialog
 // Konstruktion
 public:
 	void UpdateStrings();
-	void AddHouse(const char* name);
+	void AddHouse(const CString& name);
 	void UpdateDialog();
 	CHouses();
 	~CHouses();
@@ -93,6 +93,7 @@ protected:
 	afx_msg void OnSelchangeHumanplayer();
 	afx_msg void OnSelchangeActslike();
 	afx_msg void OnSetfocusAllies();
+	afx_msg void OnBnClickedAlliesBrowse();
 	//}}AFX_MSG
 	DECLARE_MESSAGE_MAP()
 

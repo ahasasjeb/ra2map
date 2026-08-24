@@ -39,16 +39,15 @@ InputBox();
 Shows a inputbox with specified caption and text.
 Returns the user input. If the user cancels, the user input is "".
 */
-CString InputBox(const char* Sentence, const char* Caption)
+CString InputBox(const CString& sentence, const CString& caption)
 {
 	CInputBox inp;
-	inp.SetCaption(Caption);
-	inp.SetSentence(Sentence);
-	char* res = reinterpret_cast<char*>(inp.DoModal());
-	CString cstr = res != NULL ? res : "";
-	delete[] res;
-	
-	return cstr;
+	inp.SetCaption(caption);
+	inp.SetSentence(sentence);
+	if(inp.DoModal()!=IDOK)
+		return CString();
+
+	return inp.GetValue();
 }
 
 CInputBox::CInputBox(CWnd* pParent /*=NULL*/)
@@ -87,27 +86,30 @@ void CInputBox::OnOK()
 		return;
 	}
 
-	char* str;
-	// +1 for the NUL terminator (the original allocated GetLength()
-	// bytes and strcpy overflowed by one byte on every use)
-	str=new(char[text.GetLength()+1]);
-	strcpy(str, (LPCTSTR)text);
-	EndDialog(reinterpret_cast<INT_PTR>(str));
+	m_Value=text;
+	CDialog::OnOK();
 }
 
 void CInputBox::OnCancel() 
 {
-	EndDialog(NULL);
+	m_Value.Empty();
+	CDialog::OnCancel();
 }
 
-void CInputBox::SetCaption(CString Caption)
+const CString& CInputBox::GetValue() const
 {
-	m_Caption=Caption;
+	return m_Value;
 }
 
-void CInputBox::SetSentence(CString Sentence)
+void CInputBox::SetCaption(const CString& caption)
 {
-	m_Text=Sentence;
+	m_Caption=caption;
+
+}
+
+void CInputBox::SetSentence(const CString& sentence)
+{
+	m_Text=sentence;
 }
 
 BOOL CInputBox::OnInitDialog() 
