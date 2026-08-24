@@ -437,11 +437,7 @@ void CTriggers::OnChangeName()
 {
 	CIniFile& ini=Map->GetIniFile();
 
-	UpdateData();
-	
-	CEdit& name=*(CEdit*)GetDlgItem(IDC_NAME);
-
-	int esel=name.GetSel();
+	GetDlgItemText(IDC_NAME, m_Name);
 	int sel=m_Trigger.GetCurSel();
 	if(sel<0) return;
 
@@ -452,11 +448,40 @@ void CTriggers::OnChangeName()
 		
 	ini.sections["Triggers"].values[(LPCTSTR)CurrentTrigger]=SetParam(ini.sections["Triggers"].values[(LPCTSTR)CurrentTrigger], 2, (LPCTSTR)m_Name);
 
-	UpdateDialog();
-	
-	m_Trigger.SetCurSel(sel);
-	OnSelchangeTrigger();
-	name.SetSel(esel);
+	const CString displayName=CurrentTrigger+" ("+m_Name+")";
+	m_Trigger.DeleteString(sel);
+	m_Trigger.SetCurSel(m_Trigger.AddString(displayName));
+
+	CString linkedSelection;
+	const int oldLinkedSelection=m_Trigger2.GetCurSel();
+	if(oldLinkedSelection>=0)
+	{
+		m_Trigger2.GetLBText(oldLinkedSelection,linkedSelection);
+		TruncSpace(linkedSelection);
+	}
+	for(int i=0;i<m_Trigger2.GetCount();++i)
+	{
+		CString id;
+		m_Trigger2.GetLBText(i,id);
+		TruncSpace(id);
+		if(id==CurrentTrigger)
+		{
+			m_Trigger2.DeleteString(i);
+			m_Trigger2.AddString(displayName);
+			break;
+		}
+	}
+	for(int i=0;i<m_Trigger2.GetCount();++i)
+	{
+		CString id;
+		m_Trigger2.GetLBText(i,id);
+		TruncSpace(id);
+		if(id==linkedSelection)
+		{
+			m_Trigger2.SetCurSel(i);
+			break;
+		}
+	}
 }
 
 void CTriggers::OnChangeFlag1() 

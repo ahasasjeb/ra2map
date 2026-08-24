@@ -466,22 +466,19 @@ void CScriptTypes::OnChangeName()
 {
 	CIniFile& ini=Map->GetIniFile();
 
-	UpdateData();
-
-	CEdit* n=(CEdit*)GetDlgItem(IDC_NAME);
-
-	DWORD pos=n->GetSel();
+	GetDlgItemText(IDC_NAME, m_Name);
+	const int selectedScriptType=m_ScriptType.GetCurSel();
+	if(selectedScriptType<0) return;
 	CString Scripttype;
-	if(m_ScriptType.GetCurSel()<0) return;
-	m_ScriptType.GetLBText(m_ScriptType.GetCurSel(), Scripttype);
+	m_ScriptType.GetLBText(selectedScriptType, Scripttype);
 	TruncSpace(Scripttype);
 	
 
 
 	ini.sections[(LPCTSTR)Scripttype].values["Name"]=m_Name;
 
-	UpdateDialog();
-	n->SetSel(pos);
+	m_ScriptType.DeleteString(selectedScriptType);
+	m_ScriptType.SetCurSel(m_ScriptType.AddString(Scripttype+" ("+m_Name+")"));
 }
 
 void CScriptTypes::OnEditchangeType() 

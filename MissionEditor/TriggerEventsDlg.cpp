@@ -271,7 +271,6 @@ void CTriggerEventsDlg::OnEditchangeEventtype()
 	if(eventtype.GetLength()==0)
 	{
 		eventtype="0";
-		m_EventType.SetWindowText(eventtype);
 	}
 
 	int pos=GetEventParamStart(ini.sections["Events"].values[(LPCTSTR)m_currentTrigger], curev); //1+3*curev;

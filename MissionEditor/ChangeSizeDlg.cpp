@@ -83,19 +83,25 @@ END_MESSAGE_MAP()
 // Behandlungsroutinen für Nachrichten CChangeSizeDlg 
 
 void CChangeSizeDlg::OnChangeWidth() 
-{	
-	if(UpdateData(TRUE))
+{
+	BOOL translated=FALSE;
+	const UINT width=GetDlgItemInt(IDC_WIDTH, &translated, FALSE);
+	if(translated && width<=400)
 	{
+		m_Width=static_cast<int>(width);
 		m_Left=(m_Width-Map->GetWidth())/2;
-		UpdateData(FALSE);
+		SetDlgItemInt(IDC_LEFT, m_Left, TRUE);
 	}
 }
 
 void CChangeSizeDlg::OnChangeHeight() 
 {
-	if(UpdateData(TRUE))
+	BOOL translated=FALSE;
+	const UINT height=GetDlgItemInt(IDC_HEIGHT, &translated, FALSE);
+	if(translated && height<=400)
 	{
+		m_Height=static_cast<int>(height);
 		m_Top=(m_Height-Map->GetHeight())/2;
-		UpdateData(FALSE);
+		SetDlgItemInt(IDC_TOP, m_Top, TRUE);
 	}		
 }

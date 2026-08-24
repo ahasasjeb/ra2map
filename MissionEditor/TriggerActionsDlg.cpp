@@ -136,7 +136,6 @@ void CTriggerActionsDlg::OnEditchangeActiontype()
 	if(eventtype.GetLength()==0)
 	{
 		eventtype="0";
-		m_ActionType.SetWindowText(eventtype);
 	}
 
 

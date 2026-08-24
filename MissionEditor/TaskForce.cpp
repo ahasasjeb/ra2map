@@ -368,8 +368,9 @@ void CTaskForce::OnDeleteunit()
 void CTaskForce::OnChangeNumberunits() 
 {
 	CIniFile& ini=Map->GetIniFile();
-
-	UpdateData();
+	CString numberText;
+	GetDlgItemText(IDC_NUMBERUNITS, numberText);
+	m_NumberOfUnits=atoi(numberText);
 
 	int sel=m_Units.GetCurSel();
 	if(sel<0) return;
@@ -384,21 +385,23 @@ void CTaskForce::OnChangeNumberunits()
 	itoa(u, k, 10);
 	itoa(m_NumberOfUnits, n, 10);
 	CString data=sec.values[k];
-	CString c=GetParam(data, 1);
-	sec.values[k]=n+(CString)","+c;
-	UpdateDialog();
+	CString type=GetParam(data, 1);
+	sec.values[k]=n+(CString)","+type;
+
+	CString unitLabel=n+(CString)" "+Map->GetUnitName(type);
+	m_Units.DeleteString(sel);
+	m_Units.InsertString(sel, unitLabel);
+	m_Units.SetItemData(sel, u);
+	m_Units.SetCurSel(sel);
 }
 
 void CTaskForce::OnChangeName() 
 {
 	CIniFile& ini=Map->GetIniFile();
-
-	UpdateData();
-
-	CEdit& n=*(CEdit*)GetDlgItem(IDC_NAME);
-	DWORD pos=n.GetSel();
+	GetDlgItemText(IDC_NAME, m_Name);
 
 	if(m_TaskForces.GetCurSel()<0) return;
+	const int selectedTaskForce=m_TaskForces.GetCurSel();
 	CString tf;
 	tf=GetText(&m_TaskForces);
 	
@@ -407,8 +410,9 @@ void CTaskForce::OnChangeName()
 		
 	sec.values["Name"]=m_Name;
 
-	UpdateDialog();
-	n.SetSel(pos);
+	CString displayName=tf+" ("+m_Name+")";
+	m_TaskForces.DeleteString(selectedTaskForce);
+	m_TaskForces.SetCurSel(m_TaskForces.AddString(displayName));
 }
 
 void CTaskForce::OnEditchangeUnittype() 
@@ -433,10 +437,11 @@ void CTaskForce::OnEditchangeUnittype()
 	
 	sec.values[k]=count+","+(char*)(LPCTSTR)type;
 
-	CString ut;
-	m_UnitType.GetWindowText(ut);
-	UpdateDialog();
-	m_UnitType.SetWindowText(ut);
+	CString unitLabel=count+(CString)" "+Map->GetUnitName(type);
+	m_Units.DeleteString(sel);
+	m_Units.InsertString(sel, unitLabel);
+	m_Units.SetItemData(sel, u);
+	m_Units.SetCurSel(sel);
 
 	
 }
@@ -552,8 +557,7 @@ void CTaskForce::OnAddtaskforce()
 void CTaskForce::OnChangeGroup() 
 {
 	CIniFile& ini=Map->GetIniFile();
-
-	UpdateData();
+	GetDlgItemText(IDC_GROUP, m_Group);
 
 	CString tf;
 	if(m_TaskForces.GetCurSel()<0) return;
@@ -563,7 +567,5 @@ void CTaskForce::OnChangeGroup()
 	CIniFileSection & sec=ini.sections[(char*)(LPCTSTR)tf];
 	
 	sec.values["Group"]=m_Group;
-
-	UpdateDialog();
 
 }

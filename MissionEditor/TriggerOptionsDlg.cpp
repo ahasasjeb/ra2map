@@ -178,8 +178,7 @@ void CTriggerOptionsDlg::OnChangeName()
 	if(newName.Find(",",0)>=0) 
 	{//newName.SetAt(newName.Find(",",0), 0);
 		newName=newName.Left(newName.Find(",",0));
-
-	m_Name.SetWindowText(newName);}
+	}
 
 	
 

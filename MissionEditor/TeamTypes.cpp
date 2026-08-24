@@ -196,6 +196,42 @@ CString btos(BOOL b)
 	return s;
 }
 
+static void FitComboDropDownToContents(CComboBox& combo)
+{
+	CDC* dc = combo.GetDC();
+	if (dc == NULL)
+		return;
+
+	CFont* previousFont = NULL;
+	if (combo.GetFont() != NULL)
+		previousFont = dc->SelectObject(combo.GetFont());
+
+	int droppedWidth = 0;
+	for (int i = 0; i < combo.GetCount(); ++i)
+	{
+		CString text;
+		combo.GetLBText(i, text);
+		const int textWidth = dc->GetTextExtent(text).cx;
+		if (textWidth > droppedWidth)
+			droppedWidth = textWidth;
+	}
+
+	if (previousFont != NULL)
+		dc->SelectObject(previousFont);
+	combo.ReleaseDC(dc);
+
+	CRect controlRect;
+	combo.GetWindowRect(&controlRect);
+	droppedWidth += GetSystemMetrics(SM_CXVSCROLL) + 12;
+	if (droppedWidth < controlRect.Width())
+		droppedWidth = controlRect.Width();
+
+	const int maximumWidth = GetSystemMetrics(SM_CXSCREEN) * 3 / 4;
+	if (droppedWidth > maximumWidth)
+		droppedWidth = maximumWidth;
+	combo.SetDroppedWidth(droppedWidth);
+}
+
 /////////////////////////////////////////////////////////////////////////////
 // Behandlungsroutinen für Nachrichten CTeamTypes 
 void CTeamTypes::UpdateDialog()
@@ -371,6 +407,14 @@ void CTeamTypes::UpdateDialog()
 	m_TeamTypes.SetCurSel(0);
 	if(sel>=0) m_TeamTypes.SetCurSel(sel);
 	OnSelchangeTeamtypes();
+
+	const int comboIds[] = {
+		IDC_TEAMTYPES, IDC_VETERANLEVEL, IDC_HOUSE, IDC_TECHLEVEL,
+		IDC_GROUP, IDC_WAYPOINT, IDC_SCRIPT, IDC_TASKFORCE, IDC_TAG,
+		IDC_TRANSPORTWAYPOINT, IDC_MINDCONTROLDECISION
+	};
+	for (const int comboId : comboIds)
+		FitComboDropDownToContents(*(CComboBox*)GetDlgItem(comboId));
 	
 	
 }
@@ -473,9 +517,8 @@ void CTeamTypes::OnChangeName()
 
 	UpdateData(TRUE);
 	if(m_TeamTypes.GetCount()==0) return;
-
-	CEdit& n=*(CEdit*)GetDlgItem(IDC_NAME);
-	DWORD pos=n.GetSel();
+	const int selectedTeamType = m_TeamTypes.GetCurSel();
+	if(selectedTeamType<0) return;
 
 	CString str;
 	str=GetText(&m_TeamTypes);
@@ -484,9 +527,10 @@ void CTeamTypes::OnChangeName()
 
 	sec.values["Name"]=m_Name;
 
-	UpdateDialog();
-
-	n.SetSel(pos);
+	CString displayName = str + " (" + m_Name + ")";
+	m_TeamTypes.DeleteString(selectedTeamType);
+	m_TeamTypes.SetCurSel(m_TeamTypes.AddString(displayName));
+	FitComboDropDownToContents(m_TeamTypes);
 }
 
 void CTeamTypes::OnDeleteteamtype() 

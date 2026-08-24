@@ -160,13 +160,9 @@ void CTags::OnChangeName()
 {
 	CIniFile& ini=Map->GetIniFile();
 
-	UpdateData();
-
-	CEdit&  name=*(CEdit*)GetDlgItem(IDC_NAME);
-	int sel2=name.GetSel();
-
 	int index=m_Tag.GetCurSel();
 	if(index<0) return;
+	GetDlgItemText(IDC_NAME, m_Name);
 	CString type;
 	m_Tag.GetLBText(index, type);
 	if(type.Find(" ")>=0) type.SetAt(type.Find(" "),0);
@@ -179,8 +175,8 @@ void CTags::OnChangeName()
 	data=repeat+","+(LPCTSTR)m_Name+","+tag;
 	ini.sections["Tags"].values[(LPCTSTR)type]=data;
 
-	UpdateDialog();
-	name.SetSel(sel2);
+	m_Tag.DeleteString(index);
+	m_Tag.SetCurSel(m_Tag.AddString(type+" ("+m_Name+")"));
 }
 
 void CTags::OnEditchangeRepeat() 
@@ -204,9 +200,6 @@ void CTags::OnEditchangeRepeat()
 	name=GetParam(data,1);
 	data=(CString)(LPCTSTR)str+","+name+","+trigger;
 	ini.sections["Tags"].values[(LPCTSTR)type]=data;
-	
-
-	UpdateDialog();
 
 }
 

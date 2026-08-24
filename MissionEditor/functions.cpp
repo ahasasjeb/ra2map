@@ -691,6 +691,17 @@ CString TranslateStringACP(CString u8EnglishString)
 		return u8EnglishString;
 	}
 
+	// Menu accelerators are not part of the visible caption's translation key.
+	// Keep them verbatim while translating the caption (for example,
+	// "Save\tCtrl+S" must still match the "Save" language entry).
+	const int acceleratorSeparator = u8EnglishString.Find('\t');
+	if (acceleratorSeparator >= 0)
+	{
+		CString translated = TranslateStringACP(u8EnglishString.Left(acceleratorSeparator));
+		translated += u8EnglishString.Mid(acceleratorSeparator);
+		return translated;
+	}
+
 	const CString lookupKey = GetTranslationLookupKey(u8EnglishString);
 
 #ifdef RA2_MODE

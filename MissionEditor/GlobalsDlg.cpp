@@ -132,18 +132,23 @@ void CGlobalsDlg::OnChangeDescription()
 	char c[50];
 	itoa(curglob, c, 10);
 
-	UpdateData(TRUE);
-
-	if(m_Description.Find(",")>=0) m_Description.SetAt(m_Description.Find(","), 0);
+	GetDlgItemText(IDC_DESCRIPTION, m_Description);
+	const int comma=m_Description.Find(",");
+	CString storedDescription=m_Description;
+	if(comma>=0) storedDescription=storedDescription.Left(comma);
 
 	if(ini.sections["VariableNames"].values[c].GetLength()==0) ini.sections["VariableNames"].values[c]="text,0";
-	ini.sections["VariableNames"].values[c]=SetParam(ini.sections["VariableNames"].values[c], 0, m_Description);
+	ini.sections["VariableNames"].values[c]=SetParam(ini.sections["VariableNames"].values[c], 0, storedDescription);
 
 	// do not remove, Tiberian Sun seems to don´t like probably unused global numbers
 	//if(m_Description.GetLength()==0)
 	//  ini.sections["VariableNames"].values.erase(c);
 
-	UpdateDialog();
+	CString globalLabel=c+(CString)" "+ini.sections["VariableNames"].values[c];
+	m_Global.DeleteString(cursel);
+	const int newSelection=m_Global.InsertString(cursel,globalLabel);
+	m_Global.SetItemData(newSelection,curglob);
+	m_Global.SetCurSel(newSelection);
 
 }
 
@@ -191,7 +196,6 @@ void CGlobalsDlg::OnEditchangeValue()
 	CIniFile& ini=Map->GetIniFile();
 	CString str;
 	m_Value.GetWindowText(str);
-	if(str.GetLength()==0) return;
 	int cursel=m_Global.GetCurSel();
 	if(cursel<0) return;
 	int curglob=m_Global.GetItemData(cursel);
@@ -202,11 +206,13 @@ void CGlobalsDlg::OnEditchangeValue()
 	if(ini.sections["VariableNames"].FindName(c)<0) return;
 
 	
-	UpdateData(TRUE);
-	
 	str=GetParam(str, 0);
 	TruncSpace(str);
 	ini.sections["VariableNames"].values[c]=SetParam(ini.sections["VariableNames"].values[c], 1, str);
 
-	UpdateDialog();	
+	CString globalLabel=c+(CString)" "+ini.sections["VariableNames"].values[c];
+	m_Global.DeleteString(cursel);
+	const int newSelection=m_Global.InsertString(cursel,globalLabel);
+	m_Global.SetItemData(newSelection,curglob);
+	m_Global.SetCurSel(newSelection);
 }

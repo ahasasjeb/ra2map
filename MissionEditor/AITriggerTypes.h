@@ -81,6 +81,7 @@ public:
 
 // implementation
 protected:
+	bool m_updatingDecodedData = false;
 	AITrigInfo ConvertToAITrigInfoFromHex(char* aitinfo);
 	// generated message maps
 	//{{AFX_MSG(CAITriggerTypes)

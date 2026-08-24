@@ -357,16 +357,23 @@ void CAITriggerTypes::OnSelchangeAitriggertype()
 
 void CAITriggerTypes::OnChangeName() 
 {
-	UpdateData();
-
 	CString value;
-	value=m_Name;
+	GetDlgItemText(IDC_NAME, value);
+	m_Name=value;
 
 	if(value.GetLength()==0) value=" ";
 
 	SetAITriggerParam(value, 0);
 
-	UpdateDialog();
+	const int selectedTrigger=m_AITriggerType.GetCurSel();
+	if(selectedTrigger>=0)
+	{
+		CString id;
+		m_AITriggerType.GetLBText(selectedTrigger, id);
+		TruncSpace(id);
+		m_AITriggerType.DeleteString(selectedTrigger);
+		m_AITriggerType.SetCurSel(m_AITriggerType.AddString(id+" ("+m_Name+")"));
+	}
 }
 
 void CAITriggerTypes::OnEditchangeOwner() 
@@ -434,21 +441,25 @@ void CAITriggerTypes::OnEditchangeData()
 	m_Data.GetWindowText(value);
 	TruncSpace(value);
 
-	// max 64 chars... min 64 chars too...
-	((char*)(LPCTSTR)value)[64]=0;
-	
-	int ToInsert=64-value.GetLength();
-	CString nulls('0',ToInsert);
-
-	value.Insert(value.GetLength()-ToInsert, nulls);
+	// The encoded condition is always 64 characters.  Pad on the right so
+	// entering a new value does not move already typed characters around.
+	value=value.Left(64);
+	if(value.GetLength()<64)
+		value+=CString('0',64-value.GetLength());
 		
 
 	SetAITriggerParam(value, 6);
 
-
-	int editsel=m_Data.GetEditSel();
-	UpdateDialog();		
-	m_Data.SetEditSel(editsel,editsel+1);
+	const DWORD editSelection=m_Data.GetEditSel();
+	const AITrigInfo info=ConvertToAITrigInfoFromHex((char*)(LPCSTR)value);
+	m_Condition=info.Condition;
+	m_Number=info.Number;
+	m_updatingDecodedData=true;
+	((CComboBox*)GetDlgItem(IDC_CONDITION))->SetCurSel(m_Condition);
+	SetDlgItemInt(IDC_NUMBER,m_Number,FALSE);
+	m_updatingDecodedData=false;
+	m_Data.SetWindowText(value);
+	m_Data.SetEditSel(LOWORD(editSelection), HIWORD(editSelection));
 }
 
 void CAITriggerTypes::OnChangeFloat1() 
@@ -678,10 +689,14 @@ void CAITriggerTypes::OnSelchangeCondition()
 
 void CAITriggerTypes::OnChangeNumber() 
 {
+	if(m_updatingDecodedData) return;
 	int sel=m_AITriggerType.GetCurSel();
 	if(sel<0) return;
-
-	UpdateData(TRUE);
+	CEdit& number = *(CEdit*)GetDlgItem(IDC_NUMBER);
+	CString numberText;
+	number.GetWindowText(numberText);
+	if(numberText.IsEmpty()) return;
+	m_Number=atoi(numberText);
 
 	AITrigInfo info;
 	memset(&info, 0, sizeof(AITrigInfo));
@@ -697,7 +712,7 @@ void CAITriggerTypes::OnChangeNumber()
 
 	SetAITriggerParam(buffer, 6);
 
-	UpdateDialog();		
+	m_Data.SetWindowText(buffer);
 
 }
 
