@@ -66,7 +66,7 @@ int rs_snapshot_unpack(
     unsigned char* output, size_t output_len);
 
 // ---------------------------------------------------------------------------
-// Sandboxed Lua 5.4 map scripts. The host supplies a transactional view of
+// Sandboxed Lua 5.5 map scripts. The host supplies a transactional view of
 // the map INI through these callbacks and commits it only when rs_lua_run
 // returns RS_OK. Lua receives no filesystem, process, package, or debug APIs.
 // ---------------------------------------------------------------------------

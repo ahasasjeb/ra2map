@@ -23,13 +23,13 @@ if ($LASTEXITCODE -ne 0) {
 
 $cargoBuildRoot = Join-Path -Path $targetRoot -ChildPath 'build'
 $luaLibraries = @(
-    Get-ChildItem -LiteralPath $cargoBuildRoot -Filter 'lua5.4.lib' -File -Recurse |
-        Where-Object { $_.FullName -match '[\\/]mlua-sys-[^\\/]+[\\/]out[\\/]lib[\\/]lua5\.4\.lib$' } |
+    Get-ChildItem -LiteralPath $cargoBuildRoot -Filter 'lua5.5.lib' -File -Recurse |
+        Where-Object { $_.FullName -match '[\\/]mlua-sys-[^\\/]+[\\/]out[\\/]lib[\\/]lua5\.5\.lib$' } |
         Sort-Object -Property LastWriteTimeUtc -Descending
 )
 if ($luaLibraries.Count -eq 0) {
-    throw "Cargo completed but the vendored Lua 5.4 static library was not found under $cargoBuildRoot."
+    throw "Cargo completed but the vendored Lua 5.5 static library was not found under $cargoBuildRoot."
 }
 
-$stableLuaLibrary = Join-Path -Path $targetRoot -ChildPath 'lua5.4.lib'
+$stableLuaLibrary = Join-Path -Path $targetRoot -ChildPath 'lua5.5.lib'
 Copy-Item -LiteralPath $luaLibraries[0].FullName -Destination $stableLuaLibrary -Force

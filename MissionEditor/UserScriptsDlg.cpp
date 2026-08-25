@@ -761,9 +761,9 @@ namespace
 
 static const char kUserScriptApiMarkdown[] = R"fscriptmd(# Map Script API
 
-## Lua 5.4 scripts (`.lua`)
+## Lua 5.5 scripts (`.lua`)
 
-New scripts use embedded Lua 5.4. Map edits are transactional: the editor runs the script against a temporary INI copy and asks before applying successful changes. A syntax or runtime error discards the copy.
+New scripts use embedded Lua 5.5. Map edits are transactional: the editor runs the script against a temporary INI copy and asks before applying successful changes. A syntax or runtime error discards the copy.
 
 ```lua
 print("Map:", map.get("Basic", "Name", "Unnamed"))
@@ -942,13 +942,20 @@ CString CUserScriptsDlg::GetScriptPath(const CString& scriptName) const
 	return (CString)AppPath + "\\Scripts\\" + scriptName;
 }
 
+static CString NormalizeScriptTextForComparison(CString text)
+{
+	text.Replace("\r\n", "\n");
+	text.Replace("\r", "\n");
+	return text;
+}
+
 BOOL CUserScriptsDlg::IsEditorDirty()
 {
 	if(m_loadingSource || m_loadedScript.IsEmpty()) return FALSE;
 
 	CString source;
 	GetDlgItemText(IDC_SCRIPT_EDITOR, source);
-	return source != m_originalSource;
+	return NormalizeScriptTextForComparison(source) != NormalizeScriptTextForComparison(m_originalSource);
 }
 
 void CUserScriptsDlg::UpdateEditorState()
@@ -989,8 +996,12 @@ BOOL CUserScriptsDlg::LoadScriptSource(const CString& scriptName)
 	m_loadedScript=scriptName;
 	m_Script=scriptName;
 	m_Source=source;
-	m_originalSource=source;
 	SetDlgItemText(IDC_SCRIPT_EDITOR, source);
+	// A multiline Windows edit control can normalize newline sequences while
+	// accepting text. Use the text it actually stores as the clean baseline so
+	// opening and closing an untouched script never produces a save prompt.
+	GetDlgItemText(IDC_SCRIPT_EDITOR, m_originalSource);
+	m_Source=m_originalSource;
 	m_loadingSource=FALSE;
 	UpdateEditorState();
 	return TRUE;
@@ -1110,7 +1121,7 @@ void CUserScriptsDlg::OnNewScript()
 	m_Script=scriptName;
 	if(lowerName.Right(4)==".lua")
 	{
-		m_Source="-- Lua 5.4 map script\r\n-- Press F5 or Ctrl+Enter to save and run.\r\n-- Map changes are applied only after the script succeeds.\r\n\r\nprint(\"Map:\", map.get(\"Basic\", \"Name\", \"Unnamed\"))\r\nprint(\"Size:\", map.info.width, map.info.height)\r\n";
+		m_Source="-- Lua 5.5 map script\r\n-- Press F5 or Ctrl+Enter to save and run.\r\n-- Map changes are applied only after the script succeeds.\r\n\r\nprint(\"Map:\", map.get(\"Basic\", \"Name\", \"Unnamed\"))\r\nprint(\"Size:\", map.info.width, map.info.height)\r\n";
 	}
 	else
 	{

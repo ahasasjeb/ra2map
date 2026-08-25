@@ -1,4 +1,4 @@
--- Lua 5.4 map script example
+-- Lua 5.5 map script example
 -- This script only reads the current map and writes to the report.
 
 local name = map.get("Basic", "Name", "Unnamed map")

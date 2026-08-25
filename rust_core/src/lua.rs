@@ -1,4 +1,4 @@
-//! Sandboxed Lua 5.4 host for map scripts.
+//! Sandboxed Lua 5.5 host for map scripts.
 //!
 //! The Lua VM never receives direct filesystem or process access. All map
 //! access crosses an explicit callback table supplied by the editor, which
@@ -640,6 +640,7 @@ mod tests {
             .or_default()
             .insert("width".to_owned(), "80".to_owned());
         let script = br#"
+            assert(_VERSION == "Lua 5.5")
             assert(os == nil and io == nil and package == nil and debug == nil)
             assert(require == nil and dofile == nil and loadfile == nil and load == nil)
             assert(map.get("Basic", "Name") == "Before")

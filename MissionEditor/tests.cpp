@@ -165,7 +165,7 @@ void Tests::test_lua_runtime()
 	callbacks.mutate=LuaRuntimeTestMutate;
 	callbacks.print=LuaRuntimeTestPrint;
 
-	const char* source="assert(os == nil and io == nil and require == nil); print('linked Lua 5.4')";
+	const char* source="assert(_VERSION == 'Lua 5.5'); assert(os == nil and io == nil and require == nil); print('linked Lua 5.5')";
 	char error[512]{};
 	const int result=rs_lua_run(
 		(const unsigned char*)source,
@@ -176,7 +176,7 @@ void Tests::test_lua_runtime()
 		error,
 		_countof(error));
 	REPORT_TEST(result == RS_OK);
-	REPORT_TEST(host.output == "linked Lua 5.4");
+	REPORT_TEST(host.output == "linked Lua 5.5");
 }
 
 void Tests::test_property_brush_settings()

@@ -507,7 +507,7 @@
   </ItemGroup>
   <ItemDefinitionGroup>
     <Link>
-      <AdditionalDependencies>$(SolutionDir)rust_core\target\x86_64-pc-windows-msvc\release\mission_editor_rust_core.lib;$(SolutionDir)rust_core\target\x86_64-pc-windows-msvc\release\lua5.4.lib;ntdll.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>$(SolutionDir)rust_core\target\x86_64-pc-windows-msvc\release\mission_editor_rust_core.lib;$(SolutionDir)rust_core\target\x86_64-pc-windows-msvc\release\lua5.5.lib;ntdll.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <LargeAddressAware>true</LargeAddressAware>
     </Link>
   </ItemDefinitionGroup>

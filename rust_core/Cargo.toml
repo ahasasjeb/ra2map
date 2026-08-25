@@ -11,7 +11,7 @@ cc = "1"
 
 [dependencies]
 ash = { version = "0.38", default-features = false, features = ["loaded", "std"] }
-mlua = { version = "0.12", default-features = false, features = ["lua54", "vendored"] }
+mlua = { version = "0.12", default-features = false, features = ["lua55", "vendored"] }
 
 [profile.release]
 opt-level = 3
