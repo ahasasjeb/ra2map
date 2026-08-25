@@ -684,6 +684,9 @@
     <None Include="data\FinalSun\FSData.ini">
       <Filter>Data\FinalSun</Filter>
     </None>
+    <None Include="data\shared\Scripts\Lua Map Summary.lua">
+      <Filter>Data\Shared</Filter>
+    </None>
     <None Include="res\ts_arrow.cur">
       <Filter>Resource Files</Filter>
     </None>

@@ -34,6 +34,7 @@
 #include "functions.h"
 #include "inlines.h"
 #include "combouinputdlg.h"
+#include "RustCore.h"
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -543,11 +544,265 @@ int get_player_count()
 	return wp_count;
 }
 
-static const char kUserScriptApiMarkdown[] = R"fscriptmd(# Map Script API (.fscript)
+namespace
+{
+	constexpr int LUA_MUTATE_SET=0;
+	constexpr int LUA_MUTATE_REMOVE_KEY=1;
+	constexpr int LUA_MUTATE_CLEAR_SECTION=2;
+	constexpr int LUA_MUTATE_REMOVE_SECTION=3;
+	constexpr int LUA_MAX_NAME_LENGTH=255;
+	constexpr int LUA_MAX_VALUE_LENGTH=1024 * 1024;
+	constexpr int LUA_MAX_REPORT_LENGTH=1024 * 1024;
+
+	struct LuaScriptContext
+	{
+		CMapData* map=NULL;
+		CIniFile ini;
+		CString report;
+		BOOL changed=FALSE;
+		BOOL reportTruncated=FALSE;
+	};
+
+	BOOL IsValidLuaIniName(const CString& value, BOOL section)
+	{
+		if(value.IsEmpty() || value.GetLength()>LUA_MAX_NAME_LENGTH) return FALSE;
+		if(value.FindOneOf(section ? "\r\n[]" : "\r\n=")>=0) return FALSE;
+		if(section && value.CompareNoCase("$editor")==0) return FALSE;
+		return TRUE;
+	}
+
+	BOOL IsProtectedLuaIniMutation(const CString& section, const CString* key)
+	{
+		if(section.CompareNoCase("IsoMapPack5")==0 ||
+			section.CompareNoCase("OverlayPack")==0 ||
+			section.CompareNoCase("OverlayDataPack")==0 ||
+			section.CompareNoCase("PreviewPack")==0)
+			return TRUE;
+
+		if(section.CompareNoCase("Map")!=0) return FALSE;
+		if(key==NULL) return TRUE;
+		return key->CompareNoCase("Size")==0 ||
+			key->CompareNoCase("LocalSize")==0 ||
+			key->CompareNoCase("Theater")==0;
+	}
+
+	CString GetLuaEditorValue(LuaScriptContext* context, const CString& key)
+	{
+		CString value;
+		if(key=="width") value.Format("%d", context->map->GetWidth());
+		else if(key=="height") value.Format("%d", context->map->GetHeight());
+		else if(key=="iso_size") value.Format("%d", context->map->GetIsoSize());
+		else if(key=="waypoint_count") value.Format("%d", context->map->GetWaypointCount());
+		else if(key=="unit_count") value.Format("%d", context->map->GetUnitCount());
+		else if(key=="infantry_count") value.Format("%d", context->map->GetInfantryCount());
+		else if(key=="structure_count") value.Format("%d", context->map->GetStructureCount());
+		else if(key=="aircraft_count") value.Format("%d", context->map->GetAircraftCount());
+		else if(key=="terrain_count") value.Format("%d", context->map->GetTerrainCount());
+		else if(key=="player_count") value.Format("%d", get_player_count());
+		else if(key=="house_count") value.Format("%d", context->map->GetHousesCount(FALSE));
+		else if(key=="country_count") value.Format("%d", context->map->GetHousesCount(TRUE));
+		else if(key=="theater") value=context->map->GetTheater();
+		else if(key=="multiplayer") value=context->map->IsMultiplayer() ? "1" : "0";
+		return value;
+	}
+
+	int UserLuaGet(void* opaque, const char* sectionText, const char* keyText,
+		char* dst, size_t dstCap, size_t* outLength)
+	{
+		if(opaque==NULL || sectionText==NULL || keyText==NULL || outLength==NULL) return -1;
+		LuaScriptContext* context=(LuaScriptContext*)opaque;
+		const CString section=sectionText;
+		const CString key=keyText;
+		CString value;
+
+		if(section.CompareNoCase("$editor")==0)
+		{
+			value=GetLuaEditorValue(context, key);
+			if(value.IsEmpty() && key!="theater") return 0;
+		}
+		else
+		{
+			const auto sectionIt=context->ini.sections.find(section);
+			if(sectionIt==context->ini.sections.end()) return 0;
+			const auto valueIt=sectionIt->second.values.find(key);
+			if(valueIt==sectionIt->second.values.end()) return 0;
+			value=valueIt->second;
+		}
+
+		*outLength=static_cast<size_t>(value.GetLength());
+		if(dst==NULL) return 1;
+		if(dstCap<*outLength) return -1;
+		if(*outLength>0) memcpy(dst, (LPCSTR)value, *outLength);
+		return 1;
+	}
+
+	size_t UserLuaList(void* opaque, const char* sectionText, char* dst, size_t dstCap)
+	{
+		if(opaque==NULL) return 0;
+		LuaScriptContext* context=(LuaScriptContext*)opaque;
+		size_t required=0;
+
+		if(sectionText==NULL)
+		{
+			for(const auto& section : context->ini.sections)
+				required += static_cast<size_t>(section.first.GetLength()) + 1;
+		}
+		else
+		{
+			const auto sectionIt=context->ini.sections.find(CString(sectionText));
+			if(sectionIt==context->ini.sections.end()) return 0;
+			for(const auto& value : sectionIt->second.values)
+				required += static_cast<size_t>(value.first.GetLength()) + 1;
+		}
+
+		if(dst==NULL) return required;
+		if(dstCap<required) return 0;
+
+		size_t offset=0;
+		auto copyName=[&](const CString& name)
+		{
+			const size_t length=static_cast<size_t>(name.GetLength());
+			if(length>0) memcpy(dst + offset, (LPCSTR)name, length);
+			offset += length;
+			dst[offset++]=0;
+		};
+
+		if(sectionText==NULL)
+		{
+			for(const auto& section : context->ini.sections) copyName(section.first);
+		}
+		else
+		{
+			const auto sectionIt=context->ini.sections.find(CString(sectionText));
+			for(const auto& value : sectionIt->second.values) copyName(value.first);
+		}
+		return required;
+	}
+
+	int UserLuaMutate(void* opaque, int operation, const char* sectionText,
+		const char* keyText, const char* valueText)
+	{
+		if(opaque==NULL || sectionText==NULL) return 0;
+		LuaScriptContext* context=(LuaScriptContext*)opaque;
+		const CString section=sectionText;
+		if(!IsValidLuaIniName(section, TRUE)) return 0;
+
+		if(operation==LUA_MUTATE_SET)
+		{
+			if(keyText==NULL || valueText==NULL) return 0;
+			const CString key=keyText;
+			const CString value=valueText;
+			if(!IsValidLuaIniName(key, FALSE) || value.GetLength()>LUA_MAX_VALUE_LENGTH || value.FindOneOf("\r\n")>=0)
+				return 0;
+			if(IsProtectedLuaIniMutation(section, &key)) return 0;
+			auto& values=context->ini.sections[section].values;
+			const auto existing=values.find(key);
+			if(existing==values.end() || existing->second!=value)
+			{
+				values[key]=value;
+				context->changed=TRUE;
+			}
+			return 1;
+		}
+
+		if(operation==LUA_MUTATE_REMOVE_KEY)
+		{
+			if(keyText==NULL) return 0;
+			const CString key=keyText;
+			if(!IsValidLuaIniName(key, FALSE)) return 0;
+			if(IsProtectedLuaIniMutation(section, &key)) return 0;
+			const auto sectionIt=context->ini.sections.find(section);
+			if(sectionIt!=context->ini.sections.end() && sectionIt->second.values.erase(key)>0)
+				context->changed=TRUE;
+			return 1;
+		}
+
+		if(operation==LUA_MUTATE_CLEAR_SECTION)
+		{
+			if(IsProtectedLuaIniMutation(section, NULL)) return 0;
+			const auto sectionIt=context->ini.sections.find(section);
+			if(sectionIt!=context->ini.sections.end() && !sectionIt->second.values.empty())
+			{
+				sectionIt->second.values.clear();
+				sectionIt->second.value_orig_pos.clear();
+				context->changed=TRUE;
+			}
+			return 1;
+		}
+
+		if(operation==LUA_MUTATE_REMOVE_SECTION)
+		{
+			if(IsProtectedLuaIniMutation(section, NULL)) return 0;
+			if(context->ini.sections.erase(section)>0) context->changed=TRUE;
+			return 1;
+		}
+
+		return 0;
+	}
+
+	void UserLuaPrint(void* opaque, const char* text)
+	{
+		if(opaque==NULL || text==NULL) return;
+		LuaScriptContext* context=(LuaScriptContext*)opaque;
+		if(context->reportTruncated) return;
+
+		const CString line=text;
+		if(context->report.GetLength() + line.GetLength() + 2>LUA_MAX_REPORT_LENGTH)
+		{
+			context->report += TranslateStringACP("Lua report truncated after 1 MiB.");
+			context->report += "\r\n";
+			context->reportTruncated=TRUE;
+			return;
+		}
+		context->report += line;
+		context->report += "\r\n";
+	}
+}
+
+static const char kUserScriptApiMarkdown[] = R"fscriptmd(# Map Script API
+
+## Lua 5.4 scripts (`.lua`)
+
+New scripts use embedded Lua 5.4. Map edits are transactional: the editor runs the script against a temporary INI copy and asks before applying successful changes. A syntax or runtime error discards the copy.
+
+```lua
+print("Map:", map.get("Basic", "Name", "Unnamed"))
+print("Size:", map.info.width, map.info.height)
+
+for _, key in ipairs(map.keys("Waypoints")) do
+    print("Waypoint", key, map.get("Waypoints", key))
+end
+
+map.set("Basic", "Author", "Lua script")
+```
+
+### Lua API
+
+| API | Description |
+| --- | --- |
+| `print(...)` | Append tab-separated values to the report. |
+| `map.get(section, key[, default])` | Return an INI value, the optional default, or `nil`. |
+| `map.has(section, key)` | Return whether an INI key exists. |
+| `map.set(section, key, value)` | Set a string, number, or Boolean INI value in the transaction. |
+| `map.remove(section, key)` | Remove a key and return whether it existed. |
+| `map.sections()` | Return a sorted array of section names. |
+| `map.keys(section)` | Return a sorted array of keys in a section. |
+| `map.section(section)` | Return a table containing all key/value pairs in a section. |
+| `map.replace_section(section, values)` | Replace a section with a Lua table of key/value pairs. |
+| `map.clear_section(section)` | Remove every key while keeping the section. |
+| `map.remove_section(section)` | Remove a complete section. |
+| `map.info` | Read-only-at-runtime metadata table described below. |
+| `map.api_version` | Lua map API version; currently `1`. |
+
+`map.info` contains `width`, `height`, `iso_size`, `theater`, `multiplayer`, `waypoint_count`, `unit_count`, `infantry_count`, `structure_count`, `aircraft_count`, `terrain_count`, `player_count`, `house_count`, and `country_count`.
+
+The runtime loads Lua's base, table, string, math, and UTF-8 facilities. Filesystem, process, native module, package, dynamic-code, coroutine, and debug access are unavailable (`os`, `io`, `package`, `require`, `dofile`, `loadfile`, `load`, `coroutine`, and `debug`). Each run is limited to 64 MiB of Lua memory and 20 million VM instructions. INI section/key names and values must be single-line text; values are limited to 1 MiB. Packed map sections and the `[Map]` geometry/theater keys are read-only because changing them requires specialized resizing or theater-reload operations.
+
+## Legacy scripts (`.fscript`)
 
 Map scripts run against the currently open map. Save the map before running a script: script changes cannot be undone.
 
-## Syntax
+### Syntax
 
 ```text
 // A comment
@@ -565,11 +820,11 @@ JumpTo("Loop", "%Counter%");
 - Output parameters are variable names such as `%Result%`. Other parameters expand `%Variable%` before the command runs.
 - Labels use `:Name:` and are targets for `JumpTo`.
 
-## Built-in variables
+### Built-in variables
 
 `%Width%`, `%Height%`, `%IsoSize%`, `%WaypointCount%`, `%UnitCount%`, `%InfantryCount%`, `%StructureCount%`, `%AircraftCount%`, `%TerrainCount%`, `%Theater%`, `%PlayerCount%`, `%HousesCount%`, `%CountriesCount%`, `%DeleteAllowed%`, `%AddAllowed%`, `%SafeMode%`.
 
-## Flow, messages, and variables
+### Flow, messages, and variables
 
 | API | Description |
 | --- | --- |
@@ -605,7 +860,7 @@ JumpTo("Loop", "%Counter%");
 | `GetParamCount(%result%, csv[, condition])` | Count comma-separated fields. |
 | `SetAutoUpdate(enabled[, condition])` | Enable or disable live report refresh while running. |
 
-## User input
+### User input
 
 | API | Description |
 | --- | --- |
@@ -616,7 +871,7 @@ JumpTo("Loop", "%Counter%");
 | `UInputGetTrigger(%result%, prompt[, condition])` | Select a trigger ID. |
 | `UInputGetTag(%result%, prompt[, condition])` | Select a tag ID. |
 
-## Map and INI
+### Map and INI
 
 | API | Description |
 | --- | --- |
@@ -630,7 +885,7 @@ JumpTo("Loop", "%Counter%");
 | `GetHouse(%result%, index[, condition])` | Read a house ID by zero-based index. |
 | `GetCountry(%result%, index[, condition])` | Read a country ID by zero-based index. |
 
-## Adding map content
+### Adding map content
 
 Call `AllowAdd(reason)` first. The user must confirm before add commands take effect.
 
@@ -649,7 +904,7 @@ Call `AllowAdd(reason)` first. The user must confirm before add commands take ef
 
 Object data fields use the game's comma-separated map INI format. `GetInfantry`, `GetVehicle`, `GetAircraft`, and `GetStructure` are the safest way to obtain a compatible record before changing fields with `SetParam`.
 
-## Reading and deleting map content
+### Reading and deleting map content
 
 Call `AllowDelete(reason)` first. The user must confirm before delete commands take effect.
 
@@ -821,7 +1076,7 @@ void CUserScriptsDlg::OnNewScript()
 {
 	if(!ConfirmSaveChanges()) return;
 
-	CString scriptName=InputBox(TranslateStringACP("Enter a name for the new map script."), TranslateStringACP("New Map Script"));
+	CString scriptName=InputBox(TranslateStringACP("Enter a name for the new map script. The .lua extension is used by default."), TranslateStringACP("New Map Script"));
 	scriptName.TrimLeft();
 	scriptName.TrimRight();
 	if(scriptName.IsEmpty()) return;
@@ -834,7 +1089,14 @@ void CUserScriptsDlg::OnNewScript()
 
 	CString lowerName=scriptName;
 	lowerName.MakeLower();
-	if(lowerName.GetLength()<8 || lowerName.Right(8)!=".fscript") scriptName += ".fscript";
+	const BOOL isLegacyScript=lowerName.GetLength()>=8 && lowerName.Right(8)==".fscript";
+	const BOOL isLuaScript=lowerName.GetLength()>=4 && lowerName.Right(4)==".lua";
+	if(!isLegacyScript && !isLuaScript)
+	{
+		scriptName += ".lua";
+		lowerName += ".lua";
+	}
+	CreateDirectory((CString)AppPath+"\\Scripts", NULL);
 
 	if(GetFileAttributes(GetScriptPath(scriptName))!=INVALID_FILE_ATTRIBUTES)
 	{
@@ -846,7 +1108,14 @@ void CUserScriptsDlg::OnNewScript()
 
 	m_loadedScript=scriptName;
 	m_Script=scriptName;
-	m_Source="// Map script (.fscript)\r\n// Press F5 or Ctrl+Enter to save and run.\r\n\r\nPrint(\"Script started.\");\r\n";
+	if(lowerName.Right(4)==".lua")
+	{
+		m_Source="-- Lua 5.4 map script\r\n-- Press F5 or Ctrl+Enter to save and run.\r\n-- Map changes are applied only after the script succeeds.\r\n\r\nprint(\"Map:\", map.get(\"Basic\", \"Name\", \"Unnamed\"))\r\nprint(\"Size:\", map.info.width, map.info.height)\r\n";
+	}
+	else
+	{
+		m_Source="// Legacy map script (.fscript)\r\n// Press F5 or Ctrl+Enter to save and run.\r\n\r\nPrint(\"Script started.\");\r\n";
+	}
 	m_originalSource.Empty();
 	m_loadingSource=TRUE;
 	SetDlgItemText(IDC_SCRIPT_EDITOR, m_Source);
@@ -921,11 +1190,82 @@ void CUserScriptsDlg::OnCancel()
 	if(ConfirmSaveChanges()) CDialog::OnCancel();
 }
 
+BOOL CUserScriptsDlg::RunLuaScript()
+{
+	LuaScriptContext context;
+	context.map=Map;
+	context.ini=Map->GetIniFile();
+	context.report=m_Script + " Report:\r\n\r\n";
+
+	rs_lua_callbacks callbacks{};
+	callbacks.get=UserLuaGet;
+	callbacks.list=UserLuaList;
+	callbacks.mutate=UserLuaMutate;
+	callbacks.print=UserLuaPrint;
+
+	std::array<char, 8192> error{};
+	const int result=rs_lua_run(
+		(const unsigned char*)(LPCSTR)m_Source,
+		static_cast<size_t>(m_Source.GetLength()),
+		(LPCSTR)m_Script,
+		&callbacks,
+		&context,
+		error.data(),
+		error.size());
+
+	if(result!=RS_OK)
+	{
+		context.report += TranslateStringACP("Lua script failed:");
+		context.report += "\r\n";
+		context.report += error.data();
+		m_Report=context.report;
+		SetDlgItemText(IDC_REPORT, m_Report);
+		MessageBox(error.data(), TranslateStringACP("Lua Script Error"), MB_ICONERROR);
+		return FALSE;
+	}
+
+	if(context.changed)
+	{
+		const int apply=MessageBox(
+			TranslateStringACP("The Lua script completed successfully and wants to apply its map changes. Apply them now?"),
+			TranslateStringACP("Apply Lua Script Changes"),
+			MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2);
+		if(apply==IDYES)
+		{
+			Map->GetIniFile()=context.ini;
+			Map->UpdateIniFile(MAPDATA_UPDATE_FROM_INI);
+			((CFinalSunDlg*)theApp.GetMainWnd())->UpdateDialogs(FALSE, FALSE);
+			context.report += TranslateStringACP("Lua map changes applied.");
+		}
+		else
+		{
+			context.report += TranslateStringACP("Lua map changes discarded.");
+		}
+		context.report += "\r\n";
+	}
+	else
+	{
+		context.report += TranslateStringACP("Lua script completed successfully. No map changes were requested.");
+		context.report += "\r\n";
+	}
+
+	m_Report=context.report;
+	SetDlgItemText(IDC_REPORT, m_Report);
+	return TRUE;
+}
+
 void CUserScriptsDlg::OnOK() 
 {
 	if(m_loadedScript.IsEmpty() || !SaveCurrentScript()) return;
 	UpdateData(TRUE);
 	m_Script=m_loadedScript;
+	CString lowerScriptName=m_Script;
+	lowerScriptName.MakeLower();
+	if(lowerScriptName.GetLength()>=4 && lowerScriptName.Right(4)==".lua")
+	{
+		RunLuaScript();
+		return;
+	}
 
 	//srand((unsigned)time(NULL));
 
@@ -3533,29 +3873,30 @@ BOOL CUserScriptsDlg::OnInitDialog()
 	SetWindowText(TranslateStringACP("Map Scripts"));
 	((CEdit*)GetDlgItem(IDC_SCRIPT_EDITOR))->SetTabStops(16);
 
-	CString scripts=(CString)AppPath+"\\Scripts\\*.fscript";
+	const CString scriptFolder=(CString)AppPath+"\\Scripts\\";
 	{
-		
-		CFileFind ff;
-		if(ff.FindFile(scripts))
+		CListBox* lb=(CListBox*)GetDlgItem(IDC_SCRIPTS);
+		const char* patterns[]={ "*.fscript", "*.lua" };
+		for(const char* pattern : patterns)
 		{
-			CListBox* lb=(CListBox*)GetDlgItem(IDC_SCRIPTS);
-			
-			BOOL bWorking=TRUE;
-			
-			while(bWorking)  
+			CFileFind ff;
+			if(ff.FindFile(scriptFolder + pattern))
 			{
-				bWorking=ff.FindNextFile();
-				if(!ff.IsDirectory() && !ff.IsDots()) lb->AddString(ff.GetFileName());
+				BOOL bWorking=TRUE;
+				while(bWorking)
+				{
+					bWorking=ff.FindNextFile();
+					if(!ff.IsDirectory() && !ff.IsDots()) lb->AddString(ff.GetFileName());
+				}
 			}
+		}
 
-			if(lb->GetCount()>0)
-			{
-				lb->SetCurSel(0);
-				CString scriptName;
-				lb->GetText(0, scriptName);
-				LoadScriptSource(scriptName);
-			}
+		if(lb->GetCount()>0)
+		{
+			lb->SetCurSel(0);
+			CString scriptName;
+			lb->GetText(0, scriptName);
+			LoadScriptSource(scriptName);
 		}
 	}
 

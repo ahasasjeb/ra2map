@@ -107,6 +107,7 @@ int Tests::run()
 		[this]() { test_iso(); },
 		[this]() { test_codecs(); },
 		[this]() { test_csf(); },
+		[this]() { test_lua_runtime(); },
 		[this]() { test_waypoint_codec(); },
 		[this]() { test_ini_utf8_normalization(); },
 		[this]() { test_ini_malformed_section_is_discarded(); },
@@ -125,6 +126,57 @@ int Tests::run()
 	std::cout << "Failed: " << failed_tests << std::endl;
 	std::cout << "Succeeded: " << test_functions.size() - failed_tests << std::endl;
 	return failed_tests ? 1 : 0;
+}
+
+namespace
+{
+	struct LuaRuntimeTestHost
+	{
+		std::string output;
+	};
+
+	int LuaRuntimeTestGet(void*, const char*, const char*, char*, size_t, size_t*)
+	{
+		return 0;
+	}
+
+	size_t LuaRuntimeTestList(void*, const char*, char*, size_t)
+	{
+		return 0;
+	}
+
+	int LuaRuntimeTestMutate(void*, int, const char*, const char*, const char*)
+	{
+		return 1;
+	}
+
+	void LuaRuntimeTestPrint(void* context, const char* text)
+	{
+		((LuaRuntimeTestHost*)context)->output=text;
+	}
+}
+
+void Tests::test_lua_runtime()
+{
+	LuaRuntimeTestHost host;
+	rs_lua_callbacks callbacks{};
+	callbacks.get=LuaRuntimeTestGet;
+	callbacks.list=LuaRuntimeTestList;
+	callbacks.mutate=LuaRuntimeTestMutate;
+	callbacks.print=LuaRuntimeTestPrint;
+
+	const char* source="assert(os == nil and io == nil and require == nil); print('linked Lua 5.4')";
+	char error[512]{};
+	const int result=rs_lua_run(
+		(const unsigned char*)source,
+		strlen(source),
+		"linked-test.lua",
+		&callbacks,
+		&host,
+		error,
+		_countof(error));
+	REPORT_TEST(result == RS_OK);
+	REPORT_TEST(host.output == "linked Lua 5.4");
 }
 
 void Tests::test_property_brush_settings()

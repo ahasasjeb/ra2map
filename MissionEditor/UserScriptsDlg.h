@@ -79,6 +79,7 @@ private:
 	BOOL ConfirmSaveChanges();
 	BOOL SelectScript(const CString& scriptName);
 	BOOL IsEditorDirty();
+	BOOL RunLuaScript();
 	void UpdateEditorState();
 
 	CString m_loadedScript;

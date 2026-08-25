@@ -40,6 +40,7 @@
 #define RS_ERR_PANIC (-3)
 #define RS_ERR_VULKAN_UNAVAILABLE (-10)
 #define RS_ERR_VULKAN_RUNTIME (-11)
+#define RS_ERR_LUA_RUNTIME (-20)
 
 // maximum sane render target dimension; bounds exceeding this are
 // rejected by the C++ allocation code (guards against corrupt data)
@@ -63,6 +64,56 @@ int rs_snapshot_pack(
 int rs_snapshot_unpack(
     const unsigned char* input, size_t input_len,
     unsigned char* output, size_t output_len);
+
+// ---------------------------------------------------------------------------
+// Sandboxed Lua 5.4 map scripts. The host supplies a transactional view of
+// the map INI through these callbacks and commits it only when rs_lua_run
+// returns RS_OK. Lua receives no filesystem, process, package, or debug APIs.
+// ---------------------------------------------------------------------------
+
+typedef int (*rs_lua_get_callback)(
+    void* context,
+    const char* section,
+    const char* key,
+    char* dst,
+    size_t dst_cap,
+    size_t* out_len);
+
+// section == NULL enumerates section names; otherwise enumerates keys in that
+// section. The result is a sequence of NUL-terminated strings. A sizing call
+// with dst == NULL returns the required byte count.
+typedef size_t (*rs_lua_list_callback)(
+    void* context,
+    const char* section,
+    char* dst,
+    size_t dst_cap);
+
+// Operations: 0=set key, 1=remove key, 2=clear section, 3=remove section.
+typedef int (*rs_lua_mutate_callback)(
+    void* context,
+    int operation,
+    const char* section,
+    const char* key,
+    const char* value);
+
+typedef void (*rs_lua_print_callback)(void* context, const char* text);
+
+typedef struct rs_lua_callbacks
+{
+    rs_lua_get_callback get;
+    rs_lua_list_callback list;
+    rs_lua_mutate_callback mutate;
+    rs_lua_print_callback print;
+} rs_lua_callbacks;
+
+int rs_lua_run(
+    const unsigned char* source,
+    size_t source_len,
+    const char* source_name,
+    const rs_lua_callbacks* callbacks,
+    void* context,
+    char* error,
+    size_t error_cap);
 
 // Mirrors the fields of t_vxl_section_tailer that the renderer needs.
 typedef struct rs_vxl_tailer

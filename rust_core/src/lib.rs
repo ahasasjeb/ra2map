@@ -24,9 +24,12 @@
 
 mod codec;
 mod csf;
+mod lua;
 mod minilzo;
 mod snapshot;
 mod vulkan;
+
+pub use lua::rs_lua_run;
 
 pub use vulkan::{
     rs_vulkan_create, rs_vulkan_destroy, rs_vulkan_last_error, rs_vulkan_prepare,

@@ -83,7 +83,7 @@
       <SuppressStartupBanner>true</SuppressStartupBanner>
     </Lib>
     <PreBuildEvent>
-      <Command>where cargo &gt;nul 2&gt;nul &amp;&amp; (cargo build --release --target x86_64-pc-windows-msvc --manifest-path "$(SolutionDir)rust_core\Cargo.toml") || ("$(USERPROFILE)\.cargo\bin\cargo.exe" build --release --target x86_64-pc-windows-msvc --manifest-path "$(SolutionDir)rust_core\Cargo.toml")</Command>
+      <Command>powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(SolutionDir)scripts\build_rust_core.ps1"</Command>
     </PreBuildEvent>
     <Link>
       <ModuleDefinitionFile>.\MissionEditorPackLib.def</ModuleDefinitionFile>
@@ -118,7 +118,7 @@
       <SuppressStartupBanner>true</SuppressStartupBanner>
     </Lib>
     <PreBuildEvent>
-      <Command>where cargo &gt;nul 2&gt;nul &amp;&amp; (cargo build --release --target x86_64-pc-windows-msvc --manifest-path "$(SolutionDir)rust_core\Cargo.toml") || ("$(USERPROFILE)\.cargo\bin\cargo.exe" build --release --target x86_64-pc-windows-msvc --manifest-path "$(SolutionDir)rust_core\Cargo.toml")</Command>
+      <Command>powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(SolutionDir)scripts\build_rust_core.ps1"</Command>
     </PreBuildEvent>
     <Link>
       <ModuleDefinitionFile>.\MissionEditorPackLib.def</ModuleDefinitionFile>
