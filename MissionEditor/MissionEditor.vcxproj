@@ -306,6 +306,7 @@
     <ClCompile Include="SavingDlg.cpp" />
     <ClCompile Include="ScriptTypes.cpp" />
     <ClCompile Include="SearchWaypointDlg.cpp" />
+    <ClCompile Include="CsfBrowserDlg.cpp" />
     <ClCompile Include="ShutDownDlg.cpp" />
     <ClCompile Include="SingleplayerSettings.cpp" />
     <ClCompile Include="SpecialFlags.cpp" />
@@ -426,6 +427,7 @@
     <ClInclude Include="SavingDlg.h" />
     <ClInclude Include="ScriptTypes.h" />
     <ClInclude Include="SearchWaypointDlg.h" />
+    <ClInclude Include="CsfBrowserDlg.h" />
     <ClInclude Include="ShutDownDlg.h" />
     <ClInclude Include="SingleplayerSettings.h" />
     <ClInclude Include="SpecialFlags.h" />

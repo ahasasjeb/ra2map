@@ -90,6 +90,7 @@
 #define IDD_USERSCRIPTS                 288
 #define IDD_COMBO_UINPUT                289
 #define IDD_ALLIES_EDITOR               300
+#define IDD_CSF_BROWSER                 301
 #define IDC_EDITOR_ARROW                299
 #define IDC_BULB                        1000
 #define IDC_TAB                         1007
@@ -600,6 +601,7 @@
 #define ID_HELP_SHOWLOGS40140           40140
 #define ID_OPTIONS_SMOOTHZOOM           40141
 #define ID_OPTIONS_USEDEFAULTMOUSECURSOR 40142
+#define ID_MAPTOOLS_CSFBROWSER          40144
 
 #define IDS_LINEARVERSION               57604
 #define IDC_TOOLTIPCENTER               65535
@@ -640,14 +642,24 @@
 #define IDC_ALLYED_LALLIES              1511
 #define IDC_ALLYED_LHOUSE               1512
 #define IDC_ALLYED_BIDIRECTIONAL        1513
+#define IDC_CSFVALUEPREVIEW             1514
+#define IDC_CSF_BROWSER_SEARCH          1515
+#define IDC_CSF_BROWSER_LIST            1516
+#define IDC_CSF_BROWSER_COUNT           1517
+#define IDC_CSF_BROWSER_SEARCH_LABEL    1518
+#define IDC_CSF_BROWSER_PREVIEW         1519
+#define IDC_SCRIPT_EDITOR               1520
+#define IDC_SCRIPT_SAVE                 1521
+#define IDC_SCRIPT_NEW                  1522
+#define IDC_SCRIPT_COPY_API             1523
 
 // Next default values for new objects
 //
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
-#define _APS_NEXT_RESOURCE_VALUE        301
-#define _APS_NEXT_COMMAND_VALUE         40144
-#define _APS_NEXT_CONTROL_VALUE         1514
+#define _APS_NEXT_RESOURCE_VALUE        302
+#define _APS_NEXT_COMMAND_VALUE         40145
+#define _APS_NEXT_CONTROL_VALUE         1524
 #define _APS_NEXT_SYMED_VALUE           111
 #endif
 #endif

@@ -137,6 +137,17 @@ extern BOOL yr_only[];
 extern CString currentOwner;
 extern map<CString, XCString> CCStrings;
 
+struct CsfStringIdLess
+{
+	bool operator()(const CString& left, const CString& right) const
+	{
+		return left.CompareNoCase(right)<0;
+	}
+};
+
+using CsfStringTable=map<CString, XCString, CsfStringIdLess>;
+extern CsfStringTable AllStrings;
+
 // tileset ids
 extern int cliffset;
 extern int cliffset_start;

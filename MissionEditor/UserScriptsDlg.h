@@ -27,6 +27,8 @@
 // UserScriptsDlg.h : Header-Datei
 //
 
+#include <vector>
+
 /////////////////////////////////////////////////////////////////////////////
 // Dialogfeld CUserScriptsDlg 
 
@@ -42,6 +44,7 @@ public:
 	enum { IDD = IDD_USERSCRIPTS };
 	CString	m_Script;
 	CString	m_Report;
+	CString	m_Source;
 	//}}AFX_DATA
 
 
@@ -50,6 +53,7 @@ public:
 	//{{AFX_VIRTUAL(CUserScriptsDlg)
 	protected:
 	virtual void DoDataExchange(CDataExchange* pDX);    // DDX/DDV-Unterstützung
+	virtual BOOL PreTranslateMessage(MSG* pMsg);
 	//}}AFX_VIRTUAL
 
 // Implementierung
@@ -58,9 +62,29 @@ protected:
 	// Generierte Nachrichtenzuordnungsfunktionen
 	//{{AFX_MSG(CUserScriptsDlg)
 	virtual void OnOK();
+	virtual void OnCancel();
 	virtual BOOL OnInitDialog();
+	afx_msg void OnSelchangeScripts();
+	afx_msg void OnChangeScriptEditor();
+	afx_msg void OnSaveScript();
+	afx_msg void OnNewScript();
+	afx_msg void OnCopyApiMarkdown();
 	//}}AFX_MSG
 	DECLARE_MESSAGE_MAP()
+
+private:
+	CString GetScriptPath(const CString& scriptName) const;
+	BOOL LoadScriptSource(const CString& scriptName);
+	BOOL SaveCurrentScript();
+	BOOL ConfirmSaveChanges();
+	BOOL SelectScript(const CString& scriptName);
+	BOOL IsEditorDirty();
+	void UpdateEditorState();
+
+	CString m_loadedScript;
+	CString m_originalSource;
+	std::vector<int> m_sourceLines;
+	BOOL m_loadingSource;
 };
 
 //{{AFX_INSERT_LOCATION}}

@@ -236,6 +236,7 @@ protected:
 	afx_msg void OnEditPropertybrush();
 	afx_msg void OnTimer(UINT_PTR nIDEvent);
 	afx_msg void OnMaptoolsToolscripts();
+	afx_msg void OnMaptoolsCsfbrowser();
 	//}}AFX_MSG
 	DECLARE_MESSAGE_MAP()
 private:

@@ -804,4 +804,29 @@ void Tests::test_csf()
 	size_t j = 0;
 	res = rs_csf_parse(junk, sizeof(junk), NULL, 0, &j, NULL, 0, &j, NULL, 0, &j, NULL, 0, &j, &truncated);
 	REPORT_TEST(res == RS_ERR_BAD_ARG);
+
+#ifdef RA2_MODE
+	// Trigger dialogs resolve only the display preview through the cached
+	// table. The serialized value remains the original CSF key.
+	AllStrings[id].SetString(value, static_cast<int>(vlen));
+	CString resolved;
+	REPORT_TEST(IsCsfParamListType(PARAMTYPE_TUTORIALTEXTS));
+	REPORT_TEST(IsCsfParamListType(PARAMTYPE_CSFSTRINGS));
+	REPORT_TEST(TryGetCsfString(id, resolved));
+	REPORT_TEST(resolved == CString("hello"));
+	REPORT_TEST(TryGetCsfString("name:abc", resolved));
+
+	AllStrings["MISSION:UNTHK06"].SetString(L"Mission text", 12);
+	REPORT_TEST(TryGetCsfString("mission:unthk06", resolved));
+	REPORT_TEST(resolved == CString("Mission text"));
+
+	REPORT_TEST(TryGetCsfString(id, resolved));
+	CString serialized=id;
+	serialized+=" : ";
+	serialized+=resolved;
+	TruncSpace(serialized);
+	REPORT_TEST(serialized == CString(id));
+	AllStrings.erase(id);
+	AllStrings.erase("mission:unthk06");
+#endif
 }

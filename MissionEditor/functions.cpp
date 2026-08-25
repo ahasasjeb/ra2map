@@ -268,6 +268,9 @@ void HandleParamList(CComboBox &cb, int type)
 	case PARAMTYPE_TUTORIALTEXTS:
 		ListTutorial(cb);
 		break;
+	case PARAMTYPE_CSFSTRINGS:
+		ListCsfStrings(cb);
+		break;
 	case PARAMTYPE_TRIGGERS:
 		ListTriggers(cb);
 		break;
@@ -338,6 +341,17 @@ void HandleParamList(CComboBox &cb, int type)
 		ListAIScriptLists(cb);
 		break;
 	}
+}
+
+BOOL IsCsfParamListType(int type)
+{
+#ifdef RA2_MODE
+	// RA2/YR stores tutorial text in CSF as well. List type 21 is the
+	// explicit CSF-string type used by newer action definitions.
+	return type==PARAMTYPE_TUTORIALTEXTS || type==PARAMTYPE_CSFSTRINGS;
+#else
+	return FALSE;
+#endif
 }
 
 void ShowOptionsDialog()
@@ -1161,12 +1175,55 @@ void ListRulesGlobals(CComboBox& cb)
 	}
 }
 
-extern map<CString, XCString> AllStrings;
-void ListTutorial(CComboBox& cb)
+BOOL TryGetCsfString(const CString& id, CString& value)
 {
+	value.Empty();
+
+#ifdef RA2_MODE
+	auto it=AllStrings.find(id);
+	if(it==AllStrings.end()) return FALSE;
+
+	value=it->second.cString;
+	return TRUE;
+#else
+	return FALSE;
+#endif
+}
+
+void ListCsfStrings(CComboBox& cb)
+{
+	CString oldText;
+	cb.GetWindowText(oldText);
 	while(cb.DeleteString(0)!=CB_ERR);
 
+#ifdef RA2_MODE
+	// The CSF file was parsed once by CLoading::LoadStrings. Populate from
+	// that in-memory table and reserve the combo storage up front so opening
+	// a large string table does not cause thousands of small reallocations.
+	int totalCharacters=0;
+	for(const auto& entry : AllStrings)
+		totalCharacters+=entry.first.GetLength()+entry.second.cString.GetLength()+3;
+
+	cb.InitStorage(static_cast<int>(AllStrings.size()), totalCharacters);
+	cb.SetRedraw(FALSE);
+	for(const auto& entry : AllStrings)
+	{
+		CString display=entry.first;
+		display+=" : ";
+		display+=entry.second.cString;
+		cb.AddString(display);
+	}
+	cb.SetRedraw(TRUE);
+	cb.Invalidate(FALSE);
+#endif
+
+	cb.SetWindowText(oldText);
+}
+
+void ListTutorial(CComboBox& cb)
+{
 #ifndef RA2_MODE
+	while(cb.DeleteString(0)!=CB_ERR);
 	const CIniFileSection* sec = tutorial.GetSection("Tutorial");
 	if(sec)
 	{
@@ -1183,27 +1240,7 @@ void ListTutorial(CComboBox& cb)
 		}
 	}
 #else
-	
-	typedef map<CString, XCString>::iterator it;
-	it _it=AllStrings.begin();
-	/*it begin;
-	it end;
-	begin=CCStrings.begin();
-	end=CCStrings.end();*/
-
-	int i;
-	for(i=0;i<CCStrings.size();i++)
-	{
-		
-		CString s;
-		s=_it->first;
-		s+=" : ";
-		s+=_it->second.cString;
-
-		cb.AddString(s);
-		_it++;
-	}
-
+	ListCsfStrings(cb);
 #endif
 }
 

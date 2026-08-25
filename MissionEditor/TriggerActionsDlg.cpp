@@ -77,6 +77,7 @@ BEGIN_MESSAGE_MAP(CTriggerActionsDlg, CDialog)
 	ON_CBN_EDITCHANGE(IDC_ACTIONTYPE, OnEditchangeActiontype)
 	ON_LBN_SELCHANGE(IDC_PARAMETER, OnSelchangeParameter)
 	ON_CBN_EDITCHANGE(IDC_PARAMVALUE, OnEditchangeParamvalue)
+	ON_CBN_DROPDOWN(IDC_PARAMVALUE, OnDropdownParamvalue)
 	ON_BN_CLICKED(IDC_NEWACTION, OnNewaction)
 	ON_BN_CLICKED(IDC_DELETEACTION, OnDeleteaction)
 	//}}AFX_MSG_MAP
@@ -84,6 +85,53 @@ END_MESSAGE_MAP()
 
 /////////////////////////////////////////////////////////////////////////////
 // Behandlungsroutinen für Nachrichten CTriggerActionsDlg 
+
+void CTriggerActionsDlg::PrepareParamValueList(int listType)
+{
+	if(IsCsfParamListType(listType))
+	{
+		if(!IsCsfParamListType(m_paramListType))
+		{
+			while(m_ParamValue.DeleteString(0)!=CB_ERR);
+			m_csfListPopulated=FALSE;
+		}
+	}
+	else
+	{
+		HandleParamList(m_ParamValue, listType);
+		m_csfListPopulated=FALSE;
+	}
+
+	m_paramListType=listType;
+}
+
+void CTriggerActionsDlg::UpdateCsfPreview(int listType, const CString& value)
+{
+	CString preview;
+	if(IsCsfParamListType(listType))
+		TryGetCsfString(value, preview);
+	SetDlgItemText(IDC_CSFVALUEPREVIEW, preview);
+}
+
+void CTriggerActionsDlg::OnDropdownParamvalue()
+{
+	if(!IsCsfParamListType(m_paramListType) || m_csfListPopulated) return;
+
+	CString key;
+	m_ParamValue.GetWindowText(key);
+	TruncSpace(key);
+
+	ListCsfStrings(m_ParamValue);
+	m_csfListPopulated=TRUE;
+
+	CString value;
+	if(TryGetCsfString(key, value))
+	{
+		CString display=key+" : "+value;
+		int index=m_ParamValue.FindStringExact(-1, display);
+		if(index!=CB_ERR) m_ParamValue.SetCurSel(index);
+	}
+}
 
 void CTriggerActionsDlg::OnSelchangeAction() 
 {
@@ -236,9 +284,16 @@ void CTriggerActionsDlg::OnEditchangeActiontype()
 	}
 
 	m_ParamValue.SetWindowText("");
+	SetDlgItemText(IDC_CSFVALUEPREVIEW, "");
 	if(m_Parameter.GetCount()>0) {
 		m_Parameter.SetCurSel(0);
 		OnSelchangeParameter();
+	}
+	else
+	{
+		while(m_ParamValue.DeleteString(0)!=CB_ERR);
+		m_paramListType=-1;
+		m_csfListPopulated=FALSE;
 	}
 }
 
@@ -255,6 +310,9 @@ void CTriggerActionsDlg::OnSelchangeParameter()
 	if(curselparam<0) 
 	{
 		m_ParamValue.SetWindowText("");
+		SetDlgItemText(IDC_CSFVALUEPREVIEW, "");
+		m_paramListType=-1;
+		m_csfListPopulated=FALSE;
 		return;
 	}
 
@@ -290,8 +348,11 @@ void CTriggerActionsDlg::OnSelchangeParameter()
 		else
 		{
 			CString ListType=GetParam(g_data.sections["ParamTypes"].values[ParamType],1);
-			HandleParamList(m_ParamValue, atoi(ListType));
-			m_ParamValue.SetWindowText(GetParam(ActionData,startpos+1+curparam));
+			int listType=atoi(ListType);
+			PrepareParamValueList(listType);
+			CString rawValue=GetParam(ActionData,startpos+1+curparam);
+			m_ParamValue.SetWindowText(rawValue);
+			UpdateCsfPreview(listType, rawValue);
 			
 			int i;
 			BOOL bFound=FALSE;
@@ -333,6 +394,8 @@ void CTriggerActionsDlg::OnSelchangeParameter()
 	}
 	else if(curparam==-1)
 	{
+		m_paramListType=-1;
+		m_csfListPopulated=FALSE;
 		// CString instead of char[50]: waypoint strings from the action
 		// data can exceed the old fixed buffer
 		CString wayp;
@@ -351,6 +414,7 @@ void CTriggerActionsDlg::OnSelchangeParameter()
 			
 
 		m_ParamValue.SetWindowText(wayp);
+		UpdateCsfPreview(-1, wayp);
 	}
 }
 
@@ -367,6 +431,7 @@ void CTriggerActionsDlg::OnEditchangeParamvalue()
 	if(curselparam<0) 
 	{
 		m_ParamValue.SetWindowText("");
+		SetDlgItemText(IDC_CSFVALUEPREVIEW, "");
 		return;
 	}
 
@@ -389,6 +454,7 @@ void CTriggerActionsDlg::OnEditchangeParamvalue()
 	newVal.TrimLeft();
 
 	if(newVal.Find(",",0)>=0) newVal.SetAt(newVal.Find(",",0), 0);
+	UpdateCsfPreview(m_paramListType, newVal);
 
 	if(curparam>=0)
 	{
@@ -574,4 +640,5 @@ void CTriggerActionsDlg::Clear()
 	while(m_Parameter.DeleteString(0)!=LB_ERR);
 	m_ParamValue.SetWindowText("");
 	m_ActionDescription.SetWindowText("");
+	SetDlgItemText(IDC_CSFVALUEPREVIEW, "");
 }

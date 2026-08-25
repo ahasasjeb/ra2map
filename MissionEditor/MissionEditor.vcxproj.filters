@@ -204,6 +204,9 @@
     <ClCompile Include="SearchWaypointDlg.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="CsfBrowserDlg.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="ShutDownDlg.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -500,6 +503,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="SearchWaypointDlg.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CsfBrowserDlg.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="ShutDownDlg.h">

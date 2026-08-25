@@ -62,6 +62,10 @@ public:
 // Implementierung
 protected:
 	int m_typeListKey{ -1 };	// cache key of the event type list built last
+	int m_paramListType{ -1 };
+	BOOL m_csfListPopulated{ FALSE };
+	void PrepareParamValueList(int listType);
+	void UpdateCsfPreview(int listType, const CString& value);
 
 	// Generierte Nachrichtenzuordnungsfunktionen
 	//{{AFX_MSG(CTriggerEventsDlg)
@@ -71,6 +75,7 @@ protected:
 	afx_msg void OnEditchangeEventtype();
 	afx_msg void OnSelchangeParameter();
 	afx_msg void OnEditchangeParamvalue();
+	afx_msg void OnDropdownParamvalue();
 	//}}AFX_MSG
 	DECLARE_MESSAGE_MAP()
 };

@@ -69,11 +69,59 @@ BEGIN_MESSAGE_MAP(CTriggerEventsDlg, CDialog)
 	ON_CBN_EDITCHANGE(IDC_EVENTTYPE, OnEditchangeEventtype)
 	ON_LBN_SELCHANGE(IDC_PARAMETER, OnSelchangeParameter)
 	ON_CBN_EDITCHANGE(IDC_PARAMVALUE, OnEditchangeParamvalue)
+	ON_CBN_DROPDOWN(IDC_PARAMVALUE, OnDropdownParamvalue)
 	//}}AFX_MSG_MAP
 END_MESSAGE_MAP()
 
 /////////////////////////////////////////////////////////////////////////////
 // Behandlungsroutinen für Nachrichten CTriggerEventsDlg 
+
+void CTriggerEventsDlg::PrepareParamValueList(int listType)
+{
+	if(IsCsfParamListType(listType))
+	{
+		if(!IsCsfParamListType(m_paramListType))
+		{
+			while(m_ParamValue.DeleteString(0)!=CB_ERR);
+			m_csfListPopulated=FALSE;
+		}
+	}
+	else
+	{
+		HandleParamList(m_ParamValue, listType);
+		m_csfListPopulated=FALSE;
+	}
+
+	m_paramListType=listType;
+}
+
+void CTriggerEventsDlg::UpdateCsfPreview(int listType, const CString& value)
+{
+	CString preview;
+	if(IsCsfParamListType(listType))
+		TryGetCsfString(value, preview);
+	SetDlgItemText(IDC_CSFVALUEPREVIEW, preview);
+}
+
+void CTriggerEventsDlg::OnDropdownParamvalue()
+{
+	if(!IsCsfParamListType(m_paramListType) || m_csfListPopulated) return;
+
+	CString key;
+	m_ParamValue.GetWindowText(key);
+	TruncSpace(key);
+
+	ListCsfStrings(m_ParamValue);
+	m_csfListPopulated=TRUE;
+
+	CString value;
+	if(TryGetCsfString(key, value))
+	{
+		CString display=key+" : "+value;
+		int index=m_ParamValue.FindStringExact(-1, display);
+		if(index!=CB_ERR) m_ParamValue.SetCurSel(index);
+	}
+}
 
 // MW 07/23/01: Added this because startpos=1+curev*3 isn´t anymore valid for calculating the next event
 int GetEventParamStart(CString& EventData, int param)
@@ -364,9 +412,16 @@ void CTriggerEventsDlg::OnEditchangeEventtype()
 	}
 
 	m_ParamValue.SetWindowText("");
+	SetDlgItemText(IDC_CSFVALUEPREVIEW, "");
 	if(m_Parameter.GetCount()>0) {
 		m_Parameter.SetCurSel(0);
 		OnSelchangeParameter();
+	}
+	else
+	{
+		while(m_ParamValue.DeleteString(0)!=CB_ERR);
+		m_paramListType=-1;
+		m_csfListPopulated=FALSE;
 	}
 	
 	
@@ -390,6 +445,9 @@ void CTriggerEventsDlg::OnSelchangeParameter()
 	if(curselparam<0) 
 	{
 		m_ParamValue.SetWindowText("");
+		SetDlgItemText(IDC_CSFVALUEPREVIEW, "");
+		m_paramListType=-1;
+		m_csfListPopulated=FALSE;
 		return;
 	}
 
@@ -425,9 +483,11 @@ void CTriggerEventsDlg::OnSelchangeParameter()
 	else
 	{
 		CString ListType=GetParam(g_data.sections["ParamTypes"].values[ParamType],1);
-		
-		HandleParamList(m_ParamValue, atoi(ListType));
-		m_ParamValue.SetWindowText(GetParam(EventData,startpos+1+original_cuparam));
+		int listType=atoi(ListType);
+		PrepareParamValueList(listType);
+		CString rawValue=GetParam(EventData,startpos+1+original_cuparam);
+		m_ParamValue.SetWindowText(rawValue);
+		UpdateCsfPreview(listType, rawValue);
 		
 		int i;
 		BOOL bFound=FALSE;
@@ -481,6 +541,7 @@ void CTriggerEventsDlg::OnEditchangeParamvalue()
 	if(curselparam<0) 
 	{
 		m_ParamValue.SetWindowText("");
+		SetDlgItemText(IDC_CSFVALUEPREVIEW, "");
 		return;
 	}
 
@@ -498,6 +559,7 @@ void CTriggerEventsDlg::OnEditchangeParamvalue()
 	newVal.TrimLeft();
 
 	if(newVal.Find(",",0)>=0) newVal.SetAt(newVal.Find(",",0), 0);
+	UpdateCsfPreview(m_paramListType, newVal);
 
 	ini.sections["Events"].values[(LPCTSTR)m_currentTrigger]=SetParam(EventData, startpos+1+curparam, newVal);
 }
@@ -600,4 +662,5 @@ void CTriggerEventsDlg::Clear()
 	while(m_Parameter.DeleteString(0)!=LB_ERR);
 	m_ParamValue.SetWindowText("");
 	m_EventDescription.SetWindowText("");
+	SetDlgItemText(IDC_CSFVALUEPREVIEW, "");
 }

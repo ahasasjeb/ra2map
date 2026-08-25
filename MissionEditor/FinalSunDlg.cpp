@@ -50,6 +50,7 @@
 #include "inlines.h"
 #include "MapCode.h"
 #include "SearchWaypointDlg.h"
+#include "CsfBrowserDlg.h"
 #include "MultiSelectionTool.h"
 #include "PropertyBrushTool.h"
 #include "Building.h"
@@ -230,6 +231,7 @@ BEGIN_MESSAGE_MAP(CFinalSunDlg, CDialog)
 	ON_COMMAND(ID_EDIT_PROPERTYBRUSH, OnEditPropertybrush)
 	ON_WM_TIMER()
 	ON_COMMAND(ID_MAPTOOLS_TOOLSCRIPTS, OnMaptoolsToolscripts)
+	ON_COMMAND(ID_MAPTOOLS_CSFBROWSER, OnMaptoolsCsfbrowser)
 	//}}AFX_MSG_MAP
 		ON_COMMAND(ID_OPTIONS_SMOOTHZOOM, &CFinalSunDlg::OnOptionsSmoothzoom)
 		ON_WM_SETCURSOR()
@@ -4190,6 +4192,12 @@ void CFinalSunDlg::OnEditPropertybrush()
 	AD.mode = ACTIONMODE_MAPTOOL;
 	AD.tool = std::make_unique<PropertyBrushTool>(*Map, *m_view.m_isoview, dialog.GetPropertyBrushSettings());
 	SetText(GetLanguageStringACP("PropertyBrushHelp"));
+}
+
+void CFinalSunDlg::OnMaptoolsCsfbrowser()
+{
+	CCsfBrowserDlg dlg(this);
+	dlg.DoModal();
 }
 
 void CFinalSunDlg::OnMaptoolsToolscripts() 

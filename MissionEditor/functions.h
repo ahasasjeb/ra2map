@@ -69,6 +69,9 @@ CString GetFreeID();
 
 
 void HandleParamList(CComboBox &cb, int type);
+BOOL IsCsfParamListType(int type);
+BOOL TryGetCsfString(const CString& id, CString& value);
+void ListCsfStrings(CComboBox& cb);
 
 // sets 0 if there is a space in the string, so truncates it at the first space occupation
 void TruncSpace(string& str);

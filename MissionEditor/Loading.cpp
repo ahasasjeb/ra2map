@@ -6206,173 +6206,177 @@ void CLoading::PrepareHouses()
 }
 
 
-class SortDummy2{
-public:
-	bool operator() (const CString& x, const CString& y) const
-	{
-		// the length is more important than spelling (numbers!!!)...
-		if(x.GetLength()<y.GetLength()) return true;
-		if(x.GetLength()==y.GetLength())
-		{	
-			CString x2=x;
-			CString y2=y;
-			x2.MakeLower();
-			y2.MakeLower();
-			if(x2<y2) return true;
-		}
-
-		return false;
-	
-	}
-};
-
-extern map<CString, XCString> AllStrings;
 void CLoading::LoadStrings()
 {
 	last_succeeded_operation=9;
 
 #ifdef RA2_MODE
 
-	// MW April 17th, 2002:
-	// ra2md.csf supported!
-	std::string file="RA2.CSF";
-	if(yuri_mode)
-		file="RA2MD.CSF";
-
 	errstream << "LoadStrings() executing" << endl;
 	errstream.flush();
 
-	std::vector<BYTE> lpData;
-	DWORD dwSize = 0;
-	if(DoesFileExist((std::string(TSPath) + "\\" + file).c_str()))
-	{
-		std::ifstream f(std::string(TSPath) + "\\" + file, ios::binary);
-		if (f.good())
-		{
-			f.seekg(0, std::ios::end);
-			auto size = f.tellg();
-			if (size > 0)
-			{
-				lpData.resize(static_cast<size_t>(size));
-				dwSize = static_cast<DWORD>(lpData.size());
-				f.seekg(0, std::ios::beg);
-				f.read(reinterpret_cast<char*>(lpData.data()), dwSize);
-			}
-		}
-	}
-	errstream << "LoadStrings() loading from mix" << endl;
-	errstream.flush();
+	AllStrings.clear();
+	int loadedTables=0;
 
-	if(lpData.empty())
+	auto readFile=[](const std::string& path, std::vector<BYTE>& data)
 	{
-		HMIXFILE hMix=FindFileInMix(file.c_str());
-		//HMIXFILE hMix=m_hLanguage;
-		if(hMix)
-		{
-			if (FSunPackLib::XCC_ExtractFile(file, u8AppDataPath + "\\RA2Tmp.csf", hMix))
-			{
-				std::ifstream f(u8AppDataPath + "\\RA2Tmp.csf", ios::binary);
-				if (f.good())
-				{
-					f.seekg(0, std::ios::end);
-					auto size = f.tellg();
-					if (size > 0)
-					{
-						lpData.resize(static_cast<size_t>(size));
-						dwSize = static_cast<DWORD>(lpData.size());
-						f.seekg(0, std::ios::beg);
-						f.read(reinterpret_cast<char*>(lpData.data()), dwSize);
-					}
-				}
-			}
-			
-			if (lpData.empty())
-			{
-				MessageBox(GetLanguageStringACP("LanguageFileMissing"),TranslateStringACP("Error"));
-				return;
-			}
-		}
-		else
-		{
-			MessageBox(TranslateStringACP("String file not found, using rules.ini names"),TranslateStringACP("Error"));
-			return;
-		}
-		
-	}
+		data.clear();
+		std::ifstream file(path, ios::binary);
+		if(!file.good()) return false;
 
-	// The CSF string table parsing lives in the memory-safe Rust core now.
-	// The old code walked the file with a raw pointer, trusted every
-	// length field and allocated `new BYTE[dwCharCount+1]` before copying
-	// that many bytes - a corrupt file could read far past the end of the
-	// buffer and corrupt the heap. The Rust parser clamps every read to
-	// the buffer and reports truncation instead.
+		file.seekg(0, std::ios::end);
+		auto size=file.tellg();
+		if(size<=0) return false;
+
+		data.resize(static_cast<size_t>(size));
+		file.seekg(0, std::ios::beg);
+		file.read(reinterpret_cast<char*>(data.data()), static_cast<std::streamsize>(data.size()));
+		if(!file)
+		{
+			data.clear();
+			return false;
+		}
+		return true;
+	};
+
+	// The CSF parser lives in the memory-safe Rust core. Each source is
+	// merged into the same case-insensitive table; later sources override
+	// earlier entries just like loose game files override MIX contents.
+	auto mergeData=[&](const std::vector<BYTE>& data)
 	{
+		if(data.empty()) return false;
+
 		size_t entry_count = 0, ids_len = 0, values_len = 0, values_asc_len = 0;
-		int truncated = 0;
-		int res = rs_csf_parse(lpData.data(), dwSize,
+		int res = rs_csf_parse(data.data(), data.size(),
 			NULL, 0, &entry_count,
 			NULL, 0, &ids_len,
 			NULL, 0, &values_len,
 			NULL, 0, &values_asc_len,
-			&truncated);
+			NULL);
 		if (res != RS_ERR_SMALL_BUFFER)
-			return; // " FSC" missing or file too short - same as before
+			return false;
 
 		std::vector<rs_csf_entry> entries(entry_count);
 		std::vector<BYTE> ids(ids_len), values(values_len), values_asc(values_asc_len);
-		res = rs_csf_parse(lpData.data(), dwSize,
+		res = rs_csf_parse(data.data(), data.size(),
 			entries.data(), entries.size(), &entry_count,
 			ids.data(), ids.size(), &ids_len,
 			values.data(), values.size(), &values_len,
 			values_asc.data(), values_asc.size(), &values_asc_len,
-			&truncated);
+			NULL);
 		if (res != RS_OK)
-			return;
+			return false;
 
-		map<CString, XCString, SortDummy2> strings;
 		const BYTE* idp = ids.data();
 		const BYTE* vp = values.data();
 		for (size_t i = 0; i < entry_count; i++)
 		{
 			CString id((const char*)idp, (int)entries[i].id_len);
 			const WCHAR* wval = (const WCHAR*)vp;
-			strings[id].SetString(wval, (int)entries[i].value_len);
 			AllStrings[id].SetString(wval, (int)entries[i].value_len);
 			idp += entries[i].id_len;
 			vp += (size_t)entries[i].value_len * 2;
 		}
+		return true;
+	};
 
-		int i;
+	auto loadMix=[&](const std::string& filename, HMIXFILE mix)
+	{
+		if(mix==NULL || !FSunPackLib::XCC_DoesFileExist(filename.c_str(), mix)) return;
+
+		std::string temporary=u8AppDataPath+"\\RA2Tmp.csf";
+		if(!FSunPackLib::XCC_ExtractFile(filename, temporary, mix)) return;
+
+		std::vector<BYTE> data;
+		bool merged=readFile(temporary, data) && mergeData(data);
+		deleteFile(temporary);
+		if(merged)
+		{
+			++loadedTables;
+			std::string mixName;
+			FSunPackLib::XCC_GetMixName(mix, mixName);
+			errstream << "LoadStrings() merged " << filename << " from " << mixName << endl;
+		}
+	};
+
+	auto loadLoose=[&](const std::string& filename)
+	{
+		std::vector<BYTE> data;
+		if(readFile(std::string(TSPath)+"\\"+filename, data) && mergeData(data))
+		{
+			++loadedTables;
+			errstream << "LoadStrings() merged loose " << filename << endl;
+		}
+	};
+
+	// Load the original tables first. In modded installations a loose
+	// RA2MD.CSF is often only an overlay, so replacing the MIX table with it
+	// drops vanilla keys such as MISSION:UNTHK06.
+	loadMix("RA2.CSF", m_hLanguage);
+	if(yuri_mode) loadMix("RA2MD.CSF", m_hLangMD);
+
+	// Custom archives have higher priority than the base language archives.
+	HMIXFILE ra2Override=FindFileInMix("RA2.CSF");
+	if(ra2Override!=m_hLanguage) loadMix("RA2.CSF", ra2Override);
+	if(yuri_mode)
+	{
+		HMIXFILE yrOverride=FindFileInMix("RA2MD.CSF");
+		if(yrOverride!=m_hLangMD) loadMix("RA2MD.CSF", yrOverride);
+	}
+
+	// Mental Omega and other mods split additional strings across numbered
+	// CSF files stored in expand MIX archives (for example stringtable00.csf,
+	// stringtable01.csf and stringtable11.csf). Discover the complete
+	// supported range through the normal MIX priority chain, then apply any
+	// loose copies as the final overrides.
+	std::vector<std::string> stringTables;
+	stringTables.reserve(101);
+	stringTables.push_back("stringtable.csf");
+	for(int tableIndex=0;tableIndex<100;++tableIndex)
+	{
+		char filename[32];
+		sprintf_s(filename, "stringtable%02d.csf", tableIndex);
+		stringTables.emplace_back(filename);
+	}
+	for(const std::string& filename : stringTables)
+		loadMix(filename, FindFileInMix(filename.c_str()));
+
+	// Loose files have the final say, matching the rest of the editor's
+	// game-file lookup behavior.
+	loadLoose("RA2.CSF");
+	if(yuri_mode) loadLoose("RA2MD.CSF");
+	for(const std::string& filename : stringTables)
+		loadLoose(filename);
+
+	if(loadedTables==0)
+	{
+		MessageBox(TranslateStringACP("String file not found, using rules.ini names"),TranslateStringACP("Error"));
+		return;
+	}
+	errstream << "LoadStrings() merged " << loadedTables << " CSF table(s), "
+		<< AllStrings.size() << " unique strings" << endl;
+	errstream.flush();
+
+	int i;
 
 	for(i=0;i<rules.sections.size();i++)
 	{
 		if(rules.GetSection(i)->FindName("UIName")>=0)
 		{
-			int e;
-		
-			if(strings.find(rules.GetSection(i)->values["UIName"])!=strings.end())
+			auto stringIt=AllStrings.find(rules.GetSection(i)->values["UIName"]);
+			if(stringIt!=AllStrings.end())
 			{
-				//MessageBox(strings[rules.GetSection(i)->values["UIName"]].cString);
-				if(!strings[rules.GetSection(i)->values["UIName"]].bUsedDefault)
-				{
-					//CCStrings[*rules.GetSectionName(i)].cString=strings[rules.GetSection(i)->values["UIName"]].cString; //.SetString(strings[rules.GetSection(i)->values["UIName"]].wString, strings[rules.GetSection(i)->values["UIName"]].len);
-					CCStrings[*rules.GetSectionName(i)].SetString(strings[rules.GetSection(i)->values["UIName"]].wString, strings[rules.GetSection(i)->values["UIName"]].len);
-				}
-				else
-				{
-					CCStrings[*rules.GetSectionName(i)].SetString(strings[rules.GetSection(i)->values["UIName"]].wString, strings[rules.GetSection(i)->values["UIName"]].len);
+				const XCString& localized=stringIt->second;
+				CCStrings[*rules.GetSectionName(i)].SetString(localized.wString, localized.len);
+				if(localized.bUsedDefault)
 					CCStrings[*rules.GetSectionName(i)].cString=rules.GetSection(i)->GetValueByName("Name");
-				}
 			}
 			else 
 			{
-				//MessageBox((LPSTR)(LPCSTR)rules.GetSection(i)->values["Name"], *rules.GetSectionName(i));
 				CCStrings[*rules.GetSectionName(i)].SetString((LPSTR)(LPCSTR)rules.GetSection(i)->GetValueByName("Name"));
 			}
 		}
 		else CCStrings[*rules.GetSectionName(i)].SetString((LPSTR)(LPCSTR)rules.GetSection(i)->GetValueByName("Name"));
-
-	}
 
 	}
 

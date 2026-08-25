@@ -60,6 +60,10 @@ public:
 // Implementierung
 protected:
 	int m_typeListKey{ -1 };	// cache key of the action type list built last
+	int m_paramListType{ -1 };
+	BOOL m_csfListPopulated{ FALSE };
+	void PrepareParamValueList(int listType);
+	void UpdateCsfPreview(int listType, const CString& value);
 
 	// Generierte Nachrichtenzuordnungsfunktionen
 	//{{AFX_MSG(CTriggerActionsDlg)
@@ -67,6 +71,7 @@ protected:
 	afx_msg void OnEditchangeActiontype();
 	afx_msg void OnSelchangeParameter();
 	afx_msg void OnEditchangeParamvalue();
+	afx_msg void OnDropdownParamvalue();
 	afx_msg void OnNewaction();
 	afx_msg void OnDeleteaction();
 	//}}AFX_MSG

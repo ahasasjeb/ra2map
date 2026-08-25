@@ -48,6 +48,7 @@ struct FunctionData
 {
 	CString name;
 	std::vector<CString> params;
+	int sourceLine=1;
 
 	void AddParam()
 	{
@@ -69,6 +70,7 @@ public:
 	int error;
 	int functioncount;
 	int GetFunction(int index, CString* name, std::vector<CString>* params) const;
+	int GetSourceLine(int index) const;
 	int FindJumpLine(const CString& name) const;
 	int LoadFile(const char* filename);
 	CUserScript();
@@ -112,6 +114,7 @@ int CUserScript::LoadFile(const char *setupfile)
 	BOOL inFunctionHead=FALSE;
 	BOOL inNewOrder=TRUE;
 	BOOL inJumpLine=FALSE;
+	int sourceLine=1;
 
 	
 	
@@ -179,6 +182,7 @@ int CUserScript::LoadFile(const char *setupfile)
 			{
 				inFunction=TRUE;
 				int pos=AllocateFunction();
+				functiondata[pos-1].sourceLine=sourceLine;
 				//*functiondata[pos-1].name.append(data[parsepos]);
 				functiondata[pos-1].name = static_cast<char>(data[parsepos]);
 			}
@@ -278,7 +282,7 @@ int CUserScript::LoadFile(const char *setupfile)
 		}
 		
 
-		
+		if(data[parsepos]=='\n') sourceLine++;
 
 	}
 	/////////////////////////
@@ -296,6 +300,12 @@ int CUserScript::GetFunction(int index, CString* name, std::vector<CString>* par
 	*name = functiondata[index].name;
 	*params = functiondata[index].params;
 	return 0;
+}
+
+int CUserScript::GetSourceLine(int index) const
+{
+	if(index<0 || index>=functioncount) return index;
+	return functiondata[index].sourceLine;
 }
 
 int CUserScript::AllocateFunction()
@@ -320,7 +330,9 @@ CUserScriptsDlg::CUserScriptsDlg(CWnd* pParent /*=NULL*/)
 	//{{AFX_DATA_INIT(CUserScriptsDlg)
 	m_Script = _T("");
 	m_Report = _T("");
+	m_Source = _T("");
 	//}}AFX_DATA_INIT
+	m_loadingSource=FALSE;
 }
 
 
@@ -330,12 +342,18 @@ void CUserScriptsDlg::DoDataExchange(CDataExchange* pDX)
 	//{{AFX_DATA_MAP(CUserScriptsDlg)
 	DDX_LBString(pDX, IDC_SCRIPTS, m_Script);
 	DDX_Text(pDX, IDC_REPORT, m_Report);
+	DDX_Text(pDX, IDC_SCRIPT_EDITOR, m_Source);
 	//}}AFX_DATA_MAP
 }
 
 
 BEGIN_MESSAGE_MAP(CUserScriptsDlg, CDialog)
 	//{{AFX_MSG_MAP(CUserScriptsDlg)
+	ON_LBN_SELCHANGE(IDC_SCRIPTS, OnSelchangeScripts)
+	ON_EN_CHANGE(IDC_SCRIPT_EDITOR, OnChangeScriptEditor)
+	ON_BN_CLICKED(IDC_SCRIPT_SAVE, OnSaveScript)
+	ON_BN_CLICKED(IDC_SCRIPT_NEW, OnNewScript)
+	ON_BN_CLICKED(IDC_SCRIPT_COPY_API, OnCopyApiMarkdown)
 	//}}AFX_MSG_MAP
 END_MESSAGE_MAP()
 
@@ -525,6 +543,137 @@ int get_player_count()
 	return wp_count;
 }
 
+static const char kUserScriptApiMarkdown[] = R"fscriptmd(# Map Script API (.fscript)
+
+Map scripts run against the currently open map. Save the map before running a script: script changes cannot be undone.
+
+## Syntax
+
+```text
+// A comment
+SetVariable("%Counter%", "10");
+Print("Counter: %Counter%");
+
+:Loop:
+Substract("%Counter%", "1");
+JumpTo("Loop", "%Counter%");
+```
+
+- Commands and variable names are case-sensitive.
+- Parameters are quoted strings. Use `\n` and `\r` for line breaks, and `""` for a literal quote.
+- Most commands accept an optional final `condition`. The command runs when the value is `true`, `yes`, or a non-zero number.
+- Output parameters are variable names such as `%Result%`. Other parameters expand `%Variable%` before the command runs.
+- Labels use `:Name:` and are targets for `JumpTo`.
+
+## Built-in variables
+
+`%Width%`, `%Height%`, `%IsoSize%`, `%WaypointCount%`, `%UnitCount%`, `%InfantryCount%`, `%StructureCount%`, `%AircraftCount%`, `%TerrainCount%`, `%Theater%`, `%PlayerCount%`, `%HousesCount%`, `%CountriesCount%`, `%DeleteAllowed%`, `%AddAllowed%`, `%SafeMode%`.
+
+## Flow, messages, and variables
+
+| API | Description |
+| --- | --- |
+| `Print(text[, condition])` | Append a line to the report. |
+| `Message(text, title[, condition])` | Show an information message. |
+| `Ask(%result%, text, title[, condition])` | Show a Yes/No message and store `1` or `0`. |
+| `AskContinue(message[, condition])` | Ask whether the script should continue. |
+| `Cancel([condition])` | Stop the script. |
+| `RequiresMP([condition])` | Stop unless the current map is multiplayer. |
+| `RequiresSP([condition])` | Stop unless the current map is single-player. |
+| `JumpTo(label[, condition])` | Jump to a label. A safety prompt appears after every 300 loops. |
+| `Is(left, operator, right, %result%[, condition])` | Compare using `<`, `<=`, `=`, `>=`, `>`, or `!=`; store `1` or `0`. |
+| `And(%result%, value, ...)` | Store whether every value is set. |
+| `Or(%result%, value, ...)` | Store whether any value is set. |
+| `Not(%variable%[, condition])` | Toggle a Boolean variable. |
+| `SetVariable(%variable%, value[, condition])` | Assign a string value. |
+| `Add(%variable%, number[, condition])` | Add an integer. |
+| `Substract(%variable%, number[, condition])` | Subtract an integer. The historical API spelling is `Substract`. |
+| `Multi(%variable%, number[, condition])` | Multiply an integer. |
+| `Divide(%variable%, number[, condition])` | Divide an integer. |
+| `Mod(%variable%, number[, condition])` | Store the integer remainder. |
+| `GetRandom(%result%[, condition])` | Store a random integer from 0 through 32767. |
+| `LowerCase(%variable%[, condition])` | Convert a variable to lower case. |
+| `UpperCase(%variable%[, condition])` | Convert a variable to upper case. |
+| `Length(%result%, text[, condition])` | Store the text length. |
+| `Trim(%variable%[, condition])` | Remove leading and trailing whitespace. |
+| `Insert(%variable%, text, index[, condition])` | Insert text; a negative index appends. |
+| `Replace(%variable%, old, replacement[, condition])` | Replace every matching substring. |
+| `Remove(%variable%, index, length[, condition])` | Remove a substring. |
+| `GetChar(%result%, text, index[, condition])` | Store one character. |
+| `GetParam(%result%, csv, index[, condition])` | Read a zero-based comma-separated field. |
+| `SetParam(%variable%, index, value[, condition])` | Replace a zero-based comma-separated field. |
+| `GetParamCount(%result%, csv[, condition])` | Count comma-separated fields. |
+| `SetAutoUpdate(enabled[, condition])` | Enable or disable live report refresh while running. |
+
+## User input
+
+| API | Description |
+| --- | --- |
+| `UInputGetInteger(%result%, prompt, minimum, maximum[, condition])` | Repeatedly ask for an integer in the optional bounds. Use an empty bound for none. |
+| `UInputGetString(%result%, prompt[, condition])` | Repeatedly ask for a non-empty string. |
+| `UInputGetHouse(%result%, prompt[, condition])` | Select a house. |
+| `UInputGetCountry(%result%, prompt[, condition])` | Select a country. |
+| `UInputGetTrigger(%result%, prompt[, condition])` | Select a trigger ID. |
+| `UInputGetTag(%result%, prompt[, condition])` | Select a tag ID. |
+
+## Map and INI
+
+| API | Description |
+| --- | --- |
+| `GetIniKey(%result%, section, key[, condition])` | Read a map INI value, or an empty string if it does not exist. |
+| `SetIniKey(section, key, value[, condition])` | Write a map INI value. Requires INI protection to be disabled. |
+| `SetSafeMode(enabled, reason[, condition])` | Toggle INI protection; disabling it requires confirmation. |
+| `SetWaypoint(id, x, y[, condition])` | Add or move a waypoint. Use a negative ID to allocate one automatically. |
+| `GetFreeWaypoint(%result%[, condition])` | Store an unused waypoint ID. |
+| `GetWaypointPos(id, %x%, %y%[, condition])` | Read waypoint coordinates. Missing waypoints return `0,0`. |
+| `Resize(left, top, width, height[, condition])` | Resize the map after confirmation; width and height must not exceed 200. |
+| `GetHouse(%result%, index[, condition])` | Read a house ID by zero-based index. |
+| `GetCountry(%result%, index[, condition])` | Read a country ID by zero-based index. |
+
+## Adding map content
+
+Call `AllowAdd(reason)` first. The user must confirm before add commands take effect.
+
+| API | Description |
+| --- | --- |
+| `AllowAdd(reason[, condition])` | Request permission to add objects or triggers. |
+| `AddTrigger(%id%, triggerData, eventData, actionData, createTag[, condition])` | Add a trigger and optionally a tag; store the new ID when `%id%` is non-empty. |
+| `AddAITrigger(%id%, data[, condition])` | Add an AI trigger and optionally store its ID. |
+| `AddTag(%id%, data[, condition])` | Add a tag and optionally store its ID. |
+| `AddTerrain(type, x, y[, condition])` | Add terrain at map coordinates. |
+| `AddSmudge(type, x, y[, condition])` | Add a smudge when supported by the editor variant. |
+| `AddInfantry(data[, condition])` | Add 14-field infantry INI data. |
+| `AddVehicle(data[, condition])` | Add 14-field vehicle INI data. |
+| `AddAircraft(data[, condition])` | Add 12-field aircraft INI data. |
+| `AddStructure(data[, condition])` | Add 17-field structure INI data. |
+
+Object data fields use the game's comma-separated map INI format. `GetInfantry`, `GetVehicle`, `GetAircraft`, and `GetStructure` are the safest way to obtain a compatible record before changing fields with `SetParam`.
+
+## Reading and deleting map content
+
+Call `AllowDelete(reason)` first. The user must confirm before delete commands take effect.
+
+| API | Description |
+| --- | --- |
+| `GetInfantry(%result%, index[, condition])` | Read infantry INI data by zero-based index. |
+| `GetVehicle(%result%, index[, condition])` | Read vehicle INI data by zero-based index. |
+| `GetAircraft(%result%, index[, condition])` | Read aircraft INI data by zero-based index. |
+| `GetStructure(%result%, index[, condition])` | Read structure INI data by zero-based index. |
+| `AllowDelete(reason[, condition])` | Request permission to delete objects or triggers. |
+| `DeleteTerrain(index[, condition])` | Delete terrain by index. |
+| `DeleteInfantry(index[, condition])` | Delete infantry by index. |
+| `DeleteVehicle(index[, condition])` | Delete a vehicle by index. |
+| `DeleteAircraft(index[, condition])` | Delete aircraft by index. |
+| `DeleteStructure(index[, condition])` | Delete a structure by index. |
+| `IsInfantryDeleted(%result%, index[, condition])` | Store whether an infantry record is deleted. |
+| `IsTerrainDeleted(%result%, index[, condition])` | Store whether a terrain record is deleted. |
+)fscriptmd";
+
+static CString BuildUserScriptApiMarkdown()
+{
+	return CString(kUserScriptApiMarkdown);
+}
+
 struct FUNC_INFO
 {
 	int type;
@@ -533,16 +682,260 @@ struct FUNC_INFO
 	int paramcount;
 };
 
+CString CUserScriptsDlg::GetScriptPath(const CString& scriptName) const
+{
+	return (CString)AppPath + "\\Scripts\\" + scriptName;
+}
+
+BOOL CUserScriptsDlg::IsEditorDirty()
+{
+	if(m_loadingSource || m_loadedScript.IsEmpty()) return FALSE;
+
+	CString source;
+	GetDlgItemText(IDC_SCRIPT_EDITOR, source);
+	return source != m_originalSource;
+}
+
+void CUserScriptsDlg::UpdateEditorState()
+{
+	const BOOL hasScript=!m_loadedScript.IsEmpty();
+	GetDlgItem(IDC_SCRIPT_EDITOR)->EnableWindow(hasScript);
+	GetDlgItem(IDC_SCRIPT_SAVE)->EnableWindow(hasScript && IsEditorDirty());
+	GetDlgItem(IDOK)->EnableWindow(hasScript);
+}
+
+BOOL CUserScriptsDlg::LoadScriptSource(const CString& scriptName)
+{
+	CFile file;
+	const CString path=GetScriptPath(scriptName);
+	if(!file.Open(path, CFile::modeRead | CFile::shareDenyNone))
+	{
+		CString message=TranslateStringVariables(1, TranslateStringACP("Could not open script %1."), scriptName);
+		MessageBox(message, TranslateStringACP("Error"), MB_ICONERROR);
+		return FALSE;
+	}
+
+	const ULONGLONG fileLength=file.GetLength();
+	if(fileLength>8 * 1024 * 1024)
+	{
+		file.Close();
+		MessageBox(TranslateStringACP("The script is too large to edit."), TranslateStringACP("Error"), MB_ICONERROR);
+		return FALSE;
+	}
+
+	CString source;
+	LPSTR buffer=source.GetBuffer(static_cast<int>(fileLength) + 1);
+	const UINT bytesRead=file.Read(buffer, static_cast<UINT>(fileLength));
+	buffer[bytesRead]=0;
+	source.ReleaseBuffer(bytesRead);
+	file.Close();
+
+	m_loadingSource=TRUE;
+	m_loadedScript=scriptName;
+	m_Script=scriptName;
+	m_Source=source;
+	m_originalSource=source;
+	SetDlgItemText(IDC_SCRIPT_EDITOR, source);
+	m_loadingSource=FALSE;
+	UpdateEditorState();
+	return TRUE;
+}
+
+BOOL CUserScriptsDlg::SelectScript(const CString& scriptName)
+{
+	CListBox* scripts=(CListBox*)GetDlgItem(IDC_SCRIPTS);
+	const int index=scripts->FindStringExact(-1, scriptName);
+	if(index==LB_ERR) return FALSE;
+	scripts->SetCurSel(index);
+	return TRUE;
+}
+
+BOOL CUserScriptsDlg::SaveCurrentScript()
+{
+	if(m_loadedScript.IsEmpty()) return FALSE;
+
+	CString source;
+	GetDlgItemText(IDC_SCRIPT_EDITOR, source);
+
+	CFile file;
+	if(!file.Open(GetScriptPath(m_loadedScript), CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive))
+	{
+		CString message=TranslateStringVariables(1, TranslateStringACP("Could not save script %1."), m_loadedScript);
+		MessageBox(message, TranslateStringACP("Error"), MB_ICONERROR);
+		return FALSE;
+	}
+
+	if(!source.IsEmpty()) file.Write((LPCSTR)source, source.GetLength());
+	file.Close();
+	m_Source=source;
+	m_originalSource=source;
+
+	CListBox* scripts=(CListBox*)GetDlgItem(IDC_SCRIPTS);
+	if(scripts->FindStringExact(-1, m_loadedScript)==LB_ERR) scripts->AddString(m_loadedScript);
+	SelectScript(m_loadedScript);
+	UpdateEditorState();
+	return TRUE;
+}
+
+BOOL CUserScriptsDlg::ConfirmSaveChanges()
+{
+	if(!IsEditorDirty()) return TRUE;
+
+	CString message=TranslateStringVariables(1, TranslateStringACP("Save changes to %1?"), m_loadedScript);
+	const int result=MessageBox(message, TranslateStringACP("Map Scripts"), MB_YESNOCANCEL | MB_ICONQUESTION);
+	if(result==IDCANCEL) return FALSE;
+	if(result==IDYES) return SaveCurrentScript();
+	return TRUE;
+}
+
+void CUserScriptsDlg::OnSelchangeScripts()
+{
+	CListBox* scripts=(CListBox*)GetDlgItem(IDC_SCRIPTS);
+	const int selected=scripts->GetCurSel();
+	if(selected==LB_ERR) return;
+
+	CString scriptName;
+	scripts->GetText(selected, scriptName);
+	if(scriptName==m_loadedScript) return;
+
+	if(!ConfirmSaveChanges())
+	{
+		SelectScript(m_loadedScript);
+		return;
+	}
+
+	if(!LoadScriptSource(scriptName)) SelectScript(m_loadedScript);
+}
+
+void CUserScriptsDlg::OnChangeScriptEditor()
+{
+	if(!m_loadingSource) UpdateEditorState();
+}
+
+void CUserScriptsDlg::OnSaveScript()
+{
+	SaveCurrentScript();
+}
+
+void CUserScriptsDlg::OnNewScript()
+{
+	if(!ConfirmSaveChanges()) return;
+
+	CString scriptName=InputBox(TranslateStringACP("Enter a name for the new map script."), TranslateStringACP("New Map Script"));
+	scriptName.TrimLeft();
+	scriptName.TrimRight();
+	if(scriptName.IsEmpty()) return;
+
+	if(scriptName=="." || scriptName==".." || scriptName.FindOneOf("\\/:*?\"<>|")>=0)
+	{
+		MessageBox(TranslateStringACP("The script name contains invalid characters."), TranslateStringACP("Error"), MB_ICONERROR);
+		return;
+	}
+
+	CString lowerName=scriptName;
+	lowerName.MakeLower();
+	if(lowerName.GetLength()<8 || lowerName.Right(8)!=".fscript") scriptName += ".fscript";
+
+	if(GetFileAttributes(GetScriptPath(scriptName))!=INVALID_FILE_ATTRIBUTES)
+	{
+		MessageBox(TranslateStringACP("A script with that name already exists."), TranslateStringACP("Error"), MB_ICONERROR);
+		SelectScript(scriptName);
+		LoadScriptSource(scriptName);
+		return;
+	}
+
+	m_loadedScript=scriptName;
+	m_Script=scriptName;
+	m_Source="// Map script (.fscript)\r\n// Press F5 or Ctrl+Enter to save and run.\r\n\r\nPrint(\"Script started.\");\r\n";
+	m_originalSource.Empty();
+	m_loadingSource=TRUE;
+	SetDlgItemText(IDC_SCRIPT_EDITOR, m_Source);
+	m_loadingSource=FALSE;
+	if(SaveCurrentScript())
+	{
+		GetDlgItem(IDC_SCRIPT_EDITOR)->SetFocus();
+		((CEdit*)GetDlgItem(IDC_SCRIPT_EDITOR))->SetSel(m_Source.GetLength(), m_Source.GetLength());
+	}
+}
+
+void CUserScriptsDlg::OnCopyApiMarkdown()
+{
+	const CString markdown=BuildUserScriptApiMarkdown();
+	BOOL copied=FALSE;
+	if(OpenClipboard())
+	{
+		if(EmptyClipboard())
+		{
+			HGLOBAL memory=GlobalAlloc(GMEM_MOVEABLE, markdown.GetLength() + 1);
+			if(memory!=NULL)
+			{
+				LPVOID data=GlobalLock(memory);
+				if(data!=NULL)
+				{
+					memcpy(data, (LPCSTR)markdown, markdown.GetLength() + 1);
+					GlobalUnlock(memory);
+					if(SetClipboardData(CF_TEXT, memory)!=NULL)
+					{
+						copied=TRUE;
+						memory=NULL;
+					}
+				}
+				if(memory!=NULL) GlobalFree(memory);
+			}
+		}
+		CloseClipboard();
+	}
+
+	if(copied)
+	{
+		m_Report=TranslateStringACP("API reference copied as Markdown.");
+		SetDlgItemText(IDC_REPORT, m_Report);
+	}
+	else
+	{
+		MessageBox(TranslateStringACP("Could not copy the API reference to the clipboard."), TranslateStringACP("Error"), MB_ICONERROR);
+	}
+}
+
+BOOL CUserScriptsDlg::PreTranslateMessage(MSG* pMsg)
+{
+	if(pMsg->message==WM_KEYDOWN)
+	{
+		const BOOL controlDown=(GetKeyState(VK_CONTROL) & 0x8000)!=0;
+		if(pMsg->wParam==VK_F5 || (pMsg->wParam==VK_RETURN && controlDown))
+		{
+			OnOK();
+			return TRUE;
+		}
+		if((pMsg->wParam=='S' || pMsg->wParam=='s') && controlDown)
+		{
+			OnSaveScript();
+			return TRUE;
+		}
+	}
+	return CDialog::PreTranslateMessage(pMsg);
+}
+
+void CUserScriptsDlg::OnCancel()
+{
+	if(ConfirmSaveChanges()) CDialog::OnCancel();
+}
+
 void CUserScriptsDlg::OnOK() 
 {
+	if(m_loadedScript.IsEmpty() || !SaveCurrentScript()) return;
 	UpdateData(TRUE);
+	m_Script=m_loadedScript;
 
 	//srand((unsigned)time(NULL));
 
 	if(m_Script.GetLength()==0) return;
 
 	CUserScript s;
-	s.LoadFile((CString)AppPath+(CString)"\\Scripts\\"+m_Script);
+	if(s.LoadFile(GetScriptPath(m_Script))<0) return;
+	m_sourceLines.clear();
+	for(int sourceIndex=0;sourceIndex<s.functioncount;sourceIndex++)
+		m_sourceLines.push_back(s.GetSourceLine(sourceIndex));
 
 	CIniFile& ini=Map->GetIniFile();
 
@@ -3138,10 +3531,7 @@ BOOL CUserScriptsDlg::OnInitDialog()
 	CDialog::OnInitDialog();
 	ApplyEditorUIFont(this);
 	SetWindowText(TranslateStringACP("Map Scripts"));
-
-	int k;
-	CFileFind ff;
-
+	((CEdit*)GetDlgItem(IDC_SCRIPT_EDITOR))->SetTabStops(16);
 
 	CString scripts=(CString)AppPath+"\\Scripts\\*.fscript";
 	{
@@ -3155,11 +3545,21 @@ BOOL CUserScriptsDlg::OnInitDialog()
 			
 			while(bWorking)  
 			{
-				bWorking=ff.FindNextFile();						
-				lb->AddString(ff.GetFileName());				
+				bWorking=ff.FindNextFile();
+				if(!ff.IsDirectory() && !ff.IsDots()) lb->AddString(ff.GetFileName());
+			}
+
+			if(lb->GetCount()>0)
+			{
+				lb->SetCurSel(0);
+				CString scriptName;
+				lb->GetText(0, scriptName);
+				LoadScriptSource(scriptName);
 			}
 		}
 	}
+
+	UpdateEditorState();
 	
 	return TRUE;  // return TRUE unless you set the focus to a control
 	              // EXCEPTION: OCX-Eigenschaftenseiten sollten FALSE zurückgeben
@@ -3167,6 +3567,8 @@ BOOL CUserScriptsDlg::OnInitDialog()
 
 void CUserScriptsDlg::ReportScriptError(int line)
 {
+	if(line>=0 && line<static_cast<int>(m_sourceLines.size())) line=m_sourceLines[line];
+
 	char c[50];
 	itoa(line, c, 10);
 
