@@ -430,6 +430,21 @@ void ShowOptionsDialog()
 		static_cast<CFinalSunDlg*>(theApp.m_pMainWnd)->ApplyAutomaticSaveSettings();
 }
 
+void SetMiniMapVisiblePreference(bool visible)
+{
+	theApp.m_Options.showMiniMap = visible;
+
+	CIniFile options;
+#ifndef RA2_MODE
+	const std::string iniFile = u8AppDataPath + "\\FinalSun.ini";
+#else
+	const std::string iniFile = u8AppDataPath + "\\FinalAlert.ini";
+#endif
+	options.LoadFile(iniFile);
+	options.sections["MiniMap"].values["Visible"] = visible ? "1" : "0";
+	options.SaveFile(iniFile);
+}
+
 
 BOOL DoesFileExist(LPCSTR szFile)
 {

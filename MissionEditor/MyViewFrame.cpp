@@ -25,12 +25,15 @@
 #include "FinalSun.h"
 #include "MyViewFrame.h"
 #include "functions.h"
+#include "variables.h"
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
 #undef THIS_FILE
 static char THIS_FILE[] = __FILE__;
 #endif
+
+extern BOOL bMiniMapClosedByUser;
 
 /////////////////////////////////////////////////////////////////////////////
 // CMyViewFrame
@@ -97,7 +100,11 @@ BOOL CMyViewFrame::OnCreateClient(LPCREATESTRUCT lpcs, CCreateContext* pContext)
 
 	// the minimap is not a child window right now, but it is created here though
 	auto miniMapClass = AfxRegisterWndClass(0, m_hArrowCursor, static_cast<HBRUSH>(::GetStockObject(GRAY_BRUSH)));
-	m_minimap.CreateEx(0, miniMapClass, GetLanguageStringACP("MinimapCaption"), WS_POPUPWINDOW | WS_CAPTION | WS_VISIBLE, r, NULL, 0);
+	DWORD miniMapStyle = WS_POPUPWINDOW | WS_CAPTION;
+	if (theApp.m_Options.showMiniMap)
+		miniMapStyle |= WS_VISIBLE;
+	bMiniMapClosedByUser = theApp.m_Options.showMiniMap ? FALSE : TRUE;
+	m_minimap.CreateEx(0, miniMapClass, GetLanguageStringACP("MinimapCaption"), miniMapStyle, r, NULL, 0);
     //m_minimap.Create(NULL, "Minimap", WS_OVERLAPPED)
 	m_minimap.UpdateView();
 	

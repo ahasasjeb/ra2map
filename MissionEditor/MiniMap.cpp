@@ -28,6 +28,7 @@
 #include "macros.h"
 #include "mapdata.h"
 #include "variables.h"
+#include "functions.h"
 #include "inlines.h"
 
 #ifdef _DEBUG
@@ -164,7 +165,7 @@ void CMiniMap::UpdateView()
 	CRect r;
 	GetWindowRect(r);
 
-	if(Map->GetIsoSize()==0)
+	if(Map->GetIsoSize()==0 || !theApp.m_Options.showMiniMap)
 	{
 		ShowWindow(SW_HIDE);
 	}
@@ -192,6 +193,7 @@ void CMiniMap::OnSysCommand(UINT nID, LPARAM lParam)
 	if(nID==SC_CLOSE)
 	{
 		bMiniMapClosedByUser=TRUE;
+		SetMiniMapVisiblePreference(false);
 		ShowWindow(SW_HIDE);
 		return;
 	}

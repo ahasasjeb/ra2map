@@ -334,6 +334,7 @@ BOOL CFinalSunApp::InitInstance()
 	opts.autoSaveVersioned = optini.sections["AutoSave"].values.emplace("Versioned", opts.autoSaveVersioned ? "1" : "0").first->second != "0";
 
 	opts.fMiniMapScale = static_cast<float>(atof(optini.sections["MiniMap"].values.emplace("Scale", std::to_string(opts.fMiniMapScale).c_str()).first->second));
+	opts.showMiniMap = optini.sections["MiniMap"].values.emplace("Visible", opts.showMiniMap ? "1" : "0").first->second != "0";
 
 	auto defaultViewSteps = CString(Join(",", opts.viewScaleSteps | std::views::transform([](auto v) {return std::to_string(v); })).c_str());
 	auto viewScaleStepsRange = SplitParams(optini.sections["UserInterface"].values.emplace("ViewScaleSteps", defaultViewSteps).first->second) | std::views::transform([](auto v) { return static_cast<float>(std::atof(v)); });

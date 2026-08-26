@@ -61,6 +61,7 @@ struct OPTIONS{
 	BOOL bNoSounds;
 	BOOL bDisableSlopeCorrection;
 	float fMiniMapScale = 2.0f;
+	bool showMiniMap = true;
 	float fLoadScreenDelayInSeconds = 3.5f;
 	bool bShowStats = false;
 	bool bHighResUI = true;

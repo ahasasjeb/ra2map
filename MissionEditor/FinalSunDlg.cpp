@@ -2153,17 +2153,18 @@ void CFinalSunDlg::OnOptionsShowminimap()
 	auto& minimap=m_view.m_minimap;
 	if(!::IsWindow(minimap.GetSafeHwnd())) return;
 
-	if(minimap.IsWindowVisible())
+	const bool showMiniMap = !theApp.m_Options.showMiniMap;
+	SetMiniMapVisiblePreference(showMiniMap);
+	bMiniMapClosedByUser = showMiniMap ? FALSE : TRUE;
+
+	if(!showMiniMap)
 	{
-		bMiniMapClosedByUser=TRUE;
 		minimap.ShowWindow(SW_HIDE);
 		return;
 	}
 
-	bMiniMapClosedByUser=FALSE;
 	if(minimap.IsIconic()) minimap.ShowWindow(SW_RESTORE);
 	minimap.UpdateView();
-	minimap.ShowWindow(SW_SHOW);
 	minimap.RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW);
 }
 
@@ -3253,8 +3254,7 @@ void CFinalSunDlg::OnUpdateMaptoolsChangemapheight(CCmdUI* pCmdUI)
 
 void CFinalSunDlg::OnUpdateOptionsShowminimap(CCmdUI* pCmdUI) 
 {
-	const auto& minimap=m_view.m_minimap;
-	pCmdUI->SetCheck(::IsWindow(minimap.GetSafeHwnd()) && minimap.IsWindowVisible());
+	pCmdUI->SetCheck(theApp.m_Options.showMiniMap ? TRUE : FALSE);
 }
 
 void CFinalSunDlg::OnUpdateTerrainCloak(CCmdUI* pCmdUI) 

@@ -153,6 +153,9 @@ void ApplyEditorUIFont(CWnd* root);
 // translate a dialog caption and its static/button labels using the active language table
 void LocalizeDialogText(CWnd* root);
 
+// Persist whether the floating minimap window should be visible.
+void SetMiniMapVisiblePreference(bool visible);
+
 /****************************************
  sound functions [03/16/2001]
  ****************************************/
