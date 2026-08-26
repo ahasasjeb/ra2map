@@ -14,4 +14,3 @@ struct BuildingFoundationCell
 void UpdateBuildingFoundation(int buildingType, const CString& artName);
 void ClearBuildingFoundations();
 const std::vector<BuildingFoundationCell>& GetBuildingFoundation(int buildingType);
-bool IsCustomBuildingFoundation(int buildingType);

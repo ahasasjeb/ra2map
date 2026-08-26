@@ -64,7 +64,6 @@ std::string utf16ToUtf8(const std::wstring& utf16);
 std::string utf16ToACP(const std::wstring& utf16);
 
 // map functions
-int GetNodeAt(string& owner, string& type, int x, int y);
 CString GetFreeID();
 
 

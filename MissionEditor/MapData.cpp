@@ -380,13 +380,6 @@ DWORD CMapData::GetAITriggerTypeIndex(LPCTSTR lpID)
 	return m_mapfile.sections["AITriggerTypes"].FindName(lpID);
 }
 
-CString CMapData::GetAITriggerTypeID(DWORD dwAITriggerType)
-{
-	if (dwAITriggerType >= GetAITriggerTypeCount()) return CString("");
-
-	return *m_mapfile.sections["AITriggerTypes"].GetValueName(dwAITriggerType);
-}
-
 CIniFile& CMapData::GetIniFile()
 {
 	UpdateIniFile();
@@ -3177,33 +3170,6 @@ DWORD CMapData::GetWaypointCount() const
 	return section ? section->values.size() : 0;
 }
 
-void CMapData::DeleteRulesSections()
-{
-	int i;
-
-	// delete any rules sections except the types lists (we need those to get the data of new units in the map)...
-	for (i = 0; i < m_mapfile.sections.size(); i++)
-	{
-		CString name = *m_mapfile.GetSectionName(i);
-
-		if (IsRulesSection(name) && name.Find("Types") < 0)
-		{
-			m_mapfile.sections.erase(name);
-		}
-	}
-
-	// now delete these types lists...
-	for (i = 0; i < m_mapfile.sections.size(); i++)
-	{
-		CString name = *m_mapfile.GetSectionName(i);
-
-		if (IsRulesSection(name))
-		{
-			m_mapfile.sections.erase(name);
-		}
-	}
-}
-
 BOOL CMapData::IsRulesSection(LPCTSTR lpSection)
 {
 	int i;
@@ -3266,35 +3232,6 @@ BOOL CMapData::IsRulesSection(LPCTSTR lpSection)
 
 	return FALSE;
 
-}
-
-void CMapData::ExportRulesChanges(const char* filename)
-{
-	CIniFile rul;
-
-	int i;
-	for (i = 0;i < m_mapfile.sections.size();i++)
-	{
-
-		CString name = *m_mapfile.GetSectionName(i);
-
-		if (IsRulesSection(name))
-		{
-
-			rul.sections[name] = *m_mapfile.GetSection(i);
-
-		}
-	}
-
-	rul.SaveFile(std::string(filename));
-}
-
-void CMapData::ImportRUL(LPCTSTR lpFilename)
-{
-	m_mapfile.InsertFile(std::string(lpFilename), NULL);
-	m_mapfile.sections.erase("Editor");
-	UpdateBuildingInfo();
-	UpdateTreeInfo();
 }
 
 void CMapData::UpdateMapFieldData(BOOL bSave)
@@ -4040,23 +3977,6 @@ int CMapData::GetBuildingID(LPCSTR lpBuildingName)
 
 
 
-MAPFIELDDATA* CMapData::GetMappackPointer(DWORD dwPos)
-{
-	int x = dwPos % GetIsoSize(); // note that x=y and y=x in the mappack (according to our struct)!
-	int y = dwPos / GetIsoSize();
-
-	int i = 0;
-	for (i = 0;i < dwIsoMapSize;i++)
-	{
-		MAPFIELDDATA* cur = (MAPFIELDDATA*)&m_mfd[i * MAPFIELDDATA_SIZE];
-		if (cur->wX == y && cur->wY == x)
-			return cur;
-	}
-
-	return NULL;
-}
-
-
 void CMapData::CreateMap(DWORD dwWidth, DWORD dwHeight, LPCTSTR lpTerrainType, DWORD dwGroundHeight)
 {
 	fielddata.reset();
@@ -4450,193 +4370,6 @@ void CMapData::CreateMap(DWORD dwWidth, DWORD dwHeight, LPCTSTR lpTerrainType, D
 	errstream << "CreateMap() finished\n";
 	errstream.flush();
 
-}
-
-/*void CMapData::CreateSlopesAt(DWORD dwPos)
-{
-	//OutputDebugString("CreateSlopes()\n");
-
-	FIELDDATA m=*GetFielddataAt(dwPos);
-	if(m.wGround==0xFFFF) m.wGround=0;
-
-	TILEDATA& d=(*tiledata)[m.wGround];
-
-	int ns=-1;
-	int i,e,p=0;
-	int h[3][3];
-	for(i=0;i<3; i++)
-	{
-		for(e=0;e<3;e++)
-		{
-			int pos=dwPos+(i-1)+(e-1)*m_IsoSize;
-			if(pos<0 || pos>=m_IsoSize*m_IsoSize)
-			{
-				h[i][e]=0;
-			}
-			else
-			{
-				FIELDDATA m2=*GetFielddataAt(pos);
-
-				h[i][e]=m.bHeight-m2.bHeight;
-			}
-
-
-		}
-	}
-
-	// hmm... check if the current tile must be heightened anyway
-	if(!theApp.m_Options.bDisableSlopeCorrection && d.bMorphable)
-	{
-		if((h[0][1]<0 && h[2][1]<0) || (h[1][0]<0 && h[1][2]<0)
-
-			|| (h[1][0]<0 && h[0][2]<0 && h[0][1]>=0)
-			|| (h[1][0]<0 && h[2][2]<0 && h[2][1]>=0)
-
-			|| (h[0][1]<0 && h[2][0]<0 && h[1][0]>=0)
-			|| (h[0][1]<0 && h[2][2]<0 && h[1][2]>=0)
-
-			|| (h[1][2]<0 && h[0][0]<0 && h[0][1]>=0)
-			|| (h[1][2]<0 && h[2][0]<0 && h[2][1]>=0)
-
-			|| (h[2][1]<0 && h[0][0]<0 && h[1][0]>=0)
-			|| (h[2][1]<0 && h[0][2]<0 && h[1][2]>=0)
-
-			|| (h[1][0]<0 && h[0][1]<0 && h[0][0]>=0)
-			|| (h[0][1]<0 && h[1][2]<0 && h[0][2]>=0)
-			|| (h[1][2]<0 && h[2][1]<0 && h[2][2]>=0)
-			|| (h[2][1]<0 && h[1][0]<0 && h[2][0]>=0)
-
-			)
-		{
-			SetHeightAt(dwPos, m.bHeight+1);
-			for(i=-1;i<2;i++)
-				for(e=-1;e<2;e++)
-					CreateSlopesAt(dwPos+i+e*m_IsoSize);
-
-			return;
-		}
-	}
-
-	//OutputDebugString("Running check\n");
-
-	BOOL checkOtherSlopes=FALSE;
-	/*if(h[0][0] && h[0][1] && h[0][2] && h[1][0] && h[1][2] && h[2][0] && h[2][1] && h[2][2])
-	{
-		ns=-1;
-		checkOtherSlopes=TRUE;
-	}*//*
-
-	if(h[0][0]==-1 && h[2][2]==-1 && h[2][0]>=0 && h[0][2]>=0 && h[1][0]>=0 && h[1][2]>=0 && h[0][1]>=0 && h[2][1]>=0) ns=SLOPE_UP_LEFTTOP_AND_RIGHTBOTTOM;
-	if(h[0][2]==-1 && h[2][0]==-1 && h[0][0]>=0 && h[2][2]>=0 && h[0][1]>=0 && h[1][0]>=0 && h[1][2]>=0 && h[2][1]>=0) ns=SLOPE_UP_LEFTBOTTOM_AND_RIGHTTOP;
-
-	// that would just be another solution:
-	// if(h[0][0]==-1 && h[2][2]==-1 && h[2][0]>=0 && h[0][2]>=0 && h[1][0]>=0 && h[1][2]>=0 && h[0][1]>=0 && h[2][1]>=0) ns=SLOPE_UP_LEFTTOP_AND_RIGHTBOTTOM2;
-	// if(h[0][2]==-1 && h[2][0]==-1 && h[0][0]>=0 && h[2][2]>=0 && h[0][1]>=0 && h[1][0]>=0 && h[1][2]>=0 && h[2][1]>=0) ns=SLOPE_UP_LEFTBOTTOM_AND_RIGHTTOP2;
-
-
-
-	if(ns==-1)
-	if(h[1][0]==-1 && h[0][1]!=-1 && h[1][2]!=-1 && h[2][1]!=-1)
-	{
-		ns=SLOPE_UP_LEFT;
-	}
-	else if(h[0][1]==-1 && h[1][0]!=-1 && h[2][1]!=-1 && h[1][2]!=-1)
-	{
-		ns=SLOPE_UP_TOP;
-	}
-	else if(h[1][2]==-1 && h[0][1]!=-1 && h[1][0]!=-1 && h[2][1]!=-1)
-	{
-		ns=SLOPE_UP_RIGHT;
-	}
-	else if(h[2][1]==-1 && h[0][1]!=-1 && h[1][0]!=-1 && h[1][2]!=-1)
-	{
-		ns=SLOPE_UP_BOTTOM;
-	}
-
-	if(ns==-1)
-	{
-		if(h[0][0]==-2) ns=SLOPE_DOWN_BOTTOM;
-		if(h[2][0]==-2) ns=SLOPE_DOWN_RIGHT;
-		if(h[0][2]==-2) ns=SLOPE_DOWN_LEFT;
-		if(h[2][2]==-2) ns=SLOPE_DOWN_TOP;
-	}
-
-	if(ns==-1 && h[0][0]==-1)
-	{
-		if(h[1][0]==-1 && h[0][1]==-1 ) ns=SLOPE_DOWN_RIGHTBOTTOM;
-		else if(h[1][0]==0 && h[0][1]==0) ns=SLOPE_UP_LEFTTOP;
-		//else if(h[2][2]==1) ns=SLOPE_DOWN_BOTTOM;
-	}
-
-	if( ns==-1 && h[2][0]==-1)
-	{
-		if(h[1][0]==-1 && h[2][1]==-1 ) ns=SLOPE_DOWN_RIGHTTOP;
-		else if(h[1][0]==0 && h[2][1]==0) ns=SLOPE_UP_LEFTBOTTOM;
-		//else if(h[0][2]==1) ns=SLOPE_DOWN_RIGHT;
-	}
-	if( ns==-1 && h[0][2]==-1)
-	{
-		if(h[1][2]==-1 && h[0][1]==-1 ) ns=SLOPE_DOWN_LEFTBOTTOM;
-		else if(h[1][2]==0 && h[0][1]==0) ns=SLOPE_UP_RIGHTTOP;
-		//else if(h[2][0]==1) ns=SLOPE_DOWN_LEFT;
-	}
-	if( ns==-1 && h[2][2]==-1)
-	{
-		if(h[1][2]==-1 && h[2][1]==-1 ) ns=SLOPE_DOWN_LEFTTOP;
-		else if(h[1][2]==0 && h[2][1]==0) ns=SLOPE_UP_RIGHTBOTTOM;
-		//else if(h[0][0]==1) ns=SLOPE_DOWN_TOP;
-	}
-
-	if(ns==-1 && h[1][0]==-1 && h[2][1]==-1 ) ns=SLOPE_DOWN_RIGHTTOP;
-	if(ns==-1 && h[1][2]==-1 && h[2][1]==-1 ) ns=SLOPE_DOWN_LEFTTOP;
-	if(ns==-1 && h[1][0]==-1 && h[0][1]==-1 ) ns=SLOPE_DOWN_RIGHTBOTTOM;
-	if(ns==-1 && h[1][2]==-1 && h[0][1]==-1 ) ns=SLOPE_DOWN_LEFTBOTTOM;
-
-
-	//OutputDebugString("Applying changes()\n");
-
-
-
-	int rampbase=atoi((*tiles).sections["General"].values["RampBase"]);
-	int rampsmooth=atoi((*tiles).sections["General"].values["RampSmooth"]);
-
-	//if((rampbase==d.wTileSet || rampsmooth==d.wTileSet) && m.bSubTile==ns)
-	//	return;
-
-	if(ns==-1 && (d.wTileSet==rampbase || d.wTileSet==rampsmooth) && d.bMorphable)
-	{
-		SetTileAt(dwPos, 0, 0);
-	}
-	if(d.bMorphable && ns!=-1)
-	{
-		SetTileAt(dwPos, GetTileID(rampbase, ns-1), 0);
-
-	}
-
-
-
-	/*if(ns!=-1 || checkOtherSlopes)
-	{
-		for(i=-1;i<2;i++)
-		{
-			for(e=-1;e<2;e++)
-			{
-				int pos=dwPos+(i)+(e)*m_IsoSize;
-				if(pos>0 && pos<m_IsoSize*m_IsoSize)
-				{
-					CreateSlopesAt(pos);
-				}
-			}
-		}
-	}*//*
-
-}*/
-
-int CMapData::GetNecessarySlope(DWORD dwPos)
-{
-
-
-	return 0;
 }
 
 DWORD CMapData::GetTileID(DWORD dwTileSet, int iTile)

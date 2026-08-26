@@ -102,7 +102,6 @@ public:
 	void HideField(DWORD dwPos, BOOL bHide);
 	void SetReserved(DWORD dwPos, BYTE val);
 	DWORD GetTileID(DWORD dwTileSet, int iTile);
-	int GetNecessarySlope(DWORD dwPos);
 	void CreateSlopesAt(DWORD dwPos)
 	{
 		//OutputDebugString("CreateSlopes()\n");
@@ -323,9 +322,6 @@ public:
 
 
 	int GetBuildingID(LPCSTR lpBuildingName);
-	void ImportRUL(LPCTSTR lpFilename);
-	void ExportRulesChanges(const char* filename);
-	void DeleteRulesSections();
 	DWORD GetWaypointCount() const;
 	DWORD GetCelltagCount() const;
 	WCHAR* GetUnitName(LPCTSTR lpID) const;
@@ -569,7 +565,6 @@ public:
 	void UpdateIniFile(DWORD dwFlags = MAPDATA_UPDATE_TO_INI);
 	CIniFile& GetIniFile();
 	const CIniFile& GetIniFile() const noexcept;
-	CString GetAITriggerTypeID(DWORD dwAITriggerType);
 	DWORD GetAITriggerTypeIndex(LPCTSTR lpID);
 	WORD GetHouseIndex(LPCTSTR lpHouse);
 	void GetAITriggerType(DWORD dwAITriggerType, AITRIGGERTYPE* pAITrg);
@@ -614,7 +609,6 @@ public:
 
 private:
 	void UpdateTubes(BOOL bSave);
-	MAPFIELDDATA* GetMappackPointer(DWORD dwPos);
 
 	void UpdateMapFieldData(BOOL bSave = FALSE);
 

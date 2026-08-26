@@ -486,7 +486,6 @@
     <Media Include="Res\uacbopen.wav" />
     <Media Include="Res\ugamclos.wav" />
     <Media Include="Res\umenscol.wav" />
-    <Media Include="Res\uqeue.wav" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\3rdParty\xcc\Library\XCC Library.vcxproj">

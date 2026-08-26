@@ -169,7 +169,6 @@ public:
 		return m_viewOffset;
 	}
 	RECT GetScaledDisplayRect() const;
-	void GetScroll(int& xscroll, int& yscroll) const;
 	void SetScroll(int xscroll, int yscroll);
 	void DrawMap();
 	bool PresentPanPreview();
@@ -219,14 +218,6 @@ public:
 	/// <param name="projCoords">World pixel coordinates</param>
 	/// <returns>Logical map coordinates</returns>
 	MapCoords GetMapCoordinates(const ProjectedCoords& projCoords, bool bAllowAccessBehindCliffs=false, bool ignoreHideFlags = false) const;
-	
-	/// <summary>
-	/// Converts from view / render target pixel coordinates (0/0 is top left corner of screen) to logical map coordinates 
-	/// If you use mouse-move coordinates you need to 
-	/// </summary>
-	/// <param name="projCoords">Texel coordinates of the backbuffer render target</param>
-	/// <returns>Logical map coordinates</returns>
-	MapCoords GetMapCoordinatesFromRenderTargetCoordinates(const ProjectedCoords& screenViewCoords, bool bAllowAccessBehindCliffs = false, bool ignoreHideFlags = false) const;
 
 	/// <summary>
 	/// Converts from Win32 window client coordinates (0/0 at the top left corner of the view window) to logical map coordinates
@@ -273,22 +264,8 @@ public:
 	ProjectedCoords GetRenderTargetCoordinates(const MapCoords& mapCoords, int mapZ) const;
 
 	/// <summary>
-	/// Converts from logical map coordinates to Win32 window client coordinates (0/0 at the top left corner of the view window)
-	/// </summary>
-	/// <param name="projCoords">Logical map coordinates</param>
-	/// <returns>Texel coordinates of the backbuffer render target</returns>
-	CPoint GetClientCoordinates(const MapCoords& mapCoords) const;
-
-	/// <summary>
-	/// Converts from (world) pixel coordinates to Win32 window client coordinates (0/0 at the top left corner of the view window)
-	/// </summary>
-	/// <param name="projCoords">World pixel coordinates</param>
-	/// <returns>Client coordinates as given e.g. by window messages</returns>
-	CPoint GetClientCoordinatesFromWorld(const ProjectedCoords& projectedCoords) const;
-
-	/// <summary>
 	/// Applies the scaling as it is being done when blitting from back to frontbuffer, required e.g. for drawing calls directly to the frontbuffer
-	/// If you use mouse-move coordinates you need to 
+	/// If you use mouse-move coordinates you need to
 	/// </summary>
 	/// <param name="projCoords">Texel coordinates of the backbuffer render target</param>
 	/// <returns>Texel coordinates of the frontbuffer render target</returns>

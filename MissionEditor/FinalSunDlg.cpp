@@ -970,37 +970,6 @@ void CFinalSunDlg::SaveMap(CString FileName_, bool interactive)
 		sec.values["StartX"]=c;
 		itoa(starty, c, 10);
 		sec.values["StartY"]=c;
-		
-		/*CMultiSaveOptionsDlg mso;
-			
-		if(FileName.Find(".mmx")>=0) mso.m_mmx=0; else mso.m_mmx=1;
-
-		if(mso.DoModal()==IDCANCEL) return;
-		
-		if(mso.m_mmx==0)
-		{
-			FileName.Replace(".mpr", ".map");
-			//FileName.Replace(" ", "");
-			if(CoreName.GetLength()>8) 
-			{
-				CoreName=CoreName.Left(8);
-				FileName=CoreName+".map";
-				
-				CString s="The maximum filename length for MMX files is 8 chars, do you want to save the map as ";
-				s+=CoreName;
-				s+=".mmx?";
-				int res=MessageBox(s,TranslateStringACP("Error"), MB_YESNO);
-				if(res!=IDYES) return;
-			}
-
-			bSaveAsMMX=TRUE;
-						
-		}
-		else
-		{
-			FileName.Replace(".mmx", ".mpr");
-			bSaveAsMMX=FALSE;
-		}*/
 	}
 #endif
 
@@ -1531,21 +1500,8 @@ void CFinalSunDlg::OnFileRuntiberiansun()  // or RA2
 
 
 
-void CFinalSunDlg::OnFileImportmod() 
+void CFinalSunDlg::OnFileImportmod()
 {
-	/*CImportModDlg dlg(TRUE, NULL, NULL, OFN_HIDEREADONLY | OFN_OVERWRITEPROMPT | OFN_FILEMUSTEXIST, "TS maps|*.mpr;*.map|TS multi maps|*.mpr|TS single maps|*.map|");
-
-
-
-	char cuPath[MAX_PATH];
-	GetCurrentDirectory(MAX_PATH, cuPath);
-	dlg.m_ofn.lpstrInitialDir=cuPath;
-
-	//if(theApp.m_Options.TSExe.GetLength()) dlg.m_ofn.lpstrInitialDir=(char*)(LPCTSTR)theApp.m_Options.TSExe;
-
-	if(dlg.DoModal()==IDCANCEL) return;	*/
-
-	
 }
 
 void CFinalSunDlg::OnDebugExportmappacknosections() 
@@ -2098,40 +2054,6 @@ void CFinalSunDlg::UpdateStrings()
 	delete my_menu;
 
 	
-	// update the tabs
-	/*TCITEM tci;
-	memset(&tci, 0, sizeof(TCITEM));
-	tci.mask=TCIF_TEXT;
-	tci.pszText=(char*)(LPCTSTR)GetLanguageStringACP("TabBasic");
-	m_TabCtrl.SetItem(TAB_BASIC, &tci);
-	tci.pszText=(char*)(LPCTSTR)GetLanguageStringACP("TabSingleplayerSettings");
-	m_TabCtrl.SetItem(TAB_SINGLEPLAYERSETTINGS, &tci);
-	tci.pszText=(char*)(LPCTSTR)GetLanguageStringACP("TabMap");
-	m_TabCtrl.SetItem(TAB_MAP, &tci);
-	tci.pszText=(char*)(LPCTSTR)GetLanguageStringACP("TabLighting");
-	m_TabCtrl.SetItem(TAB_LIGHTNING, &tci);
-	tci.pszText=(char*)(LPCTSTR)GetLanguageStringACP("TabSpecial");
-	m_TabCtrl.SetItem(TAB_SPECIALFLAGS, &tci);
-	tci.pszText=(char*)(LPCTSTR)GetLanguageStringACP("TabHouses");
-	m_TabCtrl.SetItem(TAB_HOUSES, &tci);
-	tci.pszText=(char*)(LPCTSTR)GetLanguageStringACP("TabTaskForces");
-	m_TabCtrl.SetItem(TAB_TASKFORCES, &tci);
-	tci.pszText=(char*)(LPCTSTR)GetLanguageStringACP("TabScriptTypes");
-	m_TabCtrl.SetItem(TAB_SCRIPTTYPES, &tci);
-	tci.pszText=(char*)(LPCTSTR)GetLanguageStringACP("TabTeamTypes");
-	m_TabCtrl.SetItem(TAB_TEAMTYPES, &tci);
-	tci.pszText=(char*)(LPCTSTR)GetLanguageStringACP("TabTriggers");
-	m_TabCtrl.SetItem(TAB_TRIGGERS, &tci);
-	tci.pszText=(char*)(LPCTSTR)GetLanguageStringACP("TabTags");
-	m_TabCtrl.SetItem(TAB_TAGS, &tci);
-	tci.pszText=(char*)(LPCTSTR)GetLanguageStringACP("TabAITriggers");
-	m_TabCtrl.SetItem(TAB_AITRIGGERTYPES, &tci);
-	tci.pszText=(char*)(LPCTSTR)GetLanguageStringACP("TabAITriggerEnable");
-	m_TabCtrl.SetItem(TAB_AITRIGGERTYPESENABLE, &tci);
-	tci.pszText=(char*)(LPCTSTR)GetLanguageStringACP("TabOther");
-	m_TabCtrl.SetItem(TAB_OTHER, &tci);
-	*/
-
 	// now the child windows and the iso view
 	m_view.m_objectview->UpdateDialog();
 	m_view.m_browser->m_bar.Update();
@@ -2702,28 +2624,10 @@ void CFinalSunDlg::OnTerrainLowerground()
 
 	Sound(SOUND_POSITIVE);
 
-	AD.mode=ACTIONMODE_LOWER;	
+	AD.mode=ACTIONMODE_LOWER;
 }
 
-//DEL void CFinalSunDlg::OnTerrainPaint() 
-//DEL {
-//DEL 	if(m_TerrainDlg.m_hWnd==NULL)
-//DEL 	{		
-//DEL 		if(!m_TerrainDlg.Create(NULL, "Terrain-Browser", WS_OVERLAPPEDWINDOW, CFrameWnd::rectDefault, NULL, NULL, 0))
-//DEL 		{
-//DEL 			MessageBox(GetLanguageStringACP("Err_CreateErr"), "Error");
-//DEL 		}
-//DEL 	}
-//DEL 
-//DEL 	if(m_TerrainDlg.m_hWnd!=NULL)
-//DEL 	{
-//DEL 		m_TerrainDlg.ShowWindow(SW_SHOW);
-//DEL 		m_TerrainDlg.ActivateFrame(SW_SHOW);
-//DEL 		m_TerrainDlg.m_bar.Update();		
-//DEL 	}
-//DEL }
-
-void CFinalSunDlg::OnTerrainLowertile() 
+void CFinalSunDlg::OnTerrainLowertile()
 {
 	if(Map->GetIsoSize()==0)
 	{
@@ -3223,30 +3127,20 @@ void CFinalSunDlg::OnMaptoolsAutolevel()
 	m_view.m_isoview->AutoLevel();	
 }
 
-void CFinalSunDlg::OnUpdateEditAitriggerenabling(CCmdUI* pCmdUI) 
+void CFinalSunDlg::OnUpdateEditAitriggerenabling(CCmdUI* pCmdUI)
 {
-	
-	/*if(Map->GetIsoSize()==0) pCmdUI->Enable(FALSE); 
-	else pCmdUI->Enable(TRUE);*/
-
 }
 
-void CFinalSunDlg::OnUpdateEditAitriggers(CCmdUI* pCmdUI) 
+void CFinalSunDlg::OnUpdateEditAitriggers(CCmdUI* pCmdUI)
 {
-	/*if(Map->GetIsoSize()==0) pCmdUI->Enable(FALSE); 
-	else pCmdUI->Enable(TRUE);*/
 }
 
-void CFinalSunDlg::OnUpdateEditBasicsettings(CCmdUI* pCmdUI) 
+void CFinalSunDlg::OnUpdateEditBasicsettings(CCmdUI* pCmdUI)
 {
-	/*if(Map->GetIsoSize()==0) pCmdUI->Enable(FALSE); 
-	else pCmdUI->Enable(TRUE);*/
 }
 
-void CFinalSunDlg::OnUpdateEditGlobalvariables(CCmdUI* pCmdUI) 
+void CFinalSunDlg::OnUpdateEditGlobalvariables(CCmdUI* pCmdUI)
 {
-	/*if(Map->GetIsoSize()==0) pCmdUI->Enable(FALSE); 
-	else pCmdUI->Enable(TRUE);*/
 }
 
 void CFinalSunDlg::OnUpdateEditHouses(CCmdUI* pCmdUI) 
@@ -3516,65 +3410,6 @@ void CFinalSunDlg::OnOptionsDisableautoshore()
 #endif
 
 }
-
-
-
-
-
-//DEL void CFinalSunDlg::OnNcPaint() 
-//DEL {
-//DEL 	CBitmap b;
-//DEL 	b.LoadBitmap(IDB_TEXTURE1);
-//DEL 	CDC dc;
-//DEL 	
-//DEL 
-//DEL 	CDC* target=GetWindowDC();
-//DEL 	dc.CreateCompatibleDC(target);
-//DEL 	dc.SelectObject(b);
-//DEL 
-//DEL 	BITMAP bd;
-//DEL 	b.GetBitmap(&bd);
-//DEL 
-//DEL 	RECT r;
-//DEL 	GetWindowRect(&r);
-//DEL 
-//DEL 	int count=(r.right-r.left)/bd.bmWidth+1;
-//DEL 	int i;
-//DEL 	for(i=0;i<count;i++)
-//DEL 	{
-//DEL 		target->BitBlt(i*bd.bmWidth,0,bd.bmWidth, bd.bmHeight-1, &dc, 0, 0, SRCCOPY);
-//DEL 	}
-//DEL 
-//DEL 	ReleaseDC(target);
-//DEL 	
-//DEL 	CMenu* m=GetMenu();
-//DEL 	if(m)
-//DEL 	{
-//DEL 		count=m->GetMenuItemCount();
-//DEL 		for(i=0;i<count;i++)
-//DEL 		{
-//DEL 			DRAWITEMSTRUCT t;
-//DEL 			t.CtlType=ODT_MENU;
-//DEL 			t.itemID=m->GetMenuItemID(i);
-//DEL 			t.itemAction=ODA_DRAWENTIRE;
-//DEL 			t.itemState=ODS_DEFAULT;
-//DEL 			t.hwndItem=(HWND)m->m_hMenu;
-//DEL 			t.rcItem=r;
-//DEL 			CString text;
-//DEL 			m->GetMenuString(t.itemID, text, MF_BYCOMMAND);
-//DEL 			t.itemData=(int)(LPCSTR)text;
-//DEL 
-//DEL 			m->DrawItem(&t);			
-//DEL 		}
-//DEL 	}
-//DEL 	
-//DEL 
-//DEL 	
-//DEL 	dc.DeleteDC();
-//DEL 	b.DeleteObject();
-//DEL 
-//DEL 	// Kein Aufruf von CDialog::OnNcPaint() für Zeichnungsnachrichten
-//DEL }
 
 void CFinalSunDlg::OnOptionsDisableautolat() 
 {

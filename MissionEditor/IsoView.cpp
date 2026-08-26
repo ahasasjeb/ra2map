@@ -3493,23 +3493,6 @@ void CIsoView::OnLButtonUp(UINT nFlags, CPoint point)
 							}
 						}
 					}
-
-					/*if(y==m_mapy)
-					{
-						for(i=m_mapx;i<=x;i++)
-						{
-							Map->SetOverlayAt(i+m_mapy*Map->GetIsoSize(), 0x3b);
-							Map->SetOverlayDataAt(i+m_mapy*Map->GetIsoSize(), 0x9);
-						}
-					}
-					else
-					{
-						for(i=m_mapy;i<=y;i++)
-						{
-							Map->SetOverlayAt(m_mapx+i*Map->GetIsoSize(), 0x3b);
-							Map->SetOverlayDataAt(m_mapx+i*Map->GetIsoSize(), 0x0);
-						}
-					}*/
 				}
 				else if (AD.data2 == 1 || AD.data2 == 3) // small bridge
 				{
@@ -4008,73 +3991,6 @@ void CIsoView::ReInitializeDDraw()
 
 	RedrawWindow();
 
-
-
-	/*
-
-	CString CommandLine;
-
-	if(res==IDYES)
-	{
-		CFileDialog dlg(FALSE, ".mpr", "noname.mpr", OFN_HIDEREADONLY | OFN_OVERWRITEPROMPT, "TS maps|*.mpr;*.map|TS multi maps|*.mpr|TS single maps|*.map|");
-		do
-		{
-
-
-			char cuPath[MAX_PATH];
-
-			GetCurrentDirectory(MAX_PATH, cuPath);
-			dlg.m_ofn.lpstrInitialDir=cuPath;
-
-			if(theApp.m_Options.TSExe.GetLength()) dlg.m_ofn.lpstrInitialDir=(char*)(LPCTSTR)theApp.m_Options.TSExe;
-
-		}while(dlg.DoModal()==IDCANCEL) ;
-
-		CommandLine=dlg.GetPathName();
-
-		((CFinalSunDlg*)theApp.m_pMainWnd)->SaveMap(dlg.GetPathName());
-	}
-
-	if(res==IDNO || res==IDYES)
-	{
-		PROCESS_INFORMATION pi;
-		STARTUPINFO si;
-		memset(&si, 0, sizeof(STARTUPINFO));
-		si.cb=sizeof(STARTUPINFO);
-
-		char myExe[MAX_PATH];
-		GetModuleFileName(NULL, myExe, MAX_PATH);
-
-		BOOL success=CreateProcess(myExe,
-			(LPTSTR)(LPCTSTR)CommandLine,
-			NULL,
-			NULL,
-			FALSE,
-			NORMAL_PRIORITY_CLASS,
-			NULL,
-			AppPath,
-			&si,
-			&pi);
-	}
-
-	theApp.m_pMainWnd->DestroyWindow();*/
-
-
-
-
-
-	/*CLoading load;
-	load.InitDirectDraw();
-	load.InitMixFiles();
-	load.InitPics();
-
-
-
-	RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW);
-
-	b_IsLoading=FALSE;*/
-
-
 }
 
 void CIsoView::OnChar(UINT nChar, UINT nRepCnt, UINT nFlags)
@@ -4416,11 +4332,6 @@ MapCoords CIsoView::GetMapCoordinates(const ProjectedCoords& projCoords, bool bA
 	return theApp.m_Options.bFlat ? Map->ToMapCoords(projCoords) : Map->ToMapCoords3d(projCoords, bAllowAccessBehindCliffs, ignoreHideFlagsAndOutside);
 }
 
-MapCoords CIsoView::GetMapCoordinatesFromRenderTargetCoordinates(const ProjectedCoords& projCoords, bool bAllowAccessBehindCliffs, bool ignoreHideFlagsAndOutside) const
-{
-	return GetMapCoordinates(projCoords + m_viewOffset, bAllowAccessBehindCliffs, ignoreHideFlagsAndOutside);
-}
-
 MapCoords CIsoView::GetMapCoordinatesFromClientCoordinates(const CPoint& clientPt, bool bAllowAccessBehindCliffs, bool ignoreHideFlagsAndOutside) const
 {
 	return GetMapCoordinates(GetProjectedCoordinatesFromClientCoordinates(clientPt), bAllowAccessBehindCliffs, ignoreHideFlagsAndOutside);
@@ -4454,28 +4365,6 @@ ProjectedCoords CIsoView::GetRenderTargetCoordinates(const MapCoords& mapCoords)
 ProjectedCoords CIsoView::GetRenderTargetCoordinates(const MapCoords& mapCoords, int mapZ) const
 {
 	return GetProjectedCoordinates(mapCoords, mapZ) - m_viewOffset;
-}
-
-CPoint CIsoView::GetClientCoordinates(const MapCoords& mapCoords) const
-{
-	RECT r;
-	GetWindowRect(&r);
-	const auto windowPos = ProjectedVec(r.left, r.top);
-	//const auto p = ScaleBackToFrontBuffer(GetRenderTargetCoordinates(mapCoords)) - windowPos;
-	const auto rtc = GetRenderTargetCoordinates(mapCoords);
-	const auto p = ((ProjectedCoords(rtc.x, rtc.y) - windowPos) / m_viewScale).convertT<std::int32_t>();
-	return CPoint(p.x, p.y);
-}
-
-CPoint CIsoView::GetClientCoordinatesFromWorld(const ProjectedCoords& projectedCoords) const
-{
-	RECT r;
-	GetWindowRect(&r);
-	const auto windowPos = ProjectedVec(r.left, r.top);
-	//const auto p = ScaleBackToFrontBuffer(GetRenderTargetCoordinates(mapCoords)) - windowPos;
-	const auto rtc = projectedCoords - m_viewOffset;
-	const auto p = ((ProjectedCoords(rtc.x, rtc.y)) / m_viewScale).convertT<std::int32_t>();
-	return CPoint(p.x, p.y);
 }
 
 ProjectedCoords CIsoView::ScaleBackToFrontBuffer(const ProjectedCoords& backBufferCoords) const
@@ -4758,32 +4647,6 @@ void __fastcall CIsoView::ChangeTileHeight(DWORD dwPos, DWORD dwNewHeight, BOOL 
 	if (dwY < m_funcRect.top) m_funcRect.top = dwY;
 	if (dwX > m_funcRect.right) m_funcRect.right = dwX;
 	if (dwY > m_funcRect.bottom) m_funcRect.bottom = dwY;
-
-	BOOL bCliffNext = FALSE;
-	/*if(bOnlyHeighten)
-	{
-		bCliffNext=FALSE;
-		/*int i;
-		int e;
-		for(i=-1;i<2;i++)
-		{
-			for(e=-1;e<2;e++)
-			{
-				int pos=dwPos+i+(e)*isosize;
-
-				FIELDDATA fd=*Map->GetFielddataAt(pos);
-				if(fd.wGround==0xFFFF) fd.wGround=0;
-
-				if((*tiledata)[fd.wGround].wTileSet==cliffset || fd.bCliffHack)
-				{
-					bCliffNext=TRUE;
-					break;
-				}
-			}
-			if(bCliffNext) break;
-		}*//*
-
-	}*/
 
 	Map->SetReserved(dwPos, 1);
 
@@ -6975,35 +6838,6 @@ void CIsoView::AutoLevel()
 	if (iCliffStart < 0)
 		return;
 
-	/*for (i = 0;i<*tiledata_count;i++)
-	{
-		if((*tiledata)[i].wTileSet==slopesetpiecesset)
-		{
-			iSlopeSetStart=i;
-			break;
-		}
-	}*/
-
-	/*int count=atoi(g_data.sections["SlopeSetPiecesDirections"].values["Count"]);
-	BYTE* bXLeftSearch=new(BYTE[count]);
-	BYTE* bXRightSearch=new(BYTE[count]);
-	BYTE* bYTopSearch=new(BYTE[count]);
-	BYTE* bYBottomSearch=new(BYTE[count]);
-
-	for(i=0;i<count;i++)
-	{
-		char c[50];
-		itoa(i,c,10);
-		CString s=*g_data.sections["SlopeSetPiecesDirections"].GetValue(i);
-		if(s=="Right_1") { bXLeftSearch=0; bXRightSearch=1; b
-		else if(s=="Left_1") bDirections[i]=1;
-		else if(s=="Bottom_1") bDirections[i]=2;
-		else if(s=="Top_1") bDirections[i]=3;
-		else if(s=="Right_2") bDirections[i]=4;
-		else if(s=="Left_2") bDirections[i]=5;
-		else if(s=="Bottom_2") bDirections[i]=6;
-		else if(s=="Top_2") bDirections[i]=7;
-	}*/
 
 	for (i = 0;i < mapsize;i++)
 	{
@@ -8794,12 +8628,6 @@ RECT CIsoView::GetScaledDisplayRect() const
 	r.right = r.right - (r.right - r.left) * (1.0f - m_viewScale.x);
 	r.bottom = r.bottom - (r.bottom - r.top) * (1.0f - m_viewScale.y);
 	return r; // RVO
-}
-
-void CIsoView::GetScroll(int& xscroll, int& yscroll) const
-{
-	xscroll = m_viewOffset.x;
-	yscroll = m_viewOffset.y;
 }
 
 void CIsoView::OnKillFocus(CWnd* pNewWnd)

@@ -220,7 +220,6 @@ public:
 
 // Implementation
 protected:
-	void PrepareBuildingTheaters();
 
 	// generated message handlers
 	//{{AFX_MSG(CLoading)

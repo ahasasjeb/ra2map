@@ -653,9 +653,6 @@
     </Image>
   </ItemGroup>
   <ItemGroup>
-    <Media Include="Res\uqeue.wav">
-      <Filter>Resource Files</Filter>
-    </Media>
     <Media Include="Res\uacbopen.wav">
       <Filter>Resource Files</Filter>
     </Media>

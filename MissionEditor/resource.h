@@ -82,7 +82,6 @@
 #define IDR_WAVE1                       275
 #define IDR_WAVE2                       276
 #define IDR_WAVE3                       277
-#define IDR_WAVE4                       278
 #define IDD_CHANGESIZE                  279
 #define IDD_AITRIGGERADD                280
 #define IDD_TERRAINPLACING              283

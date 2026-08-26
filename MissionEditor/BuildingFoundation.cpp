@@ -9,7 +9,6 @@
 namespace
 {
 	std::array<std::vector<BuildingFoundationCell>, TypeTableCapacity> Foundations;
-	std::array<bool, TypeTableCapacity> CustomFoundations{};
 
 	void AddRectangularFoundation(int buildingType, int width, int height)
 	{
@@ -28,7 +27,6 @@ void ClearBuildingFoundations()
 {
 	for (auto& cells : Foundations)
 		cells.clear();
-	CustomFoundations.fill(false);
 }
 
 void UpdateBuildingFoundation(int buildingType, const CString& artName)
@@ -38,7 +36,6 @@ void UpdateBuildingFoundation(int buildingType, const CString& artName)
 
 	auto& cells = Foundations[buildingType];
 	cells.clear();
-	CustomFoundations[buildingType] = false;
 
 	const CIniFileSection* section = art.GetSection(artName);
 	if (section == nullptr)
@@ -72,7 +69,6 @@ void UpdateBuildingFoundation(int buildingType, const CString& artName)
 	const int height = std::clamp(atoi(section->GetValueByName("Foundation.Y", CString("1"))), 1, 255);
 	buildinginfo[buildingType].w = static_cast<BYTE>(width);
 	buildinginfo[buildingType].h = static_cast<BYTE>(height);
-	CustomFoundations[buildingType] = true;
 
 	const int maximumEntries = width * height;
 	for (int i = 0; i < maximumEntries; ++i)
@@ -105,9 +101,4 @@ const std::vector<BuildingFoundationCell>& GetBuildingFoundation(int buildingTyp
 	if (buildingType < 0 || buildingType >= TypeTableCapacity || Foundations[buildingType].empty())
 		return Fallback;
 	return Foundations[buildingType];
-}
-
-bool IsCustomBuildingFoundation(int buildingType)
-{
-	return buildingType >= 0 && buildingType < TypeTableCapacity && CustomFoundations[buildingType];
 }

@@ -85,16 +85,6 @@ public:
 		return Vec2<CS, T1>(static_cast<T1>(x), static_cast<T1>(y));
 	}
 
-	inline Vec2<CS, float> inverted() const
-	{
-		return Vec2<CS, float>(1.0f / static_cast<float>(x), 1.0f / static_cast<float>(y));
-	}
-
-	inline Vec2 negated() const
-	{
-		return Vec2(-x, -y);
-	}
-
 public:
 	T x = 0;
 	T y = 0;

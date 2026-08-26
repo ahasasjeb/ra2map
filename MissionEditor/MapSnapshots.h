@@ -67,10 +67,6 @@ public:
 	// cursor (a redone branch) are discarded first.
 	void TakeSnapshot(FIELDDATA* fielddata, DWORD isoSize, BOOL bEraseFollowing, int left, int top, int right, int bottom);
 
-	bool CanUndo() const
-	{
-		return !m_snapshots.empty() && m_cursnapshot >= 0;
-	}
 	bool CanRedo() const
 	{
 		return static_cast<std::size_t>(m_cursnapshot + 1) < m_snapshots.size();

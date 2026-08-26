@@ -109,14 +109,7 @@ BEGIN_MESSAGE_MAP(CBasic, CDialog)
 END_MESSAGE_MAP()
 
 /////////////////////////////////////////////////////////////////////////////
-// Behandlungsroutinen für Nachrichten CBasic 
-
-//DEL void CBasic::OnOK() 
-//DEL {
-//DEL 	// TODO: Zusätzliche Prüfung hier einfügen
-//DEL 	
-//DEL 	CPropertyPage::OnOK();
-//DEL }
+// Behandlungsroutinen für Nachrichten CBasic
 
 void CBasic::UpdateDialog()
 {
