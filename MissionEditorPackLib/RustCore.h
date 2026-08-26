@@ -98,12 +98,26 @@ typedef int (*rs_lua_mutate_callback)(
 
 typedef void (*rs_lua_print_callback)(void* context, const char* text);
 
+// Invokes a whitelisted editor operation. Arguments are UTF-8 strings and
+// the optional response is UTF-8 text. The callback is invoked exactly once;
+// responses larger than dst_cap must be rejected instead of requiring a
+// sizing call because some operations display UI or stage a mutation.
+typedef int (*rs_lua_invoke_callback)(
+    void* context,
+    const char* operation,
+    const char* const* args,
+    size_t arg_count,
+    char* dst,
+    size_t dst_cap,
+    size_t* out_len);
+
 typedef struct rs_lua_callbacks
 {
     rs_lua_get_callback get;
     rs_lua_list_callback list;
     rs_lua_mutate_callback mutate;
     rs_lua_print_callback print;
+    rs_lua_invoke_callback invoke;
 } rs_lua_callbacks;
 
 int rs_lua_run(

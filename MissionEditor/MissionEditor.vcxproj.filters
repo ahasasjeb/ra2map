@@ -684,6 +684,12 @@
     <None Include="data\FinalSun\FSData.ini">
       <Filter>Data\FinalSun</Filter>
     </None>
+    <None Include="data\shared\Scripts\Lua Create Trigger.lua">
+      <Filter>Data\Shared</Filter>
+    </None>
+    <None Include="data\shared\Scripts\Lua Map API.md">
+      <Filter>Data\Shared</Filter>
+    </None>
     <None Include="data\shared\Scripts\Lua Map Summary.lua">
       <Filter>Data\Shared</Filter>
     </None>

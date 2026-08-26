@@ -29,6 +29,10 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <array>
+#include <cerrno>
+#include <cctype>
+#include <climits>
+#include <set>
 #include <vector>
 #include "variables.h"
 #include "functions.h"
@@ -553,6 +557,36 @@ namespace
 	constexpr int LUA_MAX_NAME_LENGTH=255;
 	constexpr int LUA_MAX_VALUE_LENGTH=1024 * 1024;
 	constexpr int LUA_MAX_REPORT_LENGTH=1024 * 1024;
+	constexpr size_t LUA_MAX_INVOKE_RESULT_LENGTH=4 * 1024 * 1024;
+
+	struct LuaTerrainRecord
+	{
+		CString type;
+		int x=0;
+		int y=0;
+		BOOL deleted=FALSE;
+	};
+
+	struct LuaTerrainOperation
+	{
+		enum class Type
+		{
+			Smooth,
+			SmoothTiberium,
+			CreateShore,
+			AutoLevel
+		};
+
+		Type type=Type::Smooth;
+		int values[5]{};
+	};
+
+	struct LuaCellEdit
+	{
+		FIELDDATA value;
+		BOOL terrainChanged=FALSE;
+		BOOL overlayChanged=FALSE;
+	};
 
 	struct LuaScriptContext
 	{
@@ -561,6 +595,25 @@ namespace
 		CString report;
 		BOOL changed=FALSE;
 		BOOL reportTruncated=FALSE;
+		int iniMutationCount=0;
+		std::set<CString> iniChangedSections;
+		std::map<DWORD, LuaCellEdit> cellEdits;
+		BOOL clearOverlay=FALSE;
+		BOOL terrainLoaded=FALSE;
+		BOOL terrainChanged=FALSE;
+		std::vector<LuaTerrainRecord> terrain;
+#ifdef SMUDGE_SUPP
+		BOOL smudgesLoaded=FALSE;
+		BOOL smudgesChanged=FALSE;
+		std::vector<LuaTerrainRecord> smudges;
+#endif
+		BOOL hasResize=FALSE;
+		BOOL theaterChanged=FALSE;
+		int resizeLeft=0;
+		int resizeTop=0;
+		int resizeWidth=0;
+		int resizeHeight=0;
+		std::vector<LuaTerrainOperation> terrainOperations;
 	};
 
 	BOOL IsValidLuaIniName(const CString& value, BOOL section)
@@ -576,7 +629,9 @@ namespace
 		if(section.CompareNoCase("IsoMapPack5")==0 ||
 			section.CompareNoCase("OverlayPack")==0 ||
 			section.CompareNoCase("OverlayDataPack")==0 ||
-			section.CompareNoCase("PreviewPack")==0)
+			section.CompareNoCase("PreviewPack")==0 ||
+			section.CompareNoCase("Terrain")==0 ||
+			section.CompareNoCase("Smudge")==0)
 			return TRUE;
 
 		if(section.CompareNoCase("Map")!=0) return FALSE;
@@ -701,6 +756,8 @@ namespace
 			{
 				values[key]=value;
 				context->changed=TRUE;
+				context->iniMutationCount++;
+				context->iniChangedSections.insert(section);
 			}
 			return 1;
 		}
@@ -713,7 +770,11 @@ namespace
 			if(IsProtectedLuaIniMutation(section, &key)) return 0;
 			const auto sectionIt=context->ini.sections.find(section);
 			if(sectionIt!=context->ini.sections.end() && sectionIt->second.values.erase(key)>0)
+			{
 				context->changed=TRUE;
+				context->iniMutationCount++;
+				context->iniChangedSections.insert(section);
+			}
 			return 1;
 		}
 
@@ -726,6 +787,8 @@ namespace
 				sectionIt->second.values.clear();
 				sectionIt->second.value_orig_pos.clear();
 				context->changed=TRUE;
+				context->iniMutationCount++;
+				context->iniChangedSections.insert(section);
 			}
 			return 1;
 		}
@@ -733,7 +796,12 @@ namespace
 		if(operation==LUA_MUTATE_REMOVE_SECTION)
 		{
 			if(IsProtectedLuaIniMutation(section, NULL)) return 0;
-			if(context->ini.sections.erase(section)>0) context->changed=TRUE;
+			if(context->ini.sections.erase(section)>0)
+			{
+				context->changed=TRUE;
+				context->iniMutationCount++;
+				context->iniChangedSections.insert(section);
+			}
 			return 1;
 		}
 
@@ -756,6 +824,817 @@ namespace
 		}
 		context->report += line;
 		context->report += "\r\n";
+	}
+
+	int WriteLuaInvokeResponse(const std::string& value, char* dst, size_t dstCap, size_t* outLength)
+	{
+		if(outLength==NULL) return 0;
+		*outLength=value.size();
+		if(value.size()>LUA_MAX_INVOKE_RESULT_LENGTH || dst==NULL || dstCap<value.size()) return 0;
+		if(!value.empty()) memcpy(dst, value.data(), value.size());
+		return 1;
+	}
+
+	int WriteLuaInvokeResponse(const CString& value, char* dst, size_t dstCap, size_t* outLength)
+	{
+		return WriteLuaInvokeResponse(std::string((LPCSTR)value, value.GetLength()), dst, dstCap, outLength);
+	}
+
+	int WriteLuaInvokeResponse(const char* value, char* dst, size_t dstCap, size_t* outLength)
+	{
+		return WriteLuaInvokeResponse(std::string(value == NULL ? "" : value), dst, dstCap, outLength);
+	}
+
+	int RejectLuaInvoke(const CString& message, char* dst, size_t dstCap, size_t* outLength)
+	{
+		WriteLuaInvokeResponse(message, dst, dstCap, outLength);
+		return 0;
+	}
+
+	BOOL ParseLuaInteger(const char* value, int& result, int minimum=INT_MIN, int maximum=INT_MAX)
+	{
+		if(value==NULL || *value==0) return FALSE;
+		char* end=NULL;
+		errno=0;
+		const long parsed=strtol(value, &end, 10);
+		if(errno==ERANGE || end==value || *end!=0 || parsed<minimum || parsed>maximum) return FALSE;
+		result=static_cast<int>(parsed);
+		return TRUE;
+	}
+
+	BOOL ValidateLuaCoordinates(LuaScriptContext* context, int x, int y, DWORD& position)
+	{
+		if(context->hasResize || context->theaterChanged) return FALSE;
+		const int isoSize=context->map->GetIsoSize();
+		if(x<0 || y<0 || x>=isoSize || y>=isoSize) return FALSE;
+		position=static_cast<DWORD>(x + y * isoSize);
+		return TRUE;
+	}
+
+	FIELDDATA GetLuaCellState(LuaScriptContext* context, DWORD position)
+	{
+		const auto staged=context->cellEdits.find(position);
+		if(staged!=context->cellEdits.end()) return staged->second.value;
+		FIELDDATA result=*context->map->GetFielddataAt(position);
+		if(context->clearOverlay)
+		{
+			result.overlay=0xFF;
+			result.overlaydata=0;
+		}
+		return result;
+	}
+
+	void StageLuaCellState(LuaScriptContext* context, DWORD position, const FIELDDATA& value,
+		BOOL terrainChanged, BOOL overlayChanged)
+	{
+		auto existing=context->cellEdits.find(position);
+		if(existing==context->cellEdits.end())
+		{
+			LuaCellEdit edit;
+			edit.value=value;
+			edit.terrainChanged=terrainChanged;
+			edit.overlayChanged=overlayChanged;
+			context->cellEdits[position]=edit;
+		}
+		else
+		{
+			existing->second.value=value;
+			existing->second.terrainChanged |= terrainChanged;
+			existing->second.overlayChanged |= overlayChanged;
+		}
+		context->changed=TRUE;
+	}
+
+	BOOL IsLuaGlobalIdUsed(const LuaScriptContext* context, const CString& id)
+	{
+		for(const char* sectionName : { "ScriptTypes", "TaskForces", "TeamTypes" })
+		{
+			const auto section=context->ini.sections.find(sectionName);
+			if(section==context->ini.sections.end()) continue;
+			for(const auto& value : section->second.values)
+				if(value.second==id) return TRUE;
+		}
+
+		for(const char* sectionName : { "Triggers", "Events", "Tags", "Actions", "AITriggerTypes" })
+		{
+			const auto section=context->ini.sections.find(sectionName);
+			if(section!=context->ini.sections.end() && section->second.values.find(id)!=section->second.values.end())
+				return TRUE;
+		}
+		return context->ini.sections.find(id)!=context->ini.sections.end();
+	}
+
+	CString GetFreeLuaGlobalId(const LuaScriptContext* context)
+	{
+		for(int number=1000000;number<9999999;number++)
+		{
+			CString id;
+			id.Format("0%d", number);
+			if(!IsLuaGlobalIdUsed(context, id)) return id;
+		}
+		return CString();
+	}
+
+	CString GetFreeLuaNumericId(const LuaScriptContext* context, const CString& sectionName)
+	{
+		const auto section=context->ini.sections.find(sectionName);
+		for(int number=0;number<INT_MAX;number++)
+		{
+			CString id;
+			id.Format("%d", number);
+			if(section==context->ini.sections.end() || section->second.values.find(id)==section->second.values.end())
+				return id;
+		}
+		return CString();
+	}
+
+	CIniFile* GetLuaGameIni(const CString& source)
+	{
+		if(source.CompareNoCase("rules")==0) return &rules;
+		if(source.CompareNoCase("art")==0) return &art;
+		if(source.CompareNoCase("ai")==0) return &ai;
+		if(source.CompareNoCase("sound")==0) return &sound;
+		if(source.CompareNoCase("tutorial")==0) return &tutorial;
+		if(source.CompareNoCase("eva")==0) return &eva;
+		if(source.CompareNoCase("theme")==0) return &theme;
+		if(source.CompareNoCase("data")==0) return &g_data;
+		if(source.CompareNoCase("language")==0) return &language;
+		if(source.CompareNoCase("tiles")==0) return tiles;
+		return NULL;
+	}
+
+	void AppendLuaListValue(std::string& result, const CString& value)
+	{
+		result.append((LPCSTR)value, value.GetLength());
+		result.push_back('\0');
+	}
+
+	void EnsureLuaTerrainLoaded(LuaScriptContext* context)
+	{
+		if(context->terrainLoaded) return;
+		context->terrainLoaded=TRUE;
+		for(DWORD index=0;index<context->map->GetTerrainCount();index++)
+		{
+			TERRAIN terrain{};
+			context->map->GetTerrainData(index, &terrain);
+			LuaTerrainRecord record;
+			record.type=terrain.type;
+			record.x=terrain.x;
+			record.y=terrain.y;
+			record.deleted=terrain.deleted;
+			context->terrain.push_back(record);
+		}
+	}
+
+#ifdef SMUDGE_SUPP
+	void EnsureLuaSmudgesLoaded(LuaScriptContext* context)
+	{
+		if(context->smudgesLoaded) return;
+		context->smudgesLoaded=TRUE;
+		for(DWORD index=0;index<context->map->GetSmudgeCount();index++)
+		{
+			SMUDGE smudge{};
+			context->map->GetSmudgeData(index, &smudge);
+			LuaTerrainRecord record;
+			record.type=smudge.type;
+			record.x=smudge.x;
+			record.y=smudge.y;
+			record.deleted=smudge.deleted;
+			context->smudges.push_back(record);
+		}
+	}
+#endif
+
+	int UserLuaInvoke(void* opaque, const char* operationText, const char* const* args,
+		size_t argCount, char* dst, size_t dstCap, size_t* outLength)
+	{
+		if(opaque==NULL || operationText==NULL || outLength==NULL) return 0;
+		LuaScriptContext* context=(LuaScriptContext*)opaque;
+		const CString operation=operationText;
+		auto requireArgs=[&](size_t count)->BOOL
+		{
+			return argCount==count && (count==0 || args!=NULL);
+		};
+		auto reject=[&](const char* message)->int
+		{
+			return RejectLuaInvoke(message, dst, dstCap, outLength);
+		};
+
+		if(operation=="capabilities")
+		{
+			std::string result;
+			for(const char* capability : {
+				"ini", "ids", "records", "triggers", "objects", "registries", "waypoints",
+				"cell_tags", "nodes", "tubes", "cells", "overlay", "terrain", "resize", "theater",
+				"game_data", "ui", "editor_view", "modules"
+#ifdef SMUDGE_SUPP
+				, "smudges"
+#endif
+			})
+			{
+				result += capability;
+				result.push_back('\0');
+			}
+			return WriteLuaInvokeResponse(result, dst, dstCap, outLength);
+		}
+
+		if(operation=="id.free_global")
+		{
+			if(!requireArgs(0)) return reject("id.free_global expects no arguments");
+			const CString id=GetFreeLuaGlobalId(context);
+			if(id.IsEmpty()) return reject("no global map ID is available");
+			return WriteLuaInvokeResponse(id, dst, dstCap, outLength);
+		}
+		if(operation=="id.free_numeric")
+		{
+			if(!requireArgs(1)) return reject("id.free_numeric expects a section name");
+			const CString id=GetFreeLuaNumericId(context, args[0]);
+			if(id.IsEmpty()) return reject("no numeric map ID is available");
+			return WriteLuaInvokeResponse(id, dst, dstCap, outLength);
+		}
+
+		if(operation=="module.load")
+		{
+			if(!requireArgs(1)) return reject("module.load expects a module name");
+			CString module=args[0];
+			if(module.IsEmpty() || module.GetLength()>200 || module.Find("..")>=0 ||
+				module[0]=='.' || module[module.GetLength() - 1]=='.')
+				return reject("invalid Lua module name");
+			for(int index=0;index<module.GetLength();index++)
+			{
+				const unsigned char value=static_cast<unsigned char>(module[index]);
+				if(!isalnum(value) && value!='_' && value!='-' && value!='.')
+					return reject("Lua module names may contain only letters, digits, dot, underscore, and hyphen");
+			}
+			module.Replace('.', '\\');
+			const CString path=(CString)AppPath + "\\Scripts\\lib\\" + module + ".lua";
+			CFile file;
+			if(!file.Open(path, CFile::modeRead | CFile::shareDenyNone)) return reject("Lua module was not found");
+			const ULONGLONG length=file.GetLength();
+			if(length>LUA_MAX_INVOKE_RESULT_LENGTH) return reject("Lua module is larger than 4 MiB");
+			std::string source(static_cast<size_t>(length), '\0');
+			if(length>0 && file.Read(source.data(), static_cast<UINT>(length))!=length) return reject("Lua module could not be read");
+			return WriteLuaInvokeResponse(source, dst, dstCap, outLength);
+		}
+
+		if(operation=="game.get")
+		{
+			if(!requireArgs(3)) return reject("game.get expects source, section, and key");
+			CIniFile* source=GetLuaGameIni(args[0]);
+			if(source==NULL) return reject("unknown game data source");
+			const auto section=source->sections.find(args[1]);
+			if(section==source->sections.end()) return WriteLuaInvokeResponse("$lua-missing$", dst, dstCap, outLength);
+			const auto value=section->second.values.find(args[2]);
+			if(value==section->second.values.end()) return WriteLuaInvokeResponse("$lua-missing$", dst, dstCap, outLength);
+			return WriteLuaInvokeResponse(value->second, dst, dstCap, outLength);
+		}
+		if(operation=="game.sections" || operation=="game.keys")
+		{
+			const size_t expected=operation=="game.sections" ? 1 : 2;
+			if(!requireArgs(expected)) return reject("invalid game data enumeration arguments");
+			CIniFile* source=GetLuaGameIni(args[0]);
+			if(source==NULL) return reject("unknown game data source");
+			std::string result;
+			if(operation=="game.sections")
+			{
+				for(const auto& section : source->sections) AppendLuaListValue(result, section.first);
+			}
+			else
+			{
+				const auto section=source->sections.find(args[1]);
+				if(section!=source->sections.end())
+					for(const auto& value : section->second.values) AppendLuaListValue(result, value.first);
+			}
+			return WriteLuaInvokeResponse(result, dst, dstCap, outLength);
+		}
+		if(operation=="game.csf.get")
+		{
+			if(!requireArgs(1)) return reject("game.csf.get expects a string ID");
+			CString value;
+			if(!TryGetCsfString(args[0], value)) return WriteLuaInvokeResponse("$lua-missing$", dst, dstCap, outLength);
+			return WriteLuaInvokeResponse(value, dst, dstCap, outLength);
+		}
+
+		if(operation=="map.metrics.money")
+		{
+			if(!requireArgs(0)) return reject("map.metrics.money expects no arguments");
+			CString value;
+			value.Format("%d", context->map->CalcMoneyOnMap());
+			return WriteLuaInvokeResponse(value, dst, dstCap, outLength);
+		}
+		if(operation=="map.metrics.power")
+		{
+			if(!requireArgs(1)) return reject("map.metrics.power expects a house ID");
+			CString value;
+			value.Format("%d", context->map->GetPowerOfHouse(args[0]));
+			return WriteLuaInvokeResponse(value, dst, dstCap, outLength);
+		}
+
+		if(operation=="ui.message" || operation=="ui.confirm")
+		{
+			if(!requireArgs(2)) return reject("message operations expect title and text");
+			const UINT flags=operation=="ui.confirm" ? MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2 : MB_OK | MB_ICONINFORMATION;
+			const int result=AfxGetMainWnd()->MessageBox(args[1], args[0], flags);
+			return WriteLuaInvokeResponse(operation=="ui.confirm" && result==IDYES ? "1" : "0", dst, dstCap, outLength);
+		}
+		if(operation=="ui.input")
+		{
+			if(!requireArgs(2)) return reject("ui.input expects title and prompt");
+			return WriteLuaInvokeResponse(InputBox(args[1], args[0]), dst, dstCap, outLength);
+		}
+		if(operation=="ui.select")
+		{
+			if(argCount<3 || args==NULL) return reject("ui.select expects a title, prompt, and options");
+			CComboUInputDlg dialog;
+			dialog.m_type=COMBOUINPUT_MANUAL;
+			dialog.m_Caption=args[1];
+			for(size_t index=2;index<argCount;index++) dialog.m_ManualStrings.push_back(args[index]);
+			dialog.DoModal();
+			return WriteLuaInvokeResponse(dialog.m_Combo, dst, dstCap, outLength);
+		}
+
+		if(operation=="map.cell.get" || operation=="map.cell.set" ||
+			operation=="map.overlay.get" || operation=="map.overlay.set")
+		{
+			const size_t expected=operation=="map.cell.set" ? 8 : operation=="map.overlay.set" ? 4 : 2;
+			if(!requireArgs(expected)) return reject("invalid cell operation arguments");
+			int x=0;
+			int y=0;
+			DWORD position=0;
+			if(!ParseLuaInteger(args[0], x) || !ParseLuaInteger(args[1], y) || !ValidateLuaCoordinates(context, x, y, position))
+				return reject("coordinates are outside the editable map buffer or cannot be mixed with resize");
+			FIELDDATA cell=GetLuaCellState(context, position);
+
+			if(operation=="map.cell.get")
+			{
+				CString value;
+				value.Format("%d,%d,%u,%u,%u,%u,%u,%u", x, y, cell.wGround, cell.bSubTile,
+					cell.bHeight, cell.bMapData, cell.bMapData2, cell.bRNDImage);
+				return WriteLuaInvokeResponse(value, dst, dstCap, outLength);
+			}
+			if(operation=="map.overlay.get")
+			{
+				CString value;
+				value.Format("%u,%u", cell.overlay, cell.overlaydata);
+				return WriteLuaInvokeResponse(value, dst, dstCap, outLength);
+			}
+
+			if(operation=="map.cell.set")
+			{
+				int tile=0;
+				int subtile=0;
+				int height=0;
+				int mapData=0;
+				int mapData2=0;
+				int randomImage=0;
+				if(!ParseLuaInteger(args[2], tile, 0, 65535) || tiledata_count==NULL || tile>=static_cast<int>(*tiledata_count) ||
+					!ParseLuaInteger(args[3], subtile, 0, 255) || subtile>=(*tiledata)[tile].wTileCount ||
+					!ParseLuaInteger(args[4], height, 0, MAXHEIGHT) || !ParseLuaInteger(args[5], mapData, 0, 65535) ||
+					!ParseLuaInteger(args[6], mapData2, 0, 255) || !ParseLuaInteger(args[7], randomImage, 0, 15))
+					return reject("invalid tile, subtile, height, or map-data value");
+				cell.wGround=static_cast<WORD>(tile);
+				cell.bSubTile=static_cast<BYTE>(subtile);
+				cell.bHeight=static_cast<BYTE>(height);
+				cell.bMapData=static_cast<WORD>(mapData);
+				cell.bMapData2=static_cast<BYTE>(mapData2);
+				cell.bRNDImage=static_cast<BYTE>(randomImage);
+			}
+			else
+			{
+				int overlay=0;
+				int overlayData=0;
+				if(!ParseLuaInteger(args[2], overlay, 0, 255) || !ParseLuaInteger(args[3], overlayData, 0, 255))
+					return reject("overlay values must be bytes");
+				cell.overlay=static_cast<BYTE>(overlay);
+				cell.overlaydata=static_cast<BYTE>(overlayData);
+			}
+			StageLuaCellState(context, position, cell,
+				operation=="map.cell.set", operation=="map.overlay.set");
+			return WriteLuaInvokeResponse("", dst, dstCap, outLength);
+		}
+
+		if(operation=="map.overlay.clear")
+		{
+			if(!requireArgs(0)) return reject("map.overlay.clear expects no arguments");
+			if(context->hasResize || context->theaterChanged)
+				return reject("overlay editing cannot be mixed with resize or theater changes in one run");
+			context->clearOverlay=TRUE;
+			for(auto& cell : context->cellEdits)
+			{
+				cell.second.value.overlay=0xFF;
+				cell.second.value.overlaydata=0;
+				cell.second.overlayChanged=FALSE;
+			}
+			context->changed=TRUE;
+			return WriteLuaInvokeResponse("", dst, dstCap, outLength);
+		}
+
+		if(operation=="map.resize")
+		{
+			if(!requireArgs(4)) return reject("map.resize expects left, top, width, and height");
+			if(context->theaterChanged) return reject("resize cannot be mixed with a theater change in one run");
+			if(!context->cellEdits.empty() || context->terrainChanged || !context->terrainOperations.empty())
+				return reject("resize cannot be mixed with cell or terrain editing in one run");
+			if(!ParseLuaInteger(args[0], context->resizeLeft, -200, 200) ||
+				!ParseLuaInteger(args[1], context->resizeTop, -200, 200) ||
+				!ParseLuaInteger(args[2], context->resizeWidth, 1, 200) ||
+				!ParseLuaInteger(args[3], context->resizeHeight, 1, 200))
+				return reject("map dimensions must be integers from 1 through 200");
+			context->hasResize=TRUE;
+			context->changed=TRUE;
+			return WriteLuaInvokeResponse("", dst, dstCap, outLength);
+		}
+
+		if(operation=="map.theater.set")
+		{
+			if(!requireArgs(1)) return reject("map.theater.set expects a theater ID");
+			if(context->hasResize || context->clearOverlay || !context->cellEdits.empty() ||
+				context->terrainChanged || !context->terrainOperations.empty()
+#ifdef SMUDGE_SUPP
+				|| context->smudgesChanged
+#endif
+				)
+				return reject("theater changes cannot be mixed with resize, cell, overlay, or terrain operations");
+			const CString theater=args[0];
+			const BOOL supported=theater==THEATER0 || theater==THEATER1 || theater==THEATER2 ||
+				theater==THEATER5 || (yuri_mode && (theater==THEATER3 || theater==THEATER4));
+			if(!supported) return reject("theater is unavailable in this editor variant");
+			auto& current=context->ini.sections["Map"].values["Theater"];
+			if(current==theater) return WriteLuaInvokeResponse("", dst, dstCap, outLength);
+			current=theater;
+			context->iniMutationCount++;
+			context->iniChangedSections.insert("Map");
+			context->theaterChanged=TRUE;
+			context->changed=TRUE;
+			return WriteLuaInvokeResponse("", dst, dstCap, outLength);
+		}
+
+		if(operation=="map.terrain.list" || operation=="map.terrain.create" || operation=="map.terrain.update" || operation=="map.terrain.delete")
+		{
+			if(context->hasResize || context->theaterChanged) return reject("terrain objects cannot be edited together with resize or theater changes");
+			EnsureLuaTerrainLoaded(context);
+			if(operation=="map.terrain.list")
+			{
+				if(!requireArgs(0)) return reject("map.terrain.list expects no arguments");
+				std::string result;
+				for(size_t index=0;index<context->terrain.size();index++)
+				{
+					const auto& terrain=context->terrain[index];
+					if(terrain.deleted) continue;
+					CString value;
+					value.Format("%zu,%s,%d,%d", index, (LPCSTR)terrain.type, terrain.x, terrain.y);
+					AppendLuaListValue(result, value);
+				}
+				return WriteLuaInvokeResponse(result, dst, dstCap, outLength);
+			}
+			if(operation=="map.terrain.create")
+			{
+				if(!requireArgs(3)) return reject("map.terrain.create expects type, x, and y");
+				int x=0;
+				int y=0;
+				DWORD position=0;
+				if(!context->map->IsTerrainType(args[0])) return reject("unknown terrain object type");
+				if(!ParseLuaInteger(args[1], x) || !ParseLuaInteger(args[2], y) || !ValidateLuaCoordinates(context, x, y, position))
+					return reject("terrain coordinates are outside the map buffer");
+				LuaTerrainRecord record;
+				record.type=args[0];
+				record.x=x;
+				record.y=y;
+				context->terrain.push_back(record);
+				context->terrainChanged=TRUE;
+				context->changed=TRUE;
+				CString index;
+				index.Format("%zu", context->terrain.size() - 1);
+				return WriteLuaInvokeResponse(index, dst, dstCap, outLength);
+			}
+			if(operation=="map.terrain.update")
+			{
+				if(!requireArgs(4)) return reject("map.terrain.update expects index, type, x, and y");
+				int index=0;
+				int x=0;
+				int y=0;
+				DWORD position=0;
+				if(!ParseLuaInteger(args[0], index, 0, static_cast<int>(context->terrain.size()) - 1) || context->terrain[index].deleted)
+					return reject("terrain index does not exist");
+				if(!context->map->IsTerrainType(args[1])) return reject("unknown terrain object type");
+				if(!ParseLuaInteger(args[2], x) || !ParseLuaInteger(args[3], y) || !ValidateLuaCoordinates(context, x, y, position))
+					return reject("terrain coordinates are outside the map buffer");
+				context->terrain[index].type=args[1];
+				context->terrain[index].x=x;
+				context->terrain[index].y=y;
+				context->terrainChanged=TRUE;
+				context->changed=TRUE;
+				return WriteLuaInvokeResponse("", dst, dstCap, outLength);
+			}
+
+			if(!requireArgs(1)) return reject("map.terrain.delete expects an index");
+			int index=0;
+			if(!ParseLuaInteger(args[0], index, 0, static_cast<int>(context->terrain.size()) - 1) || context->terrain[index].deleted)
+				return reject("terrain index does not exist");
+			context->terrain[index].deleted=TRUE;
+			context->terrainChanged=TRUE;
+			context->changed=TRUE;
+			return WriteLuaInvokeResponse("", dst, dstCap, outLength);
+		}
+
+		if(operation=="map.terrain.smooth" || operation=="map.terrain.smooth_tiberium" ||
+			operation=="map.terrain.create_shore" || operation=="map.terrain.auto_level")
+		{
+			if(context->hasResize || context->theaterChanged) return reject("terrain operations cannot be mixed with resize or theater changes");
+			LuaTerrainOperation pending;
+			if(operation=="map.terrain.auto_level")
+			{
+				if(!requireArgs(0)) return reject("map.terrain.auto_level expects no arguments");
+				pending.type=LuaTerrainOperation::Type::AutoLevel;
+			}
+			else if(operation=="map.terrain.create_shore")
+			{
+				if(!requireArgs(5)) return reject("map.terrain.create_shore expects a rectangle and Boolean");
+				pending.type=LuaTerrainOperation::Type::CreateShore;
+				for(int index=0;index<5;index++)
+					if(!ParseLuaInteger(args[index], pending.values[index])) return reject("shore arguments must be integers");
+			}
+			else
+			{
+				if(!requireArgs(2)) return reject("terrain smoothing expects x and y");
+				int x=0;
+				int y=0;
+				DWORD position=0;
+				if(!ParseLuaInteger(args[0], x) || !ParseLuaInteger(args[1], y) || !ValidateLuaCoordinates(context, x, y, position))
+					return reject("terrain coordinates are outside the map buffer");
+				pending.type=operation=="map.terrain.smooth" ? LuaTerrainOperation::Type::Smooth : LuaTerrainOperation::Type::SmoothTiberium;
+				pending.values[0]=x;
+				pending.values[1]=y;
+			}
+			context->terrainOperations.push_back(pending);
+			context->changed=TRUE;
+			return WriteLuaInvokeResponse("", dst, dstCap, outLength);
+		}
+
+#ifdef SMUDGE_SUPP
+		if(operation=="map.smudge.list" || operation=="map.smudge.create" || operation=="map.smudge.update" || operation=="map.smudge.delete")
+		{
+			if(context->hasResize || context->theaterChanged) return reject("smudges cannot be edited together with resize or theater changes");
+			EnsureLuaSmudgesLoaded(context);
+			if(operation=="map.smudge.list")
+			{
+				if(!requireArgs(0)) return reject("map.smudge.list expects no arguments");
+				std::string result;
+				for(size_t index=0;index<context->smudges.size();index++)
+				{
+					const auto& smudge=context->smudges[index];
+					if(smudge.deleted) continue;
+					CString value;
+					value.Format("%zu,%s,%d,%d", index, (LPCSTR)smudge.type, smudge.x, smudge.y);
+					AppendLuaListValue(result, value);
+				}
+				return WriteLuaInvokeResponse(result, dst, dstCap, outLength);
+			}
+			if(operation=="map.smudge.create")
+			{
+				if(!requireArgs(3)) return reject("map.smudge.create expects type, x, and y");
+				int x=0;
+				int y=0;
+				DWORD position=0;
+				if(!context->map->IsSmudgeType(args[0])) return reject("unknown smudge type");
+				if(!ParseLuaInteger(args[1], x) || !ParseLuaInteger(args[2], y) || !ValidateLuaCoordinates(context, x, y, position))
+					return reject("smudge coordinates are outside the map buffer");
+				LuaTerrainRecord record;
+				record.type=args[0];
+				record.x=x;
+				record.y=y;
+				context->smudges.push_back(record);
+				context->smudgesChanged=TRUE;
+				context->changed=TRUE;
+				CString index;
+				index.Format("%zu", context->smudges.size() - 1);
+				return WriteLuaInvokeResponse(index, dst, dstCap, outLength);
+			}
+			if(operation=="map.smudge.update")
+			{
+				if(!requireArgs(4)) return reject("map.smudge.update expects index, type, x, and y");
+				int index=0;
+				int x=0;
+				int y=0;
+				DWORD position=0;
+				if(!ParseLuaInteger(args[0], index, 0, static_cast<int>(context->smudges.size()) - 1) || context->smudges[index].deleted)
+					return reject("smudge index does not exist");
+				if(!context->map->IsSmudgeType(args[1])) return reject("unknown smudge type");
+				if(!ParseLuaInteger(args[2], x) || !ParseLuaInteger(args[3], y) || !ValidateLuaCoordinates(context, x, y, position))
+					return reject("smudge coordinates are outside the map buffer");
+				context->smudges[index].type=args[1];
+				context->smudges[index].x=x;
+				context->smudges[index].y=y;
+				context->smudgesChanged=TRUE;
+				context->changed=TRUE;
+				return WriteLuaInvokeResponse("", dst, dstCap, outLength);
+			}
+			if(!requireArgs(1)) return reject("map.smudge.delete expects an index");
+			int index=0;
+			if(!ParseLuaInteger(args[0], index, 0, static_cast<int>(context->smudges.size()) - 1) || context->smudges[index].deleted)
+				return reject("smudge index does not exist");
+			context->smudges[index].deleted=TRUE;
+			context->smudgesChanged=TRUE;
+			context->changed=TRUE;
+			return WriteLuaInvokeResponse("", dst, dstCap, outLength);
+		}
+#else
+		if(operation.Left(11)=="map.smudge.") return reject("smudges are unavailable in this editor variant");
+#endif
+
+		if(operation=="editor.focus" || operation=="editor.focus_waypoint" || operation=="editor.redraw")
+		{
+			CFinalSunDlg* mainWindow=(CFinalSunDlg*)theApp.GetMainWnd();
+			if(mainWindow==NULL || mainWindow->m_view.m_isoview==NULL) return reject("map view is unavailable");
+			if(operation=="editor.focus")
+			{
+				if(!requireArgs(2)) return reject("editor.focus expects x and y");
+				int x=0;
+				int y=0;
+				if(!ParseLuaInteger(args[0], x) || !ParseLuaInteger(args[1], y)) return reject("focus coordinates must be integers");
+				mainWindow->m_view.m_isoview->FocusMapCoordinate(x, y);
+			}
+			else if(operation=="editor.focus_waypoint")
+			{
+				if(!requireArgs(1)) return reject("editor.focus_waypoint expects an ID");
+				int id=0;
+				if(!ParseLuaInteger(args[0], id, 0)) return reject("waypoint ID must be non-negative");
+				mainWindow->m_view.m_isoview->FocusWaypoint(id);
+			}
+			else
+			{
+				if(!requireArgs(0)) return reject("editor.redraw expects no arguments");
+				mainWindow->m_view.m_isoview->RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW);
+			}
+			return WriteLuaInvokeResponse("", dst, dstCap, outLength);
+		}
+
+		return reject("unknown or unavailable editor operation");
+	}
+
+	CString BuildLuaChangeSummary(const LuaScriptContext& context)
+	{
+		CString summary;
+		CString line;
+		line.Format("INI mutations: %d\r\n", context.iniMutationCount);
+		summary += line;
+		if(!context.iniChangedSections.empty())
+		{
+			summary += "INI sections: ";
+			BOOL first=TRUE;
+			for(const auto& section : context.iniChangedSections)
+			{
+				if(!first) summary += ", ";
+				summary += section;
+				first=FALSE;
+			}
+			summary += "\r\n";
+		}
+		line.Format("Changed map cells: %zu\r\n", context.cellEdits.size());
+		summary += line;
+		if(context.clearOverlay) summary += "Overlay clear: yes\r\n";
+		if(context.terrainChanged)
+		{
+			line.Format("Terrain object state entries: %zu\r\n", context.terrain.size());
+			summary += line;
+		}
+#ifdef SMUDGE_SUPP
+		if(context.smudgesChanged)
+		{
+			line.Format("Smudge state entries: %zu\r\n", context.smudges.size());
+			summary += line;
+		}
+#endif
+		if(!context.terrainOperations.empty())
+		{
+			line.Format("Terrain operations: %zu\r\n", context.terrainOperations.size());
+			summary += line;
+		}
+		if(context.hasResize)
+		{
+			line.Format("Resize: left %d, top %d, size %d x %d\r\n",
+				context.resizeLeft, context.resizeTop, context.resizeWidth, context.resizeHeight);
+			summary += line;
+		}
+		if(context.theaterChanged)
+		{
+			summary += "Theater: ";
+			summary += context.ini.sections.at("Map").values.at("Theater");
+			summary += " (graphics reload after reopening the map)\r\n";
+		}
+		return summary;
+	}
+
+	BOOL ApplyLuaSpecialChanges(LuaScriptContext& context, CString& error)
+	{
+		if(context.hasResize)
+		{
+			context.map->ResizeMap(context.resizeLeft, context.resizeTop, context.resizeWidth, context.resizeHeight);
+		}
+
+		if(context.clearOverlay)
+		{
+			context.map->ClearOverlay();
+			context.map->ClearOverlayData();
+			const DWORD cellCount=context.map->GetIsoSize() * context.map->GetIsoSize();
+			for(DWORD position=0;position<cellCount;position++)
+			{
+				FIELDDATA* cell=context.map->GetFielddataAt(position);
+				cell->overlay=0xFF;
+				cell->overlaydata=0;
+			}
+		}
+
+		for(const auto& staged : context.cellEdits)
+		{
+			const DWORD position=staged.first;
+			const LuaCellEdit& edit=staged.second;
+			const FIELDDATA& source=edit.value;
+			if(edit.terrainChanged && !context.map->SetTileAt(position, source.wGround, source.bSubTile))
+			{
+				error="The editor rejected a staged tile change.";
+				return FALSE;
+			}
+			if(edit.terrainChanged)
+			{
+				context.map->SetHeightAt(position, source.bHeight);
+				FIELDDATA* target=context.map->GetFielddataAt(position);
+				target->bMapData=source.bMapData;
+				target->bMapData2=source.bMapData2;
+				target->bRNDImage=source.bRNDImage;
+			}
+			if(edit.overlayChanged)
+			{
+				context.map->SetOverlayAt(position, source.overlay);
+				context.map->SetOverlayDataAt(position, source.overlaydata);
+			}
+		}
+
+		if(context.terrainChanged)
+		{
+			const DWORD oldCount=context.map->GetTerrainCount();
+			for(DWORD index=oldCount;index>0;index--) context.map->DeleteTerrain(index - 1);
+			for(const auto& terrain : context.terrain)
+			{
+				if(terrain.deleted) continue;
+				const DWORD position=static_cast<DWORD>(terrain.x + terrain.y * context.map->GetIsoSize());
+				if(!context.map->AddTerrain(terrain.type, position))
+				{
+					error="The editor rejected a staged terrain object.";
+					return FALSE;
+				}
+			}
+		}
+
+#ifdef SMUDGE_SUPP
+		if(context.smudgesChanged)
+		{
+			const DWORD oldCount=context.map->GetSmudgeCount();
+			for(DWORD index=oldCount;index>0;index--) context.map->DeleteSmudge(index - 1);
+			for(const auto& record : context.smudges)
+			{
+				if(record.deleted) continue;
+				SMUDGE smudge{};
+				smudge.type=record.type;
+				smudge.x=record.x;
+				smudge.y=record.y;
+				smudge.deleted=0;
+				if(!context.map->AddSmudge(&smudge))
+				{
+					error="The editor rejected a staged smudge.";
+					return FALSE;
+				}
+			}
+		}
+#endif
+
+		CFinalSunDlg* mainWindow=(CFinalSunDlg*)theApp.GetMainWnd();
+		for(const auto& operation : context.terrainOperations)
+		{
+			const DWORD position=static_cast<DWORD>(operation.values[0] + operation.values[1] * context.map->GetIsoSize());
+			switch(operation.type)
+			{
+			case LuaTerrainOperation::Type::Smooth:
+				context.map->SmoothAllAt(position);
+				break;
+			case LuaTerrainOperation::Type::SmoothTiberium:
+				context.map->SmoothTiberium(position);
+				break;
+			case LuaTerrainOperation::Type::CreateShore:
+				context.map->CreateShore(operation.values[0], operation.values[1], operation.values[2],
+					operation.values[3], operation.values[4] != 0);
+				break;
+			case LuaTerrainOperation::Type::AutoLevel:
+				if(mainWindow==NULL || mainWindow->m_view.m_isoview==NULL)
+				{
+					error="The map view is unavailable for auto-level.";
+					return FALSE;
+				}
+				mainWindow->m_view.m_isoview->AutoLevel();
+				break;
+			}
+		}
+		return TRUE;
 	}
 }
 
@@ -792,11 +1671,11 @@ map.set("Basic", "Author", "Lua script")
 | `map.clear_section(section)` | Remove every key while keeping the section. |
 | `map.remove_section(section)` | Remove a complete section. |
 | `map.info` | Read-only-at-runtime metadata table described below. |
-| `map.api_version` | Lua map API version; currently `1`. |
+| `map.api_version` | Lua map API version; currently `2`. |
 
 `map.info` contains `width`, `height`, `iso_size`, `theater`, `multiplayer`, `waypoint_count`, `unit_count`, `infantry_count`, `structure_count`, `aircraft_count`, `terrain_count`, `player_count`, `house_count`, and `country_count`.
 
-The runtime loads Lua's base, table, string, math, and UTF-8 facilities. Filesystem, process, native module, package, dynamic-code, coroutine, and debug access are unavailable (`os`, `io`, `package`, `require`, `dofile`, `loadfile`, `load`, `coroutine`, and `debug`). Each run is limited to 64 MiB of Lua memory and 20 million VM instructions. INI section/key names and values must be single-line text; values are limited to 1 MiB. Packed map sections and the `[Map]` geometry/theater keys are read-only because changing them requires specialized resizing or theater-reload operations.
+The runtime loads Lua's base, table, string, math, and UTF-8 facilities. `require` safely loads Lua-only modules from `Scripts/lib`; arbitrary filesystem, process, native module, package, dynamic-code, coroutine, and debug access remain unavailable. Each run is limited to 64 MiB of Lua memory and 20 million VM instructions. The installed `Lua Map API.md` document describes the complete API version 2 surface.
 
 ## Legacy scripts (`.fscript`)
 
@@ -926,6 +1805,20 @@ Call `AllowDelete(reason)` first. The user must confirm before delete commands t
 
 static CString BuildUserScriptApiMarkdown()
 {
+	const CString path=(CString)AppPath + "\\Scripts\\Lua Map API.md";
+	CFile file;
+	if(file.Open(path, CFile::modeRead | CFile::shareDenyNone))
+	{
+		const ULONGLONG length=file.GetLength();
+		if(length>0 && length<=8 * 1024 * 1024)
+		{
+			CString markdown;
+			char* buffer=markdown.GetBufferSetLength(static_cast<int>(length));
+			const UINT read=file.Read(buffer, static_cast<UINT>(length));
+			markdown.ReleaseBuffer(static_cast<int>(read));
+			if(read==length) return markdown;
+		}
+	}
 	return CString(kUserScriptApiMarkdown);
 }
 
@@ -1213,6 +2106,7 @@ BOOL CUserScriptsDlg::RunLuaScript()
 	callbacks.list=UserLuaList;
 	callbacks.mutate=UserLuaMutate;
 	callbacks.print=UserLuaPrint;
+	callbacks.invoke=UserLuaInvoke;
 
 	std::array<char, 8192> error{};
 	const int result=rs_lua_run(
@@ -1237,16 +2131,46 @@ BOOL CUserScriptsDlg::RunLuaScript()
 
 	if(context.changed)
 	{
+		const CString changeSummary=BuildLuaChangeSummary(context);
+		CString confirmation=TranslateStringACP("The Lua script completed successfully and wants to apply its map changes. Apply them now?");
+		confirmation += "\r\n\r\n";
+		confirmation += changeSummary;
 		const int apply=MessageBox(
-			TranslateStringACP("The Lua script completed successfully and wants to apply its map changes. Apply them now?"),
+			confirmation,
 			TranslateStringACP("Apply Lua Script Changes"),
 			MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2);
 		if(apply==IDYES)
 		{
+			const BOOL hasFieldChanges=context.clearOverlay || !context.cellEdits.empty() ||
+				context.terrainChanged || !context.terrainOperations.empty()
+#ifdef SMUDGE_SUPP
+				|| context.smudgesChanged
+#endif
+				;
+			if(!context.hasResize && hasFieldChanges) Map->TakeSnapshot(TRUE);
 			Map->GetIniFile()=context.ini;
 			Map->UpdateIniFile(MAPDATA_UPDATE_FROM_INI);
+			CString applyError;
+			if(!ApplyLuaSpecialChanges(context, applyError))
+			{
+				context.report += TranslateStringACP("Lua map changes could not be fully applied:");
+				context.report += "\r\n";
+				context.report += applyError;
+				context.report += "\r\n";
+				m_Report=context.report;
+				SetDlgItemText(IDC_REPORT, m_Report);
+				MessageBox(applyError, TranslateStringACP("Lua Script Apply Error"), MB_ICONERROR);
+				return FALSE;
+			}
 			((CFinalSunDlg*)theApp.GetMainWnd())->UpdateDialogs(FALSE, FALSE);
 			context.report += TranslateStringACP("Lua map changes applied.");
+			context.report += "\r\n";
+			context.report += changeSummary;
+			if(context.theaterChanged)
+			{
+				context.report += TranslateStringACP("Reopen the map to reload graphics for the new theater.");
+				context.report += "\r\n";
+			}
 		}
 		else
 		{

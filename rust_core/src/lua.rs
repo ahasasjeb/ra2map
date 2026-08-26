@@ -18,6 +18,7 @@ const RS_ERR_PANIC: i32 = -3;
 const RS_ERR_LUA_RUNTIME: i32 = -20;
 
 const MEMORY_LIMIT: usize = 64 * 1024 * 1024;
+const INVOKE_RESULT_LIMIT: usize = 4 * 1024 * 1024;
 const HOOK_INTERVAL: u32 = 10_000;
 const INSTRUCTION_LIMIT: u64 = 20_000_000;
 
@@ -52,6 +53,16 @@ pub type RsLuaMutateCallback = unsafe extern "C" fn(
 
 pub type RsLuaPrintCallback = unsafe extern "C" fn(context: *mut c_void, text: *const c_char);
 
+pub type RsLuaInvokeCallback = unsafe extern "C" fn(
+    context: *mut c_void,
+    operation: *const c_char,
+    args: *const *const c_char,
+    arg_count: usize,
+    dst: *mut c_char,
+    dst_cap: usize,
+    out_len: *mut usize,
+) -> i32;
+
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct RsLuaCallbacks {
@@ -59,6 +70,7 @@ pub struct RsLuaCallbacks {
     pub list: Option<RsLuaListCallback>,
     pub mutate: Option<RsLuaMutateCallback>,
     pub print: Option<RsLuaPrintCallback>,
+    pub invoke: Option<RsLuaInvokeCallback>,
 }
 
 fn runtime_error(message: impl Into<String>) -> Error {
@@ -195,6 +207,61 @@ unsafe fn host_print(
     let text = c_string(text, "printed text")?;
     unsafe { print(context, text.as_ptr()) };
     Ok(())
+}
+
+unsafe fn host_invoke(
+    callbacks: RsLuaCallbacks,
+    context: *mut c_void,
+    operation: &str,
+    args: &[String],
+) -> mlua::Result<Vec<u8>> {
+    let invoke = callbacks
+        .invoke
+        .ok_or_else(|| runtime_error("editor operations are unavailable"))?;
+    let operation_name = operation.to_owned();
+    let response_limit = if operation == "module.load"
+        || operation.starts_with("game.")
+        || operation.ends_with(".list")
+    {
+        INVOKE_RESULT_LIMIT
+    } else {
+        64 * 1024
+    };
+    let operation = c_string(operation, "operation name")?;
+    let args = args
+        .iter()
+        .map(|value| c_string(value, "operation argument"))
+        .collect::<mlua::Result<Vec<_>>>()?;
+    let arg_ptrs = args.iter().map(|value| value.as_ptr()).collect::<Vec<_>>();
+    let mut response = vec![0u8; response_limit];
+    let mut response_len = 0usize;
+    let result = unsafe {
+        invoke(
+            context,
+            operation.as_ptr(),
+            arg_ptrs.as_ptr(),
+            arg_ptrs.len(),
+            response.as_mut_ptr().cast(),
+            response.len(),
+            &mut response_len,
+        )
+    };
+    if response_len > response.len() {
+        return Err(runtime_error(
+            "the editor returned an oversized operation result",
+        ));
+    }
+    response.truncate(response_len);
+    if result != 1 {
+        let detail = String::from_utf8_lossy(&response);
+        let message = if detail.is_empty() {
+            format!("the editor rejected operation '{operation_name}'")
+        } else {
+            detail.into_owned()
+        };
+        return Err(runtime_error(message));
+    }
+    Ok(response)
 }
 
 fn value_to_text(value: Value) -> mlua::Result<String> {
@@ -386,10 +453,78 @@ fn install_map_api(lua: &Lua, callbacks: RsLuaCallbacks, context: *mut c_void) -
         info.set("multiplayer", value == "1")?;
     }
     map.set("info", info)?;
-    map.set("api_version", 1)?;
+    map.set("api_version", 2)?;
 
     lua.globals().set("map", map)?;
     Ok(())
+}
+
+fn install_editor_api(
+    lua: &Lua,
+    callbacks: RsLuaCallbacks,
+    context: *mut c_void,
+) -> mlua::Result<()> {
+    let editor = lua.create_table()?;
+    editor.set(
+        "invoke",
+        lua.create_function(move |lua, values: Variadic<Value>| unsafe {
+            let Some(operation) = values.first() else {
+                return Err(runtime_error("editor.invoke requires an operation name"));
+            };
+            let operation = match operation {
+                Value::String(value) => value.to_string_lossy(),
+                _ => return Err(runtime_error("editor.invoke operation must be a string")),
+            };
+            let mut args = Vec::with_capacity(values.len().saturating_sub(1));
+            for value in values.into_iter().skip(1) {
+                args.push(value_to_text(value)?);
+            }
+            lua.create_string(host_invoke(callbacks, context, &operation, &args)?)
+        })?,
+    )?;
+    lua.globals().set("editor", editor)
+}
+
+fn install_safe_require(
+    lua: &Lua,
+    callbacks: RsLuaCallbacks,
+    context: *mut c_void,
+) -> mlua::Result<()> {
+    let loaded = lua.create_table()?;
+    lua.globals().set(
+        "require",
+        lua.create_function(move |lua, name: String| {
+            let existing: Value = loaded.get(name.clone())?;
+            if !matches!(existing, Value::Nil) {
+                return Ok(existing);
+            }
+
+            loaded.set(name.clone(), true)?;
+            let source = unsafe {
+                host_invoke(
+                    callbacks,
+                    context,
+                    "module.load",
+                    std::slice::from_ref(&name),
+                )?
+            };
+            let chunk_name = format!("@Scripts/lib/{}.lua", name.replace('.', "/"));
+            match lua.load(&source).set_name(&chunk_name).eval::<Value>() {
+                Ok(Value::Nil) => {
+                    loaded.set(name, true)?;
+                    Ok(Value::Boolean(true))
+                }
+                Ok(value) => {
+                    loaded.set(name, value.clone())?;
+                    Ok(value)
+                }
+                Err(error) => {
+                    loaded.set(name, Value::Nil)?;
+                    Err(error)
+                }
+            }
+        })?,
+    )
 }
 
 fn install_print(lua: &Lua, callbacks: RsLuaCallbacks, context: *mut c_void) -> mlua::Result<()> {
@@ -424,6 +559,11 @@ fn run_lua(
 
     install_map_api(&lua, callbacks, context)?;
     install_print(&lua, callbacks, context)?;
+    install_editor_api(&lua, callbacks, context)?;
+    install_safe_require(&lua, callbacks, context)?;
+    lua.load(include_str!("lua_api.lua"))
+        .set_name("@map_api")
+        .exec()?;
 
     let instruction_count = Rc::new(Cell::new(0u64));
     let hook_count = Rc::clone(&instruction_count);
@@ -479,6 +619,7 @@ pub unsafe extern "C" fn rs_lua_run(
         || unsafe { (*callbacks).get.is_none() }
         || unsafe { (*callbacks).list.is_none() }
         || unsafe { (*callbacks).mutate.is_none() }
+        || unsafe { (*callbacks).invoke.is_none() }
     {
         unsafe { write_error(error, error_cap, "invalid Lua host arguments") };
         return RS_ERR_BAD_ARG;
@@ -619,12 +760,49 @@ mod tests {
         host.output.push(unsafe { text(value) });
     }
 
+    unsafe extern "C" fn invoke(
+        context: *mut c_void,
+        operation: *const c_char,
+        _args: *const *const c_char,
+        _arg_count: usize,
+        dst: *mut c_char,
+        dst_cap: usize,
+        out_len: *mut usize,
+    ) -> i32 {
+        let operation = unsafe { CStr::from_ptr(operation) }.to_string_lossy();
+        let host = unsafe { &mut *(context as *mut Host) };
+        let response: Vec<u8> = match operation.as_ref() {
+            "capabilities" => b"test\0".to_vec(),
+            "id.free_global" => {
+                if host
+                    .sections
+                    .get("Triggers")
+                    .is_some_and(|values| !values.is_empty())
+                {
+                    b"01000001".to_vec()
+                } else {
+                    b"01000000".to_vec()
+                }
+            }
+            "id.free_numeric" => b"0".to_vec(),
+            "module.load" => b"return { answer = 42 }".to_vec(),
+            _ => Vec::new(),
+        };
+        unsafe { *out_len = response.len() };
+        if response.len() > dst_cap {
+            return 0;
+        }
+        unsafe { ptr::copy_nonoverlapping(response.as_ptr(), dst.cast(), response.len()) };
+        1
+    }
+
     fn callbacks() -> RsLuaCallbacks {
         RsLuaCallbacks {
             get: Some(get),
             list: Some(list),
             mutate: Some(mutate),
             print: Some(print),
+            invoke: Some(invoke),
         }
     }
 
@@ -642,7 +820,7 @@ mod tests {
         let script = br#"
             assert(_VERSION == "Lua 5.5")
             assert(os == nil and io == nil and package == nil and debug == nil)
-            assert(require == nil and dofile == nil and loadfile == nil and load == nil)
+            assert(type(require) == "function" and dofile == nil and loadfile == nil and load == nil)
             assert(map.get("Basic", "Name") == "Before")
             assert(map.has("Basic", "Name"))
             map.set("Basic", "Name", "After")
@@ -670,6 +848,54 @@ mod tests {
         assert_eq!(host.sections["Basic"]["Name"], "After");
         assert_eq!(host.sections["Basic"]["Number"], "42");
         assert_eq!(host.output, ["updated\tAfter"]);
+    }
+
+    #[test]
+    fn high_level_api_creates_objects_and_trigger_graphs() {
+        let mut host = Host::default();
+        let script = br#"
+            assert(map.api_version == 2)
+            local unit_id = map.objects.units.create {
+                house = "GDI", type = "MTNK", x = 12, y = 34
+            }
+            assert(unit_id == "0")
+            assert(map.objects.units.get(unit_id).type == "MTNK")
+            map.objects.units.move(unit_id, 20, 21)
+            assert(map.objects.units.get(unit_id).x == "20")
+
+            local trigger = map.triggers.create {
+                name = "Lua attack",
+                events = { { 13, 0, 10 } },
+                actions = { { 4, 0, 0, 0, 0, 0, 0, "A" } },
+                create_tag = true,
+            }
+            assert(trigger.id == "01000000")
+            assert(map.get("Events", trigger.id) == "1,13,0,10")
+            assert(#map.triggers.get(trigger.id).tags == 1)
+            map.triggers.update(trigger.id, { name = "Updated trigger" })
+            assert(map.triggers.get(trigger.id).name == "Updated trigger")
+            assert(require("sample").answer == 42)
+            assert(require("sample").answer == 42)
+        "#;
+        let name = CString::new("high_level.lua").unwrap();
+        let mut error = [0i8; 512];
+        let result = unsafe {
+            rs_lua_run(
+                script.as_ptr(),
+                script.len(),
+                name.as_ptr(),
+                &callbacks(),
+                (&mut host as *mut Host).cast(),
+                error.as_mut_ptr(),
+                error.len(),
+            )
+        };
+        assert_eq!(result, RS_OK, "{}", unsafe {
+            CStr::from_ptr(error.as_ptr()).to_string_lossy()
+        });
+        assert_eq!(host.sections["Units"]["0"].split(',').nth(1), Some("MTNK"));
+        assert_eq!(host.sections["Triggers"].len(), 1);
+        assert_eq!(host.sections["Tags"].len(), 1);
     }
 
     #[test]

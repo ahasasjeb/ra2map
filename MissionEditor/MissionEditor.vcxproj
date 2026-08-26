@@ -498,6 +498,8 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="data\FinalSun\FSData.ini" />
+    <None Include="data\shared\Scripts\Lua Create Trigger.lua" />
+    <None Include="data\shared\Scripts\Lua Map API.md" />
     <None Include="data\shared\Scripts\Lua Map Summary.lua" />
     <None Include="res\ra2_arrow.cur" />
     <None Include="res\ts_arrow.cur" />

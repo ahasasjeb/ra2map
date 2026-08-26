@@ -154,6 +154,18 @@ namespace
 	{
 		((LuaRuntimeTestHost*)context)->output=text;
 	}
+
+	int LuaRuntimeTestInvoke(void*, const char* operation, const char* const*, size_t,
+		char* dst, size_t dstCap, size_t* outLength)
+	{
+		if(strcmp(operation, "capabilities")!=0 || outLength==NULL) return 0;
+		const char capabilities[]="test\0";
+		const size_t length=sizeof(capabilities) - 1;
+		*outLength=length;
+		if(dst==NULL || dstCap<length) return 0;
+		memcpy(dst, capabilities, length);
+		return 1;
+	}
 }
 
 void Tests::test_lua_runtime()
@@ -164,8 +176,9 @@ void Tests::test_lua_runtime()
 	callbacks.list=LuaRuntimeTestList;
 	callbacks.mutate=LuaRuntimeTestMutate;
 	callbacks.print=LuaRuntimeTestPrint;
+	callbacks.invoke=LuaRuntimeTestInvoke;
 
-	const char* source="assert(_VERSION == 'Lua 5.5'); assert(os == nil and io == nil and require == nil); print('linked Lua 5.5')";
+	const char* source="assert(_VERSION == 'Lua 5.5'); assert(os == nil and io == nil and type(require) == 'function'); print('linked Lua 5.5')";
 	char error[512]{};
 	const int result=rs_lua_run(
 		(const unsigned char*)source,

@@ -339,6 +339,10 @@ public:
 	void GetWaypointData(DWORD dwIndex, CString* lpID, DWORD* lpdwPos) const;
 	BOOL IsGroundObjectAt(DWORD dwPos) const;
 	BOOL AddTerrain(LPCTSTR lpType, DWORD dwPos, int suggestedIndex = -1);
+	BOOL IsTerrainType(LPCTSTR lpType) const
+	{
+		return terrainid.find(lpType) != terrainid.end();
+	}
 	void GetTerrainData(DWORD dwIndex, CString* lpType) const;
 	void GetTerrainData(DWORD dwIndex, TERRAIN* lpTerrain) const;
 	BOOL AddUnit(UNIT* lpUnit, LPCTSTR lpType = NULL, LPCTSTR lpHouse = NULL, DWORD dwPos = 0, CString suggestedID = "");
@@ -753,8 +757,16 @@ public:
 
 #ifdef SMUDGE_SUPP
 	void UpdateSmudges(BOOL bSave = FALSE, int num = -1);
+	DWORD GetSmudgeCount() const
+	{
+		return static_cast<DWORD>(m_smudges.size());
+	}
 	void DeleteSmudge(DWORD dwIndex);
 	BOOL AddSmudge(SMUDGE* lpSmudge);
+	BOOL IsSmudgeType(LPCTSTR lpType) const
+	{
+		return smudgeid.find(lpType) != smudgeid.end();
+	}
 	void GetSmudgeData(DWORD dwIndex, SMUDGE* lpData) const;
 	void UpdateSmudgeInfo(LPCSTR lpSmudgeType = NULL);
 #endif

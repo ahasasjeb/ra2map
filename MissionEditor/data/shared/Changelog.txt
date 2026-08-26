@@ -24,3 +24,6 @@ New features for FinalSun and FinalAlert 2 (Yuri's Revenge)
 - Maps up to 400x112 (or 112x400) are now allowed.
 - Fixed minimap for non-quadratic maps.
 - Added complete Simplified Chinese (简体中文) UI language, including automatic selection on Chinese Windows.
+- Added a sandboxed Lua 5.5 map scripting editor with transactional apply confirmation.
+- Added Lua API version 2 for triggers, mission graphs, map objects, waypoints, houses, cells, overlays, terrain, resize, game databases, user input, view control, and safe Lua modules.
+- Added a complete Markdown Lua API reference and runnable trigger example.
