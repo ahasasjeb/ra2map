@@ -2231,6 +2231,13 @@ void CFinalSunDlg::OnOptionsShowminimap()
 	auto& minimap=m_view.m_minimap;
 	if(!::IsWindow(minimap.GetSafeHwnd())) return;
 
+	if(minimap.IsWindowVisible())
+	{
+		bMiniMapClosedByUser=TRUE;
+		minimap.ShowWindow(SW_HIDE);
+		return;
+	}
+
 	bMiniMapClosedByUser=FALSE;
 	if(minimap.IsIconic()) minimap.ShowWindow(SW_RESTORE);
 	minimap.UpdateView();
@@ -3352,8 +3359,8 @@ void CFinalSunDlg::OnUpdateMaptoolsChangemapheight(CCmdUI* pCmdUI)
 
 void CFinalSunDlg::OnUpdateOptionsShowminimap(CCmdUI* pCmdUI) 
 {
-	// TODO: Code für die Befehlsbehandlungsroutine zum Aktualisieren der Benutzeroberfläche hier einfügen
-	
+	const auto& minimap=m_view.m_minimap;
+	pCmdUI->SetCheck(::IsWindow(minimap.GetSafeHwnd()) && minimap.IsWindowVisible());
 }
 
 void CFinalSunDlg::OnUpdateTerrainCloak(CCmdUI* pCmdUI) 

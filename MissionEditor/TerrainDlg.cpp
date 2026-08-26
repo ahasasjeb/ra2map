@@ -101,16 +101,16 @@ void CTerrainDlg::PostNcDestroy()
 
 void CTerrainDlg::OnSelchangeTileset()
 {
-	//while(m_Type.DeleteString(0)!=CB_ERR);
+	CComboBox* TileSet = (CComboBox*)GetDlgItem(IDC_TILESET);
+	const int selection = TileSet->GetCurSel();
+	if (selection == CB_ERR)
+		return;
 
-	CString currentTileSet;
-	CComboBox* TileSet;
-	TileSet = (CComboBox*)GetDlgItem(IDC_TILESET);
-	TileSet->GetLBText(TileSet->GetCurSel(), currentTileSet);
+	const DWORD_PTR groupIndex = TileSet->GetItemData(selection);
+	if (groupIndex == CB_ERR || groupIndex >= m_tileSetGroups.size())
+		return;
 
-	TruncSpace(currentTileSet);
-
-	((CTileSetBrowserFrame*)GetParentFrame())->m_view.SetTileSet(atoi(currentTileSet));
+	((CTileSetBrowserFrame*)GetParentFrame())->m_view.SetTileSets(m_tileSetGroups[groupIndex]);
 }
 
 
@@ -132,9 +132,12 @@ void CTerrainDlg::Update()
 	TileSet = (CComboBox*)GetDlgItem(IDC_TILESET);
 
 	while (TileSet->DeleteString(0) != CB_ERR);
+	m_tileSetGroups.clear();
 
 	if (tiles)
 	{
+		std::vector<CString> groupKeys;
+		std::vector<CString> groupNames;
 		int i;
 		int tilecount = 0;
 		for (i = 0;i < 10000;i++)
@@ -154,12 +157,6 @@ void CTerrainDlg::Update()
 			if (atoi(tiles->sections[sec].values["TilesInSet"]) == 0)
 				continue;
 
-			CString string;
-			string = tset;
-			string += " (";
-			string += TranslateStringACP(tiles->sections[sec].values["SetName"]);
-			string += ")";
-
 			BOOL bForced = FALSE;
 			BOOL bForcedNot = FALSE;
 
@@ -178,19 +175,62 @@ void CTerrainDlg::Update()
 
 
 			if (bForced || (!bForcedNot && (*tiledata)[tilecount].bAllowToPlace && !(*tiledata)[tilecount].bMarbleMadness))
-				TileSet->SetItemData(TileSet->AddString(string), i);
+			{
+				CString groupKey = tiles->sections[sec].values["SetName"];
+				groupKey.Trim();
+				CString groupName = TranslateStringACP(groupKey);
+				groupName.Trim();
+
+				size_t groupIndex = 0;
+				for (; groupIndex < groupKeys.size(); ++groupIndex)
+				{
+					if (groupKeys[groupIndex].CompareNoCase(groupKey) == 0)
+						break;
+				}
+
+				if (groupIndex == groupKeys.size())
+				{
+					groupKeys.push_back(groupKey);
+					groupNames.push_back(groupName);
+					m_tileSetGroups.emplace_back();
+				}
+				m_tileSetGroups[groupIndex].push_back(i);
+			}
 
 			tilecount += atoi(tiles->sections[sec].values["TilesInSet"]);
 		}
 
-		TileSet->SetCurSel(0);
-		OnSelchangeTileset();
+		for (size_t groupIndex = 0; groupIndex < m_tileSetGroups.size(); ++groupIndex)
+		{
+			CString caption;
+			caption.Format("%04lu (%s", m_tileSetGroups[groupIndex].front(), (LPCTSTR)groupNames[groupIndex]);
+			if (m_tileSetGroups[groupIndex].size() > 1)
+			{
+				CString count;
+				count.Format(" ×%d", static_cast<int>(m_tileSetGroups[groupIndex].size()));
+				caption += count;
+			}
+			caption += ")";
+
+			const int comboIndex = TileSet->AddString(caption);
+			if (comboIndex != CB_ERR && comboIndex != CB_ERRSPACE)
+				TileSet->SetItemData(comboIndex, groupIndex);
+		}
+
+		if (TileSet->GetCount() > 0)
+		{
+			TileSet->SetCurSel(0);
+			OnSelchangeTileset();
+		}
 	}
 
 	CComboBox* Overlays;
 	Overlays = (CComboBox*)GetDlgItem(IDC_OVERLAY);
 
 	while (Overlays->DeleteString(0) != CB_ERR);
+	m_overlayGroups.clear();
+	std::vector<CString> overlayGroupKeys;
+	std::vector<CString> overlayGroupNames;
 
 	int i;
 
@@ -220,13 +260,44 @@ void CTerrainDlg::Update()
 
 				if (bListIt)
 				{
-					CString str;
-					str = TranslateStringACP(rules.sections[(*rules.sections["OverlayTypes"].GetValue(i))].values["Name"]);
-					Overlays->SetItemData(Overlays->AddString(str), e);
+					CString groupKey = rules.sections[id].values["Name"];
+					groupKey.Trim();
+					CString groupName = TranslateStringACP(groupKey);
+					groupName.Trim();
+
+					size_t groupIndex = 0;
+					for (; groupIndex < overlayGroupKeys.size(); ++groupIndex)
+					{
+						if (overlayGroupKeys[groupIndex].CompareNoCase(groupKey) == 0)
+							break;
+					}
+
+					if (groupIndex == overlayGroupKeys.size())
+					{
+						overlayGroupKeys.push_back(groupKey);
+						overlayGroupNames.push_back(groupName);
+						m_overlayGroups.emplace_back();
+					}
+					m_overlayGroups[groupIndex].push_back(e);
 				}
 			}
 			e++;
 		}
+	}
+
+	for (size_t groupIndex = 0; groupIndex < m_overlayGroups.size(); ++groupIndex)
+	{
+		CString caption = overlayGroupNames[groupIndex];
+		if (m_overlayGroups[groupIndex].size() > 1)
+		{
+			CString count;
+			count.Format(" ×%d", static_cast<int>(m_overlayGroups[groupIndex].size()));
+			caption += count;
+		}
+
+		const int comboIndex = Overlays->AddString(caption);
+		if (comboIndex != CB_ERR && comboIndex != CB_ERRSPACE)
+			Overlays->SetItemData(comboIndex, groupIndex);
 	}
 }
 
@@ -276,7 +347,9 @@ void CTerrainDlg::OnSelchangeOverlay()
 
 	if (n < 0) return;
 
-	int sel = Overlay->GetItemData(n);
+	const DWORD_PTR groupIndex = Overlay->GetItemData(n);
+	if (groupIndex == CB_ERR || groupIndex >= m_overlayGroups.size())
+		return;
 
-	((CTileSetBrowserFrame*)GetParentFrame())->m_view.SetOverlay(sel);
+	((CTileSetBrowserFrame*)GetParentFrame())->m_view.SetOverlays(m_overlayGroups[groupIndex]);
 }

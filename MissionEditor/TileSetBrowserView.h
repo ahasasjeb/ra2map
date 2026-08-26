@@ -57,12 +57,14 @@ public:
 // Implementierung
 public:
 	void SetOverlay(DWORD dwID);
+	void SetOverlays(const std::vector<DWORD>& overlayTypes);
 	int m_currentOverlay;
 	int GetAddedHeight(DWORD dwID);
 	int m_bottom_needed;
 	void DrawIt();
 	std::vector<CComPtr<IDirectDrawSurface4>> m_lpDDS;
 	void SetTileSet(DWORD dwTileSet, BOOL bOnlyRedraw=FALSE);
+	void SetTileSets(const std::vector<DWORD>& tileSets, BOOL bOnlyRedraw=FALSE);
 	DWORD GetTileID(DWORD dwTileSet, DWORD dwType);
 	int m_currentTileSet = 0;
 	// Rebuilds the cached tile surfaces after the DirectDraw objects were
@@ -82,11 +84,20 @@ public:
 	//}}AFX_MSG
 	DECLARE_MESSAGE_MAP()
 protected:
+	struct OverlayImageRef
+	{
+		DWORD overlayType;
+		DWORD imageIndex;
+	};
+
 	int m_CurrentMode;
 	LPDIRECTDRAWSURFACE4 RenderTile(DWORD dwID);
 	int m_tilecount = 0;
 	int m_tile_height = 0;
 	int m_tile_width = 0;
+	std::vector<DWORD> m_currentTileSets;
+	std::vector<DWORD> m_currentTileIds;
+	std::vector<OverlayImageRef> m_currentOverlayImages;
 };
 
 /////////////////////////////////////////////////////////////////////////////

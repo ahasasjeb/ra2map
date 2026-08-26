@@ -21,6 +21,8 @@
 #if !defined(AFX_TERRAINDLG_H__9746CA41_703A_11D4_9C87_EB588B546B1A__INCLUDED_)
 #define AFX_TERRAINDLG_H__9746CA41_703A_11D4_9C87_EB588B546B1A__INCLUDED_
 
+#include <vector>
+
 #if _MSC_VER > 1000
 #pragma once
 #endif // _MSC_VER > 1000
@@ -57,6 +59,8 @@ public:
 
 // Implementierung
 protected:
+	std::vector<std::vector<DWORD>> m_tileSetGroups;
+	std::vector<std::vector<DWORD>> m_overlayGroups;
 
 	// Generierte Nachrichtenzuordnungsfunktionen
 	//{{AFX_MSG(CTerrainDlg)

@@ -6,10 +6,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def tab(key_left: str, key_right: str, val_left: str, val_right: str) -> str:
-    return f"{key_left}\t{key_right}={val_left}\t{val_right}"
-
-
 CHINESE_HEADER = """
 [ChineseHeader]
 Name=简体中文
@@ -463,13 +459,13 @@ Auto level using cliffs=按悬崖自动调整地面高度（AutoLevel）
 FinalSun Homepage=FinalSun 主页
 FinalSun support forum=FinalSun 支持论坛
 """ + "\n".join([
-    tab("Manual", "F1", "说明书", "F1"),
-    tab("Undo", "Ctrl+Z", "撤销", "Ctrl+Z"),
-    tab("Redo", "Ctrl+Y", "重做", "Ctrl+Y"),
-    tab("Copy", "Ctrl+C", "复制", "Ctrl+C"),
-    tab("Paste", "Ctrl+V", "粘贴", "Ctrl+V"),
-    tab("Disable AutoShore", "CTRL-A", "禁用自动海岸", "CTRL-A"),
-    tab("Disable AutoLat", "CTRL-L", "禁用自动 LAT", "CTRL-L"),
+    "Manual=说明书",
+    "Undo=撤销",
+    "Redo=重做",
+    "Copy=复制",
+    "Paste=粘贴",
+    "Disable AutoShore=禁用自动海岸",
+    "Disable AutoLat=禁用自动 LAT",
 ]) + r"""
 Event=事件
 Action=动作
@@ -523,7 +519,71 @@ Copy whole map=复制整张地图
 Paste centered=居中粘贴
 Local variables (Locals)=局部变量（Locals）
 Search Waypoint=查找路径点
+Navigate to coordinate=定位到坐标
 Tool Scripts=工具脚本
+Clear Rock A=空地岩石 A
+Clear Rock B=空地岩石 B
+Clear Rock C=空地岩石 C
+Clear Rock D=空地岩石 D
+Clear Rock E=空地岩石 E
+Concrete Low Bridge=混凝土低桥
+Palette=调色板
+Pavement Cliff Box=路面悬崖方块
+Sand Rock A=沙地岩石 A
+Sand Rock B=沙地岩石 B
+Sand Rock C=沙地岩石 C
+Sand Rock D=沙地岩石 D
+Sand Rock E=沙地岩石 E
+Soviet Fortress Wall=苏军要塞墙
+Water Crate=水上补给箱
+Generic Sandbags=通用沙袋
+Generic Black Fence=通用黑色栅栏
+Generic Prison Fence=通用监狱围栏
+Generic White Fence=通用白色栅栏
+Generic Oil Pipe=通用输油管
+Generic Barbed Wire=通用铁丝网
+Generic Concrete Wall=通用混凝土墙
+Generic Brick Fence=通用砖墙
+Generic Stone Wall=通用石墙
+Black fence=黑色栅栏
+Prison camp fence=战俘营围栏
+White fence=白色栅栏
+Ore=矿石
+Small bridge   at the ground=地面小桥
+Big bridge   in the air=高架大桥
+High wood bridge=高架木桥
+Small concrete bridge=小型混凝土桥
+Crate=补给箱
+Drum=油桶
+Goodie Crate=奖励箱
+Large Rock A=大型岩石 A
+Large Rock B=大型岩石 B
+Large Rock C=大型岩石 C
+Large Rock D=大型岩石 D
+Large Rock E=大型岩石 E
+Large Rock F=大型岩石 F
+Allied Wall=盟军围墙
+Allied Concrete Wall=盟军混凝土墙
+Block Base=阻挡建造
+Block Base and Movement=阻挡建造与通行
+Bridge Bottom-Left to Top-Right=桥梁（左下至右上）
+Bridge Top-Left to Bottom-Right=桥梁（左上至右下）
+Concrete Low Bridge End 1=混凝土低桥桥头 1
+Concrete Low Bridge End 2=混凝土低桥桥头 2
+Concrete Low Bridge End 3=混凝土低桥桥头 3
+Concrete Low Bridge End 4=混凝土低桥桥头 4
+Yuri Wall=尤里围墙
+Epsilon Citadel Wall=厄普西隆城堡墙
+Foehn Bastion Wall=焚风堡垒墙
+Kremlin Wall=克里姆林宫围墙
+Kremlin Walls=克里姆林宫围墙
+Low Bridge=低桥
+A Black Tile A=黑色图块 A
+A Black Tile B=黑色图块 B
+Destructible Rocks Base=可摧毁岩石基底
+Soviet Wall=苏军围墙
+Wood Bridge Bottom-Left to Top-Right=木桥（左下至右上）
+Wood Bridge Top-Left to Bottom-Right=木桥（左上至右下）
 Options=选项
 Settings=设置
 Show map view=显示地图视图
