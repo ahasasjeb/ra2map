@@ -3198,7 +3198,6 @@ BEGIN
         MENUITEM "Copy whole map",              ID_EDIT_COPYWHOLEMAP
         MENUITEM "Paste\tCtrl+V",               ID_EDIT_PASTE
         MENUITEM "Paste centered",              ID_EDIT_PASTEWHOLEMAP
-        MENUITEM "Multi-selection",             ID_EDIT_MULTISELECT
         MENUITEM "Property brush",              ID_EDIT_PROPERTYBRUSH
         MENUITEM SEPARATOR
         MENUITEM "Map",                         ID_EDIT_MAP
@@ -3309,7 +3308,6 @@ BEGIN
         MENUITEM "Copy whole map",              ID_EDIT_COPYWHOLEMAP
         MENUITEM "Paste\tCtrl+V",               ID_EDIT_PASTE
         MENUITEM "Paste centered",              ID_EDIT_PASTEWHOLEMAP
-        MENUITEM "Multi-selection",             ID_EDIT_MULTISELECT
         MENUITEM "Property brush",              ID_EDIT_PROPERTYBRUSH
         MENUITEM SEPARATOR
         MENUITEM "Map",                         ID_EDIT_MAP

@@ -2228,8 +2228,14 @@ void CFinalSunDlg::OnOptionsSimpleview()
 
 void CFinalSunDlg::OnOptionsShowminimap() 
 {
+	auto& minimap=m_view.m_minimap;
+	if(!::IsWindow(minimap.GetSafeHwnd())) return;
+
 	bMiniMapClosedByUser=FALSE;
-	this->m_view.m_minimap.UpdateView();
+	if(minimap.IsIconic()) minimap.ShowWindow(SW_RESTORE);
+	minimap.UpdateView();
+	minimap.ShowWindow(SW_SHOW);
+	minimap.RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW);
 }
 
 void CFinalSunDlg::HideAllDialogs()
