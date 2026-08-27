@@ -174,6 +174,7 @@ CMapData::CMapData()
 	tiledata = NULL;
 	m_mfd.reset();
 	dwIsoMapSize = 0;
+	m_rulesSectionNamesValid = FALSE;
 
 	// the minimap DIB initializes itself (CMapMinimap)
 }
@@ -532,6 +533,7 @@ BOOL CMapData::LoadMap(const std::string& file)
 
 	m_mapfile.Clear();
 	m_mapfile.sections.swap(loadedMap.sections);
+	m_rulesSectionNamesValid = FALSE;
 
 	// any .mpr is a multi map. Previous FinalAlert/FinalSun versions did not set this value correctly->
 	char lowc[MAX_PATH] = { 0 };
@@ -3170,61 +3172,79 @@ DWORD CMapData::GetWaypointCount() const
 	return section ? section->values.size() : 0;
 }
 
+// Collects the section names that mark rules data: the values of the type
+// lists embedded in the map file and every name referenced by a Projectile=
+// entry. IsRulesSection() used to rescan the whole map file for these on
+// every query, which made saving maps with many sections quadratic (and the
+// per-index section accessors turned it cubic).
+void CMapData::BuildRulesSectionCache()
+{
+	m_rulesSectionNames.clear();
+
+	static const char* const typeLists[] =
+	{
+		"InfantryTypes", "VehicleTypes", "AircraftTypes", "BuildingTypes", "TerrainTypes"
+	};
+	for (const char* const typeList : typeLists)
+	{
+		const auto types = m_mapfile.sections.find(typeList);
+		if (types == m_mapfile.sections.end()) continue;
+		for (const auto& type : types->second.values)
+			m_rulesSectionNames.insert(type.second);
+	}
+
+	for (const auto& section : m_mapfile.sections)
+	{
+		if (section.first == "IsoMapPack5" || section.first == "OverlayPack" || section.first == "OverlayDataPack")
+			continue;
+		const auto projectile = section.second.values.find("Projectile");
+		if (projectile != section.second.values.end())
+			m_rulesSectionNames.insert(projectile->second);
+	}
+
+	m_rulesSectionNamesValid = TRUE;
+}
+
 BOOL CMapData::IsRulesSection(LPCTSTR lpSection)
 {
-	int i;
-	for (i = 0;i < GetHousesCount();i++)
-		if (GetHouseID(i) == lpSection) return FALSE;
+	// house IDs: walk the house list directly. The previous loop called
+	// GetHouseID() per index, which re-located the section and stepped
+	// through its value map on every iteration.
+	const auto mapHouses = m_mapfile.sections.find(MAPHOUSES);
+	if (mapHouses != m_mapfile.sections.end() && !mapHouses->second.values.empty())
+	{
+		for (const auto& house : mapHouses->second.values)
+			if (house.second == lpSection) return FALSE;
+	}
+	else
+	{
+		const auto rulesHouses = rules.sections.find(HOUSES);
+		if (rulesHouses != rules.sections.end())
+			for (const auto& house : rulesHouses->second.values)
+				if (house.second == lpSection) return FALSE;
+	}
 
 	if (strcmp(lpSection, HOUSES) == NULL) return FALSE;
 	if (strcmp(lpSection, "VariableNames") == NULL) return FALSE;
 
 	if (rules.sections.find(lpSection) != rules.sections.end()) return TRUE;
 
+	if (!m_rulesSectionNamesValid) BuildRulesSectionCache();
+	if (m_rulesSectionNames.count(lpSection) > 0) return TRUE;
 
-	if (m_mapfile.sections.find("InfantryTypes") != m_mapfile.sections.end())
-		if (m_mapfile.sections["InfantryTypes"].FindValue(lpSection) >= 0)
-			return TRUE;
-
-	if (m_mapfile.sections.find("VehicleTypes") != m_mapfile.sections.end())
-		if (m_mapfile.sections["VehicleTypes"].FindValue(lpSection) >= 0)
-			return TRUE;
-
-	if (m_mapfile.sections.find("AircraftTypes") != m_mapfile.sections.end())
-		if (m_mapfile.sections["AircraftTypes"].FindValue(lpSection) >= 0)
-			return TRUE;
-
-	if (m_mapfile.sections.find("BuildingTypes") != m_mapfile.sections.end())
-		if (m_mapfile.sections["BuildingTypes"].FindValue(lpSection) >= 0)
-			return TRUE;
-
-	if (m_mapfile.sections.find("TerrainTypes") != m_mapfile.sections.end())
-		if (m_mapfile.sections["TerrainTypes"].FindValue(lpSection) >= 0)
-			return TRUE;
-
-	if ((CString)"IsoMapPack5" != lpSection && (CString)"OverlayPack" != lpSection && (CString)"OverlayDataPack" != lpSection && m_mapfile.sections.find(lpSection) != m_mapfile.sections.end())
+	if ((CString)"IsoMapPack5" != lpSection && (CString)"OverlayPack" != lpSection && (CString)"OverlayDataPack" != lpSection)
 	{
-		CIniFileSection& sec = m_mapfile.sections[lpSection];
-		if (sec.FindName("ROF") > -1 && sec.FindName("Range") > -1 &&
-			sec.FindName("Damage") > -1 && sec.FindName("Warhead") > -1)
-			return TRUE; // a weapon
-
-		if (sec.FindName("Spread") > -1 && sec.FindName("Range") > -1 &&
-			sec.FindName("Damage") > -1 && sec.FindName("Warhead") > -1)
-			return TRUE; // a warhead
-
-		// check for projectile/warhead
-		for (i = 0;i < m_mapfile.sections.size();i++)
+		const auto own = m_mapfile.sections.find(lpSection);
+		if (own != m_mapfile.sections.end())
 		{
-			CString name = *m_mapfile.GetSectionName(i);
-			if ((CString)"IsoMapPack5" != name && (CString)"OverlayPack" != name && (CString)"OverlayDataPack" != name && (m_mapfile.GetSection(i)->FindName("Projectile") > -1 || m_mapfile.GetSection(i)->FindName("Warhead") > -1))
-			{
-				// MW Bugfix: Check if is found in Projectile first...
-				// This may have caused several crashes while saving
-				if (m_mapfile.GetSection(i)->FindName("Projectile") >= 0)
-					if (*m_mapfile.GetSection(i)->GetValue(m_mapfile.GetSection(i)->FindName("Projectile")) == lpSection)
-						return TRUE;
-			}
+			const map<CString, CString, SortDummy>& values = own->second.values;
+			if (values.find("ROF") != values.end() && values.find("Range") != values.end() &&
+				values.find("Damage") != values.end() && values.find("Warhead") != values.end())
+				return TRUE; // a weapon
+
+			if (values.find("Spread") != values.end() && values.find("Range") != values.end() &&
+				values.find("Damage") != values.end() && values.find("Warhead") != values.end())
+				return TRUE; // a warhead
 		}
 	}
 
@@ -4004,6 +4024,7 @@ void CMapData::CreateMap(DWORD dwWidth, DWORD dwHeight, LPCTSTR lpTerrainType, D
 
 
 	m_mapfile.Clear();
+	m_rulesSectionNamesValid = FALSE;
 
 	CString stdMap;
 	stdMap = AppPath;

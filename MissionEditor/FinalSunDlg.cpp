@@ -1228,6 +1228,11 @@ void CFinalSunDlg::SaveMap(CString FileName_, bool interactive)
 
 		}
 
+		// classify rules sections from a freshly built cache: doing the
+		// Projectile reference scan per section below made saving large
+		// maps lock up
+		Map->BuildRulesSectionCache();
+
 		for (const auto& section : ini.sections)
 		{
 			if (Map->IsRulesSection(section.first))

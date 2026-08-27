@@ -116,6 +116,7 @@ int Tests::run()
 		[this]() { test_turret_offset_parsing(); },
 		[this]() { test_paletted_image_composition(); },
 		[this]() { test_alliance_sync(); },
+		[this]() { test_rules_section_cache(); },
 	});
 	for (const auto f : test_functions)
 	{
@@ -894,4 +895,55 @@ void Tests::test_csf()
 	AllStrings.erase(id);
 	AllStrings.erase("mission:unthk06");
 #endif
+}
+
+void Tests::test_rules_section_cache()
+{
+	CMapData mapData;
+	CIniFile& ini = mapData.GetIniFile();
+
+	// a house is never a rules section
+	ini.sections["Houses"].values["0"] = "Americans";
+
+	// weapon heuristic: ROF/Range/Damage/Warhead
+	ini.sections["MyWeapon"].values["ROF"] = "50";
+	ini.sections["MyWeapon"].values["Range"] = "5";
+	ini.sections["MyWeapon"].values["Damage"] = "10";
+	ini.sections["MyWeapon"].values["Warhead"] = "MyWarhead";
+
+	// warhead heuristic: Spread/Range/Damage/Warhead
+	ini.sections["MyWarhead"].values["Spread"] = "2";
+	ini.sections["MyWarhead"].values["Range"] = "5";
+	ini.sections["MyWarhead"].values["Damage"] = "10";
+	ini.sections["MyWarhead"].values["Warhead"] = "none";
+
+	// a Projectile= reference marks the target as rules data
+	ini.sections["MyWeapon"].values["Projectile"] = "MyProjectile";
+	ini.sections["MyProjectile"].values["Speed"] = "100";
+
+	// type list values are rules sections
+	ini.sections["BuildingTypes"].values["0"] = "GAGAP";
+
+	// a plain map section stays a map section
+	ini.sections["MyMapSection"].values["Foo"] = "Bar";
+
+	mapData.BuildRulesSectionCache();
+
+	REPORT_TEST(!mapData.IsRulesSection("Americans"));
+	REPORT_TEST(mapData.IsRulesSection("MyWeapon"));
+	REPORT_TEST(mapData.IsRulesSection("MyWarhead"));
+	REPORT_TEST(mapData.IsRulesSection("MyProjectile"));
+	REPORT_TEST(mapData.IsRulesSection("GAGAP"));
+	REPORT_TEST(!mapData.IsRulesSection("MyMapSection"));
+
+	// the cache must not serve stale results after new references appear
+	ini.sections["NewWeapon"].values["ROF"] = "50";
+	ini.sections["NewWeapon"].values["Range"] = "5";
+	ini.sections["NewWeapon"].values["Damage"] = "10";
+	ini.sections["NewWeapon"].values["Warhead"] = "none";
+	ini.sections["NewWeapon"].values["Projectile"] = "NewProjectile";
+	REPORT_TEST(!mapData.IsRulesSection("NewProjectile"));
+	mapData.BuildRulesSectionCache();
+	REPORT_TEST(mapData.IsRulesSection("NewProjectile"));
+	REPORT_TEST(mapData.IsRulesSection("NewWeapon"));
 }

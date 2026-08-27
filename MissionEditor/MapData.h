@@ -66,6 +66,7 @@ extern int rampset;
 #pragma once
 #endif // _MSC_VER > 1000
 #include <array>
+#include <set>
 
 #define MAPDATA_UPDATE_FROM_INI 0
 #define MAPDATA_UPDATE_TO_INI 1
@@ -580,6 +581,10 @@ public:
 		return m_maprect.right;
 	};
 	BOOL IsRulesSection(LPCTSTR lpSection);
+	// Rebuilds the name cache used by IsRulesSection() (type list values and
+	// Projectile= references). Call after bulk map file edits and before
+	// classifying many sections, e.g. right before saving.
+	void BuildRulesSectionCache();
 
 	CMapData();
 	virtual ~CMapData();
@@ -638,6 +643,11 @@ private:
 	std::unique_ptr<BYTE[]> m_mfd;	// map field data buffer
 	DWORD dwIsoMapSize;
 	CIniFile m_mapfile;
+	// names that identify rules sections (type list values, Projectile=
+	// references), rebuilt by BuildRulesSectionCache(). The per-query scan
+	// this replaces made saving large maps lock up for minutes.
+	std::set<CString, SortDummy> m_rulesSectionNames;
+	BOOL m_rulesSectionNamesValid;
 	RECT m_maprect;
 	RECT m_vismaprect;
 	std::unique_ptr<FIELDDATA[]> fielddata;

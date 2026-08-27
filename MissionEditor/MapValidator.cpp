@@ -30,6 +30,7 @@
 #include "inlines.h"
 #include "BuildingFoundation.h"
 #include <algorithm>
+#include <set>
 #include <string>
 
 #ifdef _DEBUG
@@ -201,13 +202,35 @@ BOOL CMapValidator::CheckMap()
 		// sections/values into the map file
 		const CIniFileSection* tagsSec = ini.GetSection("Tags");
 		CIniFileSection* triggersSec = ini.GetSection("Triggers");
+		const CIniFileSection* teamTypesSec = ini.GetSection("TeamTypes");
+		const CIniFileSection* taskForcesSec = ini.GetSection("TaskForces");
+		const CIniFileSection* scriptTypesSec = ini.GetSection("ScriptTypes");
+
+		// name lookup sets: FindName()/FindValue() are linear scans, and
+		// running one per entry made validating large maps quadratic
+		std::set<CString, SortDummy> triggerNames;
+		if (triggersSec)
+			for (const auto& trigger : triggersSec->values)
+				triggerNames.insert(trigger.first);
+		std::set<CString, SortDummy> tagNames;
+		if (tagsSec)
+			for (const auto& tag : tagsSec->values)
+				tagNames.insert(tag.first);
+		std::set<CString, SortDummy> taskForceNames;
+		if (taskForcesSec)
+			for (const auto& taskForce : taskForcesSec->values)
+				taskForceNames.insert(taskForce.second);
+		std::set<CString, SortDummy> scriptTypeNames;
+		if (scriptTypesSec)
+			for (const auto& scriptType : scriptTypesSec->values)
+				scriptTypeNames.insert(scriptType.second);
 
 		if(tagsSec)
 		{
 			for(const auto& tag : tagsSec->values)
 			{
 				CString trigger=GetParam(tag.second, 2);
-				if(!triggersSec || triggersSec->FindName(trigger)<0)
+				if(triggerNames.count(trigger)==0)
 				{
 					CString error;
 					error=GetLanguageStringACP("MV_TriggerMissing");
@@ -228,7 +251,7 @@ BOOL CMapValidator::CheckMap()
 			for(const auto& trigger : triggersSec->values)
 			{
 				CString referencedTrigger=GetParam(trigger.second, 1);
-				if(triggersSec->FindName(referencedTrigger)<0 && referencedTrigger!="<none>")
+				if(triggerNames.count(referencedTrigger)==0 && referencedTrigger!="<none>")
 				{
 					CString error;
 					error=GetLanguageStringACP("MV_TriggerMissing");
@@ -240,9 +263,6 @@ BOOL CMapValidator::CheckMap()
 			}
 		}
 
-		const CIniFileSection* teamTypesSec = ini.GetSection("TeamTypes");
-		const CIniFileSection* taskForcesSec = ini.GetSection("TaskForces");
-		const CIniFileSection* scriptTypesSec = ini.GetSection("ScriptTypes");
 		if(teamTypesSec)
 		{
 			for(const auto& teamType : teamTypesSec->values)
@@ -250,7 +270,7 @@ BOOL CMapValidator::CheckMap()
 				const CIniFileSection* sec = ini.GetSection(teamType.second);
 				if(!sec) continue;
 				CString taskforce=sec->GetValueByName("TaskForce", CString());
-				if(taskforce.GetLength()>0 && (!taskForcesSec || taskForcesSec->FindValue(taskforce)<0))
+				if(taskforce.GetLength()>0 && taskForceNames.count(taskforce)==0)
 				{
 					CString error;
 					error=GetLanguageStringACP("MV_TaskForceMissing");
@@ -264,7 +284,7 @@ BOOL CMapValidator::CheckMap()
 				const CIniFileSection* sec = ini.GetSection(teamType.second);
 				if(!sec) continue;
 				CString scripttype=sec->GetValueByName("Script", CString());
-				if(scripttype.GetLength()>0 && (!scriptTypesSec || scriptTypesSec->FindValue(scripttype)<0))
+				if(scripttype.GetLength()>0 && scriptTypeNames.count(scripttype)==0)
 				{
 					CString error;
 					error=GetLanguageStringACP("MV_ScripttypeMissing");
@@ -281,7 +301,7 @@ BOOL CMapValidator::CheckMap()
 				if(tagIt != sec->values.end())
 				{
 					CString tag=tagIt->second;
-					if(!tagsSec || tagsSec->FindName(tag)<0)
+					if(tagNames.count(tag)==0)
 					{
 						CString error;
 						error=GetLanguageStringACP("MV_TagMissing");
@@ -293,28 +313,35 @@ BOOL CMapValidator::CheckMap()
 				}
 			}
 		}
-		for(int i=0;i<(int)Map->GetCelltagCount();i++)
-		{		
-			CString tag;
-			DWORD pos;
-			Map->GetCelltagData(i, &tag, &pos);
-			int x=pos%Map->GetIsoSize();
-			int y=pos/Map->GetIsoSize();
-			char cx[50];
-			char cy[50];
-			itoa(x, cx, 10);
-			itoa(y, cy, 10);
-			CString p=cx;
-			p+="/";
-			p+=cy;
-			if(!tagsSec || tagsSec->FindName(tag)<0)
+		// iterate the CellTags section directly: GetCelltagData() steps
+		// through the value map per index, which is quadratic in the
+		// celltag count
+		const CIniFileSection* cellTagsSec = ini.GetSection("CellTags");
+		if (cellTagsSec)
+		{
+			for (const auto& cellTag : cellTagsSec->values)
 			{
-				CString error;
-				error=GetLanguageStringACP("MV_TagMissing");
-				error=TranslateStringVariables(1, error, tag);
-				error=TranslateStringVariables(2, error, "Celltag");
-				error=TranslateStringVariables(3, error, p);
-				AddItemWithNewLine(m_MapProblemList, error, 1);
+				int tagX, tagY;
+				PosToXY(cellTag.first, &tagX, &tagY);
+				const DWORD pos = tagX + tagY * Map->GetIsoSize();
+				int x=pos%Map->GetIsoSize();
+				int y=pos/Map->GetIsoSize();
+				char cx[50];
+				char cy[50];
+				itoa(x, cx, 10);
+				itoa(y, cy, 10);
+				CString p=cx;
+				p+="/";
+				p+=cy;
+				if(tagNames.count(cellTag.second)==0)
+				{
+					CString error;
+					error=GetLanguageStringACP("MV_TagMissing");
+					error=TranslateStringVariables(1, error, cellTag.second);
+					error=TranslateStringVariables(2, error, "Celltag");
+					error=TranslateStringVariables(3, error, p);
+					AddItemWithNewLine(m_MapProblemList, error, 1);
+				}
 			}
 		}
 
