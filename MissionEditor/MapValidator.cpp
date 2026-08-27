@@ -420,7 +420,6 @@ BOOL CMapValidator::CheckMap()
 			if (occupied[pos].size() < 2)
 				continue;
 
-			bAllow = FALSE;
 			CString names;
 			for (size_t i = 0; i < occupied[pos].size(); ++i)
 			{
@@ -431,7 +430,7 @@ BOOL CMapValidator::CheckMap()
 			error = TranslateStringVariables(1, error, std::to_string(pos % isoSize).c_str());
 			error = TranslateStringVariables(2, error, std::to_string(pos / isoSize).c_str());
 			error = TranslateStringVariables(3, error, names);
-			AddItemWithNewLine(m_MapProblemList, error, 0);
+			AddItemWithNewLine(m_MapProblemList, error, 1);
 		}
 	}
 
