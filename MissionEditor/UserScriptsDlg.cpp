@@ -597,6 +597,8 @@ namespace
 		BOOL reportTruncated=FALSE;
 		int iniMutationCount=0;
 		std::set<CString> iniChangedSections;
+		std::set<CString> reservedGlobalIds;
+		std::map<CString, std::set<CString>> reservedNumericIds;
 		std::map<DWORD, LuaCellEdit> cellEdits;
 		BOOL clearOverlay=FALSE;
 		BOOL terrainLoaded=FALSE;
@@ -924,26 +926,35 @@ namespace
 		return context->ini.sections.find(id)!=context->ini.sections.end();
 	}
 
-	CString GetFreeLuaGlobalId(const LuaScriptContext* context)
+	CString ReserveFreeLuaGlobalId(LuaScriptContext* context)
 	{
 		for(int number=1000000;number<9999999;number++)
 		{
 			CString id;
 			id.Format("0%d", number);
-			if(!IsLuaGlobalIdUsed(context, id)) return id;
+			if(!IsLuaGlobalIdUsed(context, id) && context->reservedGlobalIds.find(id)==context->reservedGlobalIds.end())
+			{
+				context->reservedGlobalIds.insert(id);
+				return id;
+			}
 		}
 		return CString();
 	}
 
-	CString GetFreeLuaNumericId(const LuaScriptContext* context, const CString& sectionName)
+	CString ReserveFreeLuaNumericId(LuaScriptContext* context, const CString& sectionName)
 	{
 		const auto section=context->ini.sections.find(sectionName);
+		auto& reserved=context->reservedNumericIds[sectionName];
 		for(int number=0;number<INT_MAX;number++)
 		{
 			CString id;
 			id.Format("%d", number);
-			if(section==context->ini.sections.end() || section->second.values.find(id)==section->second.values.end())
+			if((section==context->ini.sections.end() || section->second.values.find(id)==section->second.values.end()) &&
+				reserved.find(id)==reserved.end())
+			{
+				reserved.insert(id);
 				return id;
+			}
 		}
 		return CString();
 	}
@@ -1041,14 +1052,14 @@ namespace
 		if(operation=="id.free_global")
 		{
 			if(!requireArgs(0)) return reject("id.free_global expects no arguments");
-			const CString id=GetFreeLuaGlobalId(context);
+			const CString id=ReserveFreeLuaGlobalId(context);
 			if(id.IsEmpty()) return reject("no global map ID is available");
 			return WriteLuaInvokeResponse(id, dst, dstCap, outLength);
 		}
 		if(operation=="id.free_numeric")
 		{
 			if(!requireArgs(1)) return reject("id.free_numeric expects a section name");
-			const CString id=GetFreeLuaNumericId(context, args[0]);
+			const CString id=ReserveFreeLuaNumericId(context, args[0]);
 			if(id.IsEmpty()) return reject("no numeric map ID is available");
 			return WriteLuaInvokeResponse(id, dst, dstCap, outLength);
 		}
@@ -1351,8 +1362,15 @@ namespace
 			{
 				if(!requireArgs(5)) return reject("map.terrain.create_shore expects a rectangle and Boolean");
 				pending.type=LuaTerrainOperation::Type::CreateShore;
-				for(int index=0;index<5;index++)
-					if(!ParseLuaInteger(args[index], pending.values[index])) return reject("shore arguments must be integers");
+				const int isoSize=static_cast<int>(context->map->GetIsoSize());
+				if(!ParseLuaInteger(args[0], pending.values[0], 0, isoSize) ||
+					!ParseLuaInteger(args[1], pending.values[1], 0, isoSize) ||
+					!ParseLuaInteger(args[2], pending.values[2], 0, isoSize) ||
+					!ParseLuaInteger(args[3], pending.values[3], 0, isoSize) ||
+					!ParseLuaInteger(args[4], pending.values[4], 0, 1))
+					return reject("shore rectangle must stay inside the map buffer and the flag must be 0 or 1");
+				if(pending.values[0]>=pending.values[2] || pending.values[1]>=pending.values[3])
+					return reject("shore rectangle must have positive width and height");
 			}
 			else
 			{
@@ -1523,6 +1541,86 @@ namespace
 			summary += " (graphics reload after reopening the map)\r\n";
 		}
 		return summary;
+	}
+
+	BOOL ValidateLuaSpecialChanges(const LuaScriptContext& context, CString& error)
+	{
+		if(context.map==NULL)
+		{
+			error="The map is unavailable.";
+			return FALSE;
+		}
+
+		const DWORD isoSize=context.map->GetIsoSize();
+		const unsigned __int64 cellCount=static_cast<unsigned __int64>(isoSize) * isoSize;
+		for(const auto& staged : context.cellEdits)
+		{
+			if(staged.first>=cellCount)
+			{
+				error="A staged cell is outside the map buffer.";
+				return FALSE;
+			}
+			if(staged.second.terrainChanged)
+			{
+				const FIELDDATA& value=staged.second.value;
+				if(tiledata_count==NULL || tiledata==NULL || value.wGround>=*tiledata_count ||
+					value.bSubTile>=(*tiledata)[value.wGround].wTileCount)
+				{
+					error="A staged tile is unavailable in the current theater.";
+					return FALSE;
+				}
+			}
+		}
+
+		if(context.terrainChanged)
+		{
+			for(const auto& terrain : context.terrain)
+			{
+				if(terrain.deleted) continue;
+				if(terrain.x<0 || terrain.y<0 || terrain.x>=static_cast<int>(isoSize) ||
+					terrain.y>=static_cast<int>(isoSize) || !context.map->IsTerrainType(terrain.type))
+				{
+					error="A staged terrain object is invalid for the current map.";
+					return FALSE;
+				}
+			}
+		}
+
+#ifdef SMUDGE_SUPP
+		if(context.smudgesChanged)
+		{
+			for(const auto& smudge : context.smudges)
+			{
+				if(smudge.deleted) continue;
+				if(smudge.x<0 || smudge.y<0 || smudge.x>=static_cast<int>(isoSize) ||
+					smudge.y>=static_cast<int>(isoSize) || !context.map->IsSmudgeType(smudge.type))
+				{
+					error="A staged smudge is invalid for the current map.";
+					return FALSE;
+				}
+			}
+		}
+#endif
+
+		CFinalSunDlg* mainWindow=(CFinalSunDlg*)theApp.GetMainWnd();
+		for(const auto& operation : context.terrainOperations)
+		{
+			if(operation.type==LuaTerrainOperation::Type::AutoLevel &&
+				(mainWindow==NULL || mainWindow->m_view.m_isoview==NULL))
+			{
+				error="The map view is unavailable for auto-level.";
+				return FALSE;
+			}
+			if(operation.type==LuaTerrainOperation::Type::CreateShore &&
+				(operation.values[0]<0 || operation.values[1]<0 ||
+				operation.values[2]>static_cast<int>(isoSize) || operation.values[3]>static_cast<int>(isoSize) ||
+				operation.values[0]>=operation.values[2] || operation.values[1]>=operation.values[3]))
+			{
+				error="A staged shore rectangle is outside the map buffer.";
+				return FALSE;
+			}
+		}
+		return TRUE;
 	}
 
 	BOOL ApplyLuaSpecialChanges(LuaScriptContext& context, CString& error)
@@ -2141,6 +2239,18 @@ BOOL CUserScriptsDlg::RunLuaScript()
 			MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2);
 		if(apply==IDYES)
 		{
+			CString applyError;
+			if(!ValidateLuaSpecialChanges(context, applyError))
+			{
+				context.report += TranslateStringACP("Lua map changes could not be applied:");
+				context.report += "\r\n";
+				context.report += applyError;
+				context.report += "\r\n";
+				m_Report=context.report;
+				SetDlgItemText(IDC_REPORT, m_Report);
+				MessageBox(applyError, TranslateStringACP("Lua Script Apply Error"), MB_ICONERROR);
+				return FALSE;
+			}
 			const BOOL hasFieldChanges=context.clearOverlay || !context.cellEdits.empty() ||
 				context.terrainChanged || !context.terrainOperations.empty()
 #ifdef SMUDGE_SUPP
@@ -2150,7 +2260,6 @@ BOOL CUserScriptsDlg::RunLuaScript()
 			if(!context.hasResize && hasFieldChanges) Map->TakeSnapshot(TRUE);
 			Map->GetIniFile()=context.ini;
 			Map->UpdateIniFile(MAPDATA_UPDATE_FROM_INI);
-			CString applyError;
 			if(!ApplyLuaSpecialChanges(context, applyError))
 			{
 				context.report += TranslateStringACP("Lua map changes could not be fully applied:");

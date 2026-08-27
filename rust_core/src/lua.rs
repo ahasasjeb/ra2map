@@ -853,6 +853,10 @@ mod tests {
     #[test]
     fn high_level_api_creates_objects_and_trigger_graphs() {
         let mut host = Host::default();
+        host.sections
+            .entry("$editor".to_owned())
+            .or_default()
+            .insert("iso_size".to_owned(), "80".to_owned());
         let script = br#"
             assert(map.api_version == 2)
             local unit_id = map.objects.units.create {
@@ -874,6 +878,37 @@ mod tests {
             assert(#map.triggers.get(trigger.id).tags == 1)
             map.triggers.update(trigger.id, { name = "Updated trigger" })
             assert(map.triggers.get(trigger.id).name == "Updated trigger")
+
+            local team = map.team_types.create { Name = "Before", Max = 5 }
+            assert(team.id == "01000001")
+            map.team_types.update(team.id, { Name = "After" })
+            assert(map.team_types.get(team.id).Name == "After")
+            assert(map.team_types.get(team.id).Max == "5")
+            map.team_types.replace(team.id, { Name = "Only" })
+            assert(map.team_types.get(team.id).Name == "Only")
+            assert(map.team_types.get(team.id).Max == nil)
+            assert(not pcall(function() map.team_types.update("missing", {}) end))
+
+            local house = map.houses.create("Lua House", { IQ = 0, Color = "Gold" })
+            map.houses.update(house.id, { IQ = 10 })
+            assert(map.houses.get(house.id).IQ == "10")
+            assert(map.houses.get(house.id).Color == "Gold")
+            map.houses.replace(house.id, { IQ = 20 })
+            assert(map.houses.get(house.id).IQ == "20")
+            assert(map.houses.get(house.id).Color == nil)
+
+            local first_node = map.nodes.create(house.id, { type = "GAPOWR", x = 10, y = 11 })
+            assert(first_node == "0" and map.get(house.id, "NodeCount") == "1")
+            assert(map.nodes.get(house.id, 0).key == "000")
+            map.nodes.move(house.id, 0, 12, 13)
+            assert(map.nodes.get(house.id, 0).x == 12)
+            local second_node = map.nodes.create(house.id, { type = "GAREFN", x = 20, y = 21 })
+            assert(second_node == "1" and #map.nodes.list(house.id) == 2)
+            assert(map.nodes.delete(house.id, 0))
+            assert(map.get(house.id, "NodeCount") == "1")
+            assert(map.nodes.get(house.id, 0).type == "GAREFN")
+            assert(map.get(house.id, "001") == nil)
+
             assert(require("sample").answer == 42)
             assert(require("sample").answer == 42)
         "#;

@@ -369,6 +369,23 @@ function map.registries.delete(section, id)
     end
     return map.remove_section(id)
 end
+local function require_registered_id(section, id)
+    id = tostring(id)
+    for _, index in ipairs(map.keys(section)) do
+        if map.get(section, index) == id then return id end
+    end
+    error(section .. " entry does not exist", 3)
+end
+function map.registries.update(section, id, values)
+    id = require_registered_id(section, id)
+    for key, value in pairs(values or {}) do map.set(id, key, value) end
+    return id
+end
+function map.registries.replace(section, id, values)
+    id = require_registered_id(section, id)
+    map.replace_section(id, values or {})
+    return id
+end
 
 local function registry_wrapper(section, defaults)
     return {
@@ -379,7 +396,8 @@ local function registry_wrapper(section, defaults)
             for key, value in pairs(values or {}) do merged[key] = value end
             return map.registries.create(section, merged, options)
         end,
-        update = function(id, values) map.replace_section(tostring(id), values or {}); return tostring(id) end,
+        update = function(id, values) return map.registries.update(section, id, values) end,
+        replace = function(id, values) return map.registries.replace(section, id, values) end,
         delete = function(id) return map.registries.delete(section, id) end,
     }
 end
@@ -410,12 +428,23 @@ function map.named_lists.delete(section, id)
     end
     return map.remove_section(id)
 end
+function map.named_lists.update(section, id, values)
+    id = require_registered_id(section, id)
+    for key, value in pairs(values or {}) do map.set(id, key, value) end
+    return id
+end
+function map.named_lists.replace(section, id, values)
+    id = require_registered_id(section, id)
+    map.replace_section(id, values or {})
+    return id
+end
 local function named_list_wrapper(section)
     return {
         list = function() return map.named_lists.list(section) end,
         get = function(id) return map.section(tostring(id)) end,
         create = function(id, values, options) return map.named_lists.create(section, id, values, options) end,
-        update = function(id, values) map.replace_section(tostring(id), values or {}); return tostring(id) end,
+        update = function(id, values) return map.named_lists.update(section, id, values) end,
+        replace = function(id, values) return map.named_lists.replace(section, id, values) end,
         delete = function(id) return map.named_lists.delete(section, id) end,
     }
 end
@@ -489,13 +518,86 @@ end
 map.local_variables = make_entity_collection("VariableNames", { "name", "initial_state" }, { "Lua variable", 0 }, false)
 
 map.nodes = {}
+local function node_key(index)
+    index = math.tointeger(tonumber(index))
+    if not index or index < 0 then error("node index must be a non-negative integer", 3) end
+    return string.format("%03d", index), index
+end
+local function node_count(house)
+    house = require_registered_id("Houses", house)
+    local count = math.tointeger(tonumber(map.get(house, "NodeCount", "0")))
+    if not count or count < 0 then error("house has an invalid NodeCount", 3) end
+    return count
+end
+local function encode_node(value, current)
+    if value.raw ~= nil then return tostring(value.raw) end
+    current = current or {}
+    local node_type = value.type ~= nil and tostring(value.type) or current.type
+    local x = math.tointeger(tonumber(value.x ~= nil and value.x or current.x))
+    local y = math.tointeger(tonumber(value.y ~= nil and value.y or current.y))
+    if not node_type or node_type == "" then error("node type is required", 3) end
+    if not x or not y or x < 0 or y < 0 or x >= map.info.iso_size or y >= map.info.iso_size then
+        error("node coordinates are outside the map buffer", 3)
+    end
+    return join_csv({ node_type, y, x })
+end
+function map.nodes.get(house, index)
+    local key
+    key, index = node_key(index)
+    if index >= node_count(house) then return nil end
+    local raw = map.get(house, key)
+    if raw == nil then return nil end
+    local fields = split_csv(raw)
+    return {
+        id = tostring(index), index = index, key = key, raw = raw, fields = fields,
+        type = fields[1], y = tonumber(fields[2]), x = tonumber(fields[3]),
+    }
+end
+function map.nodes.list(house)
+    local result = {}
+    for index = 0, node_count(house) - 1 do
+        local value = map.nodes.get(house, index)
+        if value then result[#result + 1] = value end
+    end
+    return result
+end
 function map.nodes.create(house, value)
     value = value or {}
-    local id = value.id or map.ids.free_numeric(house)
-    map.set(house, id, value.raw or join_csv({ value.type or "", value.y or 0, value.x or 0 }))
-    return id
+    local count = node_count(house)
+    if value.id ~= nil or value.index ~= nil then
+        local requested = math.tointeger(tonumber(value.id or value.index))
+        if requested ~= count then error("new nodes must be appended at NodeCount", 2) end
+    end
+    local key = node_key(count)
+    map.set(house, key, encode_node(value))
+    map.set(house, "NodeCount", count + 1)
+    return tostring(count)
 end
-function map.nodes.delete(house, id) return map.remove(house, tostring(id)) end
+function map.nodes.update(house, index, changes)
+    local current = map.nodes.get(house, index)
+    if not current then error("node does not exist", 2) end
+    changes = changes or {}
+    map.set(house, current.key, encode_node(changes, current))
+    return tostring(current.index)
+end
+function map.nodes.move(house, index, x, y)
+    return map.nodes.update(house, index, { x = x, y = y })
+end
+function map.nodes.delete(house, index)
+    local key
+    key, index = node_key(index)
+    local count = node_count(house)
+    if index >= count or not map.has(house, key) then return false end
+    for current = index, count - 2 do
+        local destination = node_key(current)
+        local source = node_key(current + 1)
+        map.set(house, destination, map.get(house, source, ""))
+    end
+    local last_key = node_key(count - 1)
+    map.remove(house, last_key)
+    map.set(house, "NodeCount", count - 1)
+    return true
+end
 
 map.tubes = {
     get = function(id) return map.records.get("Tubes", id) end,

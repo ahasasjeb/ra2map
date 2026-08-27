@@ -27,3 +27,6 @@ New features for FinalSun and FinalAlert 2 (Yuri's Revenge)
 - Added a sandboxed Lua 5.5 map scripting editor with transactional apply confirmation.
 - Added Lua API version 2 for triggers, mission graphs, map objects, waypoints, houses, cells, overlays, terrain, resize, game databases, user input, view control, and safe Lua modules.
 - Added a complete Markdown Lua API reference and runnable trigger example.
+- Hardened Lua terrain operations with bounded shore rectangles and apply-time preflight validation.
+- Lua ID allocation now reserves IDs for the current run, and registry/house update APIs preserve unspecified fields; explicit replace APIs remain available.
+- Completed Lua house-node CRUD with padded keys, NodeCount maintenance, movement, and deletion compaction.

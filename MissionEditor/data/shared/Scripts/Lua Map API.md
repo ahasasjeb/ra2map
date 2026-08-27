@@ -124,8 +124,8 @@ script-editable data source.
 
 | API | Description |
 | --- | --- |
-| `map.ids.free()` | Allocate a globally unique eight-character mission ID. |
-| `map.ids.free_numeric(section)` | Allocate an unused numeric key. |
+| `map.ids.free()` | Reserve a globally unique eight-character mission ID for this run. |
+| `map.ids.free_numeric(section)` | Reserve an unused numeric key in a section for this run. |
 | `map.csv.split(text)` | Split a legacy comma-separated record. |
 | `map.csv.join(values)` | Join a field array. |
 | `map.position.encode(x, y)` | Encode a map-position key. |
@@ -159,13 +159,15 @@ for any ordinary INI section.
 - `map.tags.get/list/create/update/delete`
 - `map.ai_triggers.get/list/create/update/delete`
 - `map.ai_trigger_enabling.get/list/set/delete`
-- `map.task_forces.get/list/create/update/delete`
-- `map.script_types.get/list/create/update/delete`
-- `map.team_types.get/list/create/update/delete`
+- `map.task_forces.get/list/create/update/replace/delete`
+- `map.script_types.get/list/create/update/replace/delete`
+- `map.team_types.get/list/create/update/replace/delete`
 
 Task forces, script types, and team types manage both their numeric registry
 entry and globally named child section. The generic forms are
-`map.registries.list/create/delete`.
+`map.registries.list/create/update/replace/delete`. `update` patches only the
+provided keys, while `replace` deliberately replaces the complete child
+section.
 
 ## Units and structures
 
@@ -196,17 +198,23 @@ still validate type IDs through `game.rules` for the target mod.
 
 ## Houses, variables, waypoints, and map references
 
-- `map.houses.get/list/create/update/delete`
-- `map.countries.get/list/create/update/delete`
+- `map.houses.get/list/create/update/replace/delete`
+- `map.countries.get/list/create/update/replace/delete`
 - `map.local_variables.get/list/create/update/delete`
 - `map.waypoints.get/list/set/delete`
 - `map.cell_tags.get/list/set/delete`
-- `map.nodes.create/delete`
+- `map.nodes.get/list/create/update/move/delete`
 - `map.tubes.get/list/create/update/delete`
 
 `map.basic`, `map.map_settings`, `map.lighting`, and `map.special_flags` are
 section wrappers with `get`, `has`, `set`, `remove`, `values`, `patch`, and
 `replace`.
+
+`map.nodes` maintains the house section's padded node keys and `NodeCount`.
+Creation appends a node, and deletion compacts later node indices to match the
+editor's native behavior. Typed creation and updates require an in-buffer
+coordinate and a non-empty building type; explicit `raw` records remain
+available for mod-specific formats.
 
 ## Cells, overlays, and terrain
 
@@ -233,6 +241,9 @@ height.
 - `map.terrain.smooth_tiberium(x, y)` smooths resource overlay.
 - `map.terrain.create_shore(left, top, right, bottom[, remove_useless])`
 - `map.terrain.auto_level()`
+
+Shore rectangles use an exclusive `right, bottom` edge, must have positive
+width and height, and must stay within `0..map.info.iso_size`.
 
 Smudges are available only in editor variants compiled with smudge support;
 check `editor.has_capability("smudges")`.
@@ -294,6 +305,9 @@ the wrong map type.
 
 - Raw INI changes and staged specialized changes are applied together only
   after successful execution and confirmation.
+- Specialized changes are preflighted again immediately before the map is
+  committed, so an invalid tile, terrain object, smudge, shore rectangle, or
+  unavailable map view is rejected before any staged data is applied.
 - The confirmation dialog reports changed INI sections, mutation and cell
   counts, terrain operations, and resize parameters.
 - `map.info` and live metrics describe the map state at the start of the run;
