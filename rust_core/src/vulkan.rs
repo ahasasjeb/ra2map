@@ -49,12 +49,29 @@ impl Default for StagingBuffer {
     }
 }
 
+struct UploadImage {
+    image: vk::Image,
+    memory: vk::DeviceMemory,
+    extent: vk::Extent2D,
+}
+
+impl Default for UploadImage {
+    fn default() -> Self {
+        Self {
+            image: vk::Image::null(),
+            memory: vk::DeviceMemory::null(),
+            extent: vk::Extent2D::default(),
+        }
+    }
+}
+
 struct FrameResources {
     command_buffer: vk::CommandBuffer,
     image_available: vk::Semaphore,
     upload_complete: vk::Semaphore,
     fence: vk::Fence,
     staging: StagingBuffer,
+    upload_image: UploadImage,
     source_x_offsets: Vec<isize>,
 }
 
@@ -66,6 +83,7 @@ impl FrameResources {
             upload_complete: vk::Semaphore::null(),
             fence: vk::Fence::null(),
             staging: StagingBuffer::default(),
+            upload_image: UploadImage::default(),
             source_x_offsets: Vec::new(),
         }
     }
@@ -85,6 +103,8 @@ struct VulkanRenderer {
     swapchain_images: Vec<vk::Image>,
     image_initialized: Vec<bool>,
     swapchain_format: vk::Format,
+    swapchain_opaque: bool,
+    gpu_bgrx_blit_supported: bool,
     swapchain_extent: vk::Extent2D,
     requested_extent: vk::Extent2D,
     vsync: bool,
@@ -186,6 +206,8 @@ impl VulkanRenderer {
             swapchain_images: Vec::new(),
             image_initialized: Vec::new(),
             swapchain_format: vk::Format::UNDEFINED,
+            swapchain_opaque: false,
+            gpu_bgrx_blit_supported: false,
             swapchain_extent: vk::Extent2D::default(),
             requested_extent: vk::Extent2D::default(),
             vsync: true,
@@ -394,6 +416,129 @@ impl VulkanRenderer {
         *staging = StagingBuffer::default();
     }
 
+    unsafe fn create_upload_image(&self, extent: vk::Extent2D) -> Result<UploadImage, String> {
+        let image_info = vk::ImageCreateInfo::default()
+            .image_type(vk::ImageType::TYPE_2D)
+            .format(vk::Format::B8G8R8A8_UNORM)
+            .extent(vk::Extent3D {
+                width: extent.width,
+                height: extent.height,
+                depth: 1,
+            })
+            .mip_levels(1)
+            .array_layers(1)
+            .samples(vk::SampleCountFlags::TYPE_1)
+            .tiling(vk::ImageTiling::OPTIMAL)
+            .usage(vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::TRANSFER_SRC)
+            .sharing_mode(vk::SharingMode::EXCLUSIVE)
+            .initial_layout(vk::ImageLayout::UNDEFINED);
+        let image = unsafe { self.device.create_image(&image_info, None) }
+            .map_err(|error| format!("vkCreateImage for the upload frame failed: {error:?}"))?;
+        let requirements = unsafe { self.device.get_image_memory_requirements(image) };
+        let memory_properties = unsafe {
+            self.instance
+                .get_physical_device_memory_properties(self.physical_device)
+        };
+        let memory_type = (0..memory_properties.memory_type_count).find(|index| {
+            requirements.memory_type_bits & (1_u32 << index) != 0
+                && memory_properties.memory_types[*index as usize]
+                    .property_flags
+                    .contains(vk::MemoryPropertyFlags::DEVICE_LOCAL)
+        });
+        let memory_type = match memory_type {
+            Some(index) => index,
+            None => {
+                unsafe { self.device.destroy_image(image, None) };
+                return Err("no device-local Vulkan upload-image memory type exists".into());
+            }
+        };
+        let allocate_info = vk::MemoryAllocateInfo::default()
+            .allocation_size(requirements.size)
+            .memory_type_index(memory_type);
+        let memory = match unsafe { self.device.allocate_memory(&allocate_info, None) } {
+            Ok(memory) => memory,
+            Err(error) => {
+                unsafe { self.device.destroy_image(image, None) };
+                return Err(format!(
+                    "vkAllocateMemory for the upload image failed: {error:?}"
+                ));
+            }
+        };
+        if let Err(error) = unsafe { self.device.bind_image_memory(image, memory, 0) } {
+            unsafe {
+                self.device.free_memory(memory, None);
+                self.device.destroy_image(image, None);
+            }
+            return Err(format!("vkBindImageMemory failed: {error:?}"));
+        }
+        Ok(UploadImage {
+            image,
+            memory,
+            extent,
+        })
+    }
+
+    unsafe fn free_upload_image(&self, upload: &mut UploadImage) {
+        if upload.image != vk::Image::null() {
+            unsafe { self.device.destroy_image(upload.image, None) };
+        }
+        if upload.memory != vk::DeviceMemory::null() {
+            unsafe { self.device.free_memory(upload.memory, None) };
+        }
+        *upload = UploadImage::default();
+    }
+
+    unsafe fn ensure_gpu_upload_resources(
+        &mut self,
+        frame_index: usize,
+        extent: vk::Extent2D,
+        staging_len: usize,
+    ) -> Result<(), String> {
+        if self.frames[frame_index].staging.len < staging_len {
+            let old_len = self.frames[frame_index].staging.len;
+            let growth_target = old_len.saturating_add(old_len / 2).max(staging_len);
+            let new_staging = unsafe { self.create_staging_buffer(growth_target) }?;
+            let mut old_staging =
+                std::mem::replace(&mut self.frames[frame_index].staging, new_staging);
+            unsafe { self.free_staging_buffer(&mut old_staging) };
+        }
+
+        if self.frames[frame_index].upload_image.extent != extent {
+            let new_upload = unsafe { self.create_upload_image(extent) }?;
+            let mut old_upload =
+                std::mem::replace(&mut self.frames[frame_index].upload_image, new_upload);
+            unsafe { self.free_upload_image(&mut old_upload) };
+        }
+        Ok(())
+    }
+
+    unsafe fn supports_gpu_bgrx_blit(&self) -> bool {
+        if !self.swapchain_opaque
+            || !matches!(
+                self.swapchain_format,
+                vk::Format::B8G8R8A8_UNORM | vk::Format::R8G8B8A8_UNORM
+            )
+        {
+            return false;
+        }
+        let source = unsafe {
+            self.instance.get_physical_device_format_properties(
+                self.physical_device,
+                vk::Format::B8G8R8A8_UNORM,
+            )
+        };
+        let destination = unsafe {
+            self.instance
+                .get_physical_device_format_properties(self.physical_device, self.swapchain_format)
+        };
+        source
+            .optimal_tiling_features
+            .contains(vk::FormatFeatureFlags::BLIT_SRC)
+            && destination
+                .optimal_tiling_features
+                .contains(vk::FormatFeatureFlags::BLIT_DST)
+    }
+
     unsafe fn recreate_swapchain(
         &mut self,
         requested_width: u32,
@@ -518,6 +663,8 @@ impl VulkanRenderer {
         self.swapchain_images = new_images;
         self.image_initialized = vec![false; self.swapchain_images.len()];
         self.swapchain_format = format.format;
+        self.swapchain_opaque = composite_alpha == vk::CompositeAlphaFlagsKHR::OPAQUE;
+        self.gpu_bgrx_blit_supported = unsafe { self.supports_gpu_bgrx_blit() };
         self.swapchain_extent = extent;
         self.requested_extent = vk::Extent2D {
             width: requested_width,
@@ -605,28 +752,82 @@ impl VulkanRenderer {
             Err(error) => return Err(format!("vkAcquireNextImageKHR failed: {error:?}")),
         };
 
+        let source_is_bgrx8888 = bytes_per_pixel == 4
+            && red_mask == 0x00ff_0000
+            && green_mask == 0x0000_ff00
+            && blue_mask == 0x0000_00ff;
+        let source_rect_is_inside = src_left >= 0
+            && src_top >= 0
+            && (src_left as usize).saturating_add(src_width) <= surface_width
+            && (src_top as usize).saturating_add(src_height) <= surface_height;
+        let source_extent = vk::Extent2D {
+            width: u32::try_from(src_width).map_err(|_| "source rectangle is too wide")?,
+            height: u32::try_from(src_height).map_err(|_| "source rectangle is too tall")?,
+        };
+        let source_upload_len = src_width
+            .checked_mul(src_height)
+            .and_then(|pixels| pixels.checked_mul(4))
+            .ok_or_else(|| "Vulkan source upload size overflow".to_string())?;
+        let use_direct_bgrx_upload = source_is_bgrx8888
+            && source_rect_is_inside
+            && self.swapchain_opaque
+            && matches!(
+                self.swapchain_format,
+                vk::Format::B8G8R8A8_UNORM | vk::Format::B8G8R8A8_SRGB
+            )
+            && source_extent == self.swapchain_extent;
+        let mut use_gpu_blit = !use_direct_bgrx_upload
+            && source_is_bgrx8888
+            && source_rect_is_inside
+            && self.gpu_bgrx_blit_supported;
+        if use_gpu_blit
+            && unsafe {
+                self.ensure_gpu_upload_resources(frame_index, source_extent, source_upload_len)
+            }
+            .is_err()
+        {
+            // Device-local image allocation is an optimization. The mapped
+            // CPU conversion path remains available on constrained drivers.
+            use_gpu_blit = false;
+            self.gpu_bgrx_blit_supported = false;
+        }
+
         let staging_mapped = self.frames[frame_index].staging.mapped;
         let staging_len = self.frames[frame_index].staging.len;
         let destination = unsafe { slice::from_raw_parts_mut(staging_mapped, staging_len) };
-        write_scaled_pixels(
-            destination,
-            self.swapchain_extent.width as usize,
-            self.swapchain_extent.height as usize,
-            self.swapchain_format,
-            pixels,
-            surface_width,
-            surface_height,
-            pitch,
-            bytes_per_pixel,
-            red_mask,
-            green_mask,
-            blue_mask,
-            src_left,
-            src_top,
-            src_width,
-            src_height,
-            &mut self.frames[frame_index].source_x_offsets,
-        )?;
+        if use_direct_bgrx_upload || use_gpu_blit {
+            copy_bgrx_source_rect(
+                destination,
+                pixels,
+                surface_width,
+                surface_height,
+                pitch,
+                src_left as usize,
+                src_top as usize,
+                src_width,
+                src_height,
+            )?;
+        } else {
+            write_scaled_pixels(
+                destination,
+                self.swapchain_extent.width as usize,
+                self.swapchain_extent.height as usize,
+                self.swapchain_format,
+                pixels,
+                surface_width,
+                surface_height,
+                pitch,
+                bytes_per_pixel,
+                red_mask,
+                green_mask,
+                blue_mask,
+                src_left,
+                src_top,
+                src_width,
+                src_height,
+                &mut self.frames[frame_index].source_x_offsets,
+            )?;
+        }
 
         unsafe { self.device.reset_fences(&[frame_fence]) }
             .map_err(|error| format!("vkResetFences failed: {error:?}"))?;
@@ -673,29 +874,146 @@ impl VulkanRenderer {
                 &[to_transfer],
             )
         };
-        let copy_region = vk::BufferImageCopy::default()
-            .buffer_offset(0)
-            .buffer_row_length(0)
-            .buffer_image_height(0)
-            .image_subresource(
-                vk::ImageSubresourceLayers::default()
-                    .aspect_mask(vk::ImageAspectFlags::COLOR)
-                    .layer_count(1),
-            )
-            .image_extent(vk::Extent3D {
-                width: self.swapchain_extent.width,
-                height: self.swapchain_extent.height,
-                depth: 1,
-            });
-        unsafe {
-            self.device.cmd_copy_buffer_to_image(
-                command_buffer,
-                self.frames[frame_index].staging.buffer,
-                self.swapchain_images[image_index as usize],
-                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-                &[copy_region],
-            )
-        };
+        if use_gpu_blit {
+            let upload_image = self.frames[frame_index].upload_image.image;
+            let upload_to_destination = vk::ImageMemoryBarrier::default()
+                .old_layout(vk::ImageLayout::UNDEFINED)
+                .new_layout(vk::ImageLayout::TRANSFER_DST_OPTIMAL)
+                .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                .image(upload_image)
+                .subresource_range(
+                    vk::ImageSubresourceRange::default()
+                        .aspect_mask(vk::ImageAspectFlags::COLOR)
+                        .level_count(1)
+                        .layer_count(1),
+                )
+                .src_access_mask(vk::AccessFlags::empty())
+                .dst_access_mask(vk::AccessFlags::TRANSFER_WRITE);
+            unsafe {
+                self.device.cmd_pipeline_barrier(
+                    command_buffer,
+                    vk::PipelineStageFlags::TOP_OF_PIPE,
+                    vk::PipelineStageFlags::TRANSFER,
+                    vk::DependencyFlags::empty(),
+                    &[],
+                    &[],
+                    &[upload_to_destination],
+                )
+            };
+            let upload_region = vk::BufferImageCopy::default()
+                .buffer_offset(0)
+                .buffer_row_length(0)
+                .buffer_image_height(0)
+                .image_subresource(
+                    vk::ImageSubresourceLayers::default()
+                        .aspect_mask(vk::ImageAspectFlags::COLOR)
+                        .layer_count(1),
+                )
+                .image_extent(vk::Extent3D {
+                    width: source_extent.width,
+                    height: source_extent.height,
+                    depth: 1,
+                });
+            unsafe {
+                self.device.cmd_copy_buffer_to_image(
+                    command_buffer,
+                    self.frames[frame_index].staging.buffer,
+                    upload_image,
+                    vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                    &[upload_region],
+                )
+            };
+            let upload_to_source = vk::ImageMemoryBarrier::default()
+                .old_layout(vk::ImageLayout::TRANSFER_DST_OPTIMAL)
+                .new_layout(vk::ImageLayout::TRANSFER_SRC_OPTIMAL)
+                .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                .image(upload_image)
+                .subresource_range(
+                    vk::ImageSubresourceRange::default()
+                        .aspect_mask(vk::ImageAspectFlags::COLOR)
+                        .level_count(1)
+                        .layer_count(1),
+                )
+                .src_access_mask(vk::AccessFlags::TRANSFER_WRITE)
+                .dst_access_mask(vk::AccessFlags::TRANSFER_READ);
+            unsafe {
+                self.device.cmd_pipeline_barrier(
+                    command_buffer,
+                    vk::PipelineStageFlags::TRANSFER,
+                    vk::PipelineStageFlags::TRANSFER,
+                    vk::DependencyFlags::empty(),
+                    &[],
+                    &[],
+                    &[upload_to_source],
+                )
+            };
+            let source_offsets = [
+                vk::Offset3D { x: 0, y: 0, z: 0 },
+                vk::Offset3D {
+                    x: source_extent.width as i32,
+                    y: source_extent.height as i32,
+                    z: 1,
+                },
+            ];
+            let destination_offsets = [
+                vk::Offset3D { x: 0, y: 0, z: 0 },
+                vk::Offset3D {
+                    x: self.swapchain_extent.width as i32,
+                    y: self.swapchain_extent.height as i32,
+                    z: 1,
+                },
+            ];
+            let blit_region = vk::ImageBlit::default()
+                .src_subresource(
+                    vk::ImageSubresourceLayers::default()
+                        .aspect_mask(vk::ImageAspectFlags::COLOR)
+                        .layer_count(1),
+                )
+                .src_offsets(source_offsets)
+                .dst_subresource(
+                    vk::ImageSubresourceLayers::default()
+                        .aspect_mask(vk::ImageAspectFlags::COLOR)
+                        .layer_count(1),
+                )
+                .dst_offsets(destination_offsets);
+            unsafe {
+                self.device.cmd_blit_image(
+                    command_buffer,
+                    upload_image,
+                    vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+                    self.swapchain_images[image_index as usize],
+                    vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                    &[blit_region],
+                    vk::Filter::NEAREST,
+                )
+            };
+        } else {
+            let copy_region = vk::BufferImageCopy::default()
+                .buffer_offset(0)
+                .buffer_row_length(0)
+                .buffer_image_height(0)
+                .image_subresource(
+                    vk::ImageSubresourceLayers::default()
+                        .aspect_mask(vk::ImageAspectFlags::COLOR)
+                        .layer_count(1),
+                )
+                .image_extent(vk::Extent3D {
+                    width: self.swapchain_extent.width,
+                    height: self.swapchain_extent.height,
+                    depth: 1,
+                });
+            unsafe {
+                self.device.cmd_copy_buffer_to_image(
+                    command_buffer,
+                    self.frames[frame_index].staging.buffer,
+                    self.swapchain_images[image_index as usize],
+                    vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                    &[copy_region],
+                )
+            };
+        }
         let to_present = vk::ImageMemoryBarrier::default()
             .old_layout(vk::ImageLayout::TRANSFER_DST_OPTIMAL)
             .new_layout(vk::ImageLayout::PRESENT_SRC_KHR)
@@ -771,6 +1089,7 @@ impl Drop for VulkanRenderer {
             let _ = self.device.device_wait_idle();
             for mut frame in std::mem::take(&mut self.frames) {
                 self.free_staging_buffer(&mut frame.staging);
+                self.free_upload_image(&mut frame.upload_image);
                 if frame.fence != vk::Fence::null() {
                     self.device.destroy_fence(frame.fence, None);
                 }
@@ -826,6 +1145,46 @@ impl ComponentDecoder {
         let value = ((pixel & self.mask) >> self.shift) as u64;
         ((value * 255 + self.maximum / 2) / self.maximum) as u8
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn copy_bgrx_source_rect(
+    destination: &mut [u8],
+    source: &[u8],
+    source_width: usize,
+    source_height: usize,
+    source_pitch: usize,
+    source_left: usize,
+    source_top: usize,
+    source_rect_width: usize,
+    source_rect_height: usize,
+) -> Result<(), String> {
+    let row_bytes = source_rect_width
+        .checked_mul(4)
+        .ok_or_else(|| "source row byte count overflow".to_string())?;
+    let required = row_bytes
+        .checked_mul(source_rect_height)
+        .ok_or_else(|| "source rectangle byte count overflow".to_string())?;
+    let minimum_pitch = source_width
+        .checked_mul(4)
+        .ok_or_else(|| "source row size overflow".to_string())?;
+    if destination.len() < required
+        || source_pitch < minimum_pitch
+        || source.len() < source_pitch.saturating_mul(source_height)
+        || source_left.saturating_add(source_rect_width) > source_width
+        || source_top.saturating_add(source_rect_height) > source_height
+    {
+        return Err("invalid BGRX source rectangle".into());
+    }
+
+    let source_left_bytes = source_left * 4;
+    for row in 0..source_rect_height {
+        let source_start = (source_top + row) * source_pitch + source_left_bytes;
+        let destination_start = row * row_bytes;
+        destination[destination_start..destination_start + row_bytes]
+            .copy_from_slice(&source[source_start..source_start + row_bytes]);
+    }
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1194,6 +1553,29 @@ pub unsafe extern "C" fn rs_vulkan_last_error(dst: *mut c_char, dst_cap: usize) 
 mod tests {
     use super::*;
 
+    #[link(name = "user32")]
+    unsafe extern "system" {
+        fn CreateWindowExW(
+            ex_style: u32,
+            class_name: *const u16,
+            window_name: *const u16,
+            style: u32,
+            x: i32,
+            y: i32,
+            width: i32,
+            height: i32,
+            parent: *mut c_void,
+            menu: *mut c_void,
+            instance: *mut c_void,
+            parameter: *mut c_void,
+        ) -> *mut c_void;
+        fn DestroyWindow(window: *mut c_void) -> i32;
+    }
+
+    fn wide(value: &str) -> Vec<u16> {
+        value.encode_utf16().chain(std::iter::once(0)).collect()
+    }
+
     #[test]
     fn creates_vulkan_instance_with_win32_surface_extensions() {
         unsafe {
@@ -1213,6 +1595,73 @@ mod tests {
                 .create_instance(&create_info, None)
                 .expect("create Vulkan instance");
             instance.destroy_instance(None);
+        }
+    }
+
+    #[test]
+    fn presents_bgrx_frames_through_gpu_paths() {
+        unsafe {
+            let class_name = wide("STATIC");
+            let window_name = wide("mission-editor-vulkan-test");
+            let window = CreateWindowExW(
+                0,
+                class_name.as_ptr(),
+                window_name.as_ptr(),
+                0,
+                0,
+                0,
+                64,
+                64,
+                ptr::null_mut(),
+                ptr::null_mut(),
+                GetModuleHandleW(ptr::null()),
+                ptr::null_mut(),
+            );
+            assert!(!window.is_null(), "create hidden Vulkan test window");
+
+            let result = VulkanRenderer::new(window).and_then(|mut renderer| {
+                let pixels = [
+                    0_u8, 0, 255, 0, 0, 255, 0, 0, 255, 0, 0, 0, 255, 255, 255, 0,
+                ];
+                renderer.present(
+                    &pixels,
+                    2,
+                    2,
+                    8,
+                    4,
+                    0x00ff_0000,
+                    0x0000_ff00,
+                    0x0000_00ff,
+                    0,
+                    0,
+                    2,
+                    2,
+                    64,
+                    64,
+                    false,
+                )?;
+
+                let unscaled_pixels = vec![0x7f_u8; 64 * 64 * 4];
+                renderer.present(
+                    &unscaled_pixels,
+                    64,
+                    64,
+                    64 * 4,
+                    4,
+                    0x00ff_0000,
+                    0x0000_ff00,
+                    0x0000_00ff,
+                    0,
+                    0,
+                    64,
+                    64,
+                    64,
+                    64,
+                    false,
+                )
+            });
+            DestroyWindow(window);
+            result.unwrap();
         }
     }
 
@@ -1283,6 +1732,20 @@ mod tests {
         assert_eq!(
             destination,
             [30, 20, 10, 255, 60, 50, 40, 255, 90, 80, 70, 255, 120, 110, 100, 255]
+        );
+    }
+
+    #[test]
+    fn packs_bgrx_subrectangle_for_gpu_upload() {
+        let source = [
+            3_u8, 2, 1, 7, 30, 20, 10, 8, 60, 50, 40, 9, 0xaa, 0xbb, 0xcc, 0xdd, 6, 5, 4, 10, 90,
+            80, 70, 11, 120, 110, 100, 12, 0xee, 0xff, 0x11, 0x22,
+        ];
+        let mut destination = [0_u8; 16];
+        copy_bgrx_source_rect(&mut destination, &source, 3, 2, 16, 1, 0, 2, 2).unwrap();
+        assert_eq!(
+            destination,
+            [30, 20, 10, 8, 60, 50, 40, 9, 90, 80, 70, 11, 120, 110, 100, 12]
         );
     }
 
