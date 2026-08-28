@@ -1500,6 +1500,7 @@ struct Model {
 /// One render result from a pipeline
 struct RenderOut {
     image: Vec<u8>,
+    #[allow(dead_code)] // kept for parity with the C++ lighting buffer
     lighting: Vec<u8>,
     x_center: i32,
     y_center: i32,
@@ -1573,8 +1574,8 @@ fn old_render_section(
         (max_scale.z - min_scale.z) / cz1 as f32,
     ));
 
-    let mut i3dx = if i3d_center_x < 0 { 0 } else { i3d_center_x };
-    let mut i3dy = if i3d_center_y < 0 { 0 } else { i3d_center_y };
+    let i3dx = if i3d_center_x < 0 { 0 } else { i3d_center_x };
+    let i3dy = if i3d_center_y < 0 { 0 } else { i3d_center_y };
 
     let mut x_center = 0i32;
     let mut y_center = 0i32;
