@@ -32,6 +32,8 @@ class TextDrawer
 {
 public:
     TextDrawer(IDirectDraw4* pDirectDraw, int fontSizeInPoints, COLORREF col, COLORREF shadowCol=CLR_INVALID);
+    TextDrawer(const TextDrawer&) = delete;
+    TextDrawer& operator=(const TextDrawer&) = delete;
 
     bool isValid() const;
 

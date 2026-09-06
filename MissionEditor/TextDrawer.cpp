@@ -25,6 +25,7 @@
 #include <algorithm>
 #include "Vec2.h"
 #include "MissionEditorPackLib.h"
+#include "VulkanScene.h"
 
 namespace
 {
@@ -310,6 +311,14 @@ void TextDrawer::RenderText(IDirectDrawSurface4* target, int x, int y, const std
     if (centered)
     {
         cur -= GetExtent(text) / 2;
+    }
+
+    if (auto scene = VulkanScene::Current(); scene && scene->IsTarget(target))
+    {
+        auto& cached = GetCachedString(text);
+        if (cached.shadow) scene->Bitmap(cached.shadow, cur.x + shadowOffset, cur.y + shadowOffset);
+        if (cached.main) scene->Bitmap(cached.main, cur.x, cur.y);
+        return;
     }
 
     // Some DirectDraw drivers ignore the source color key when a cached GDI

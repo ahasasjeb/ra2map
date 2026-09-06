@@ -34,6 +34,7 @@
 #include "PropertyBrushTool.h"
 #include "PalettedImageComposition.h"
 #include "AlliesEditorDlg.h"
+#include "PanScroll.h"
 
 class TestError : public std::runtime_error
 {
@@ -117,6 +118,7 @@ int Tests::run()
 		[this]() { test_paletted_image_composition(); },
 		[this]() { test_alliance_sync(); },
 		[this]() { test_rules_section_cache(); },
+		[this]() { test_pan_scroll(); },
 	});
 	for (const auto f : test_functions)
 	{
@@ -127,6 +129,63 @@ int Tests::run()
 	std::cout << "Failed: " << failed_tests << std::endl;
 	std::cout << "Succeeded: " << test_functions.size() - failed_tests << std::endl;
 	return failed_tests ? 1 : 0;
+}
+
+void Tests::test_pan_scroll()
+{
+	// Equal elapsed time must give the same travel despite uneven frame times.
+	PanScrollMotion regular, delayed;
+	CPoint regularTotal(0, 0), delayedTotal(0, 0);
+	for (int i = 0; i < 60; ++i)
+		regularTotal += regular.Advance(17, -7, 0.016);
+	for (int i = 0; i < 30; ++i)
+	{
+		delayedTotal += delayed.Advance(17, -7, 0.011);
+		delayedTotal += delayed.Advance(17, -7, 0.021);
+	}
+	TEST(abs(regularTotal.x - 340) <= 1 && abs(regularTotal.y + 140) <= 1);
+	TEST(abs(delayedTotal.x - regularTotal.x) <= 1);
+	TEST(abs(delayedTotal.y - regularTotal.y) <= 1);
+
+	PanScrollMotion slow;
+	TEST(slow.Advance(1, -1, 0.024) == CPoint(0, 0));
+	TEST(slow.Advance(1, -1, 0.024) == CPoint(1, -1));
+	slow.Reset();
+	TEST(slow.Advance(1, 0, 0.024).x == 0);
+	TEST(slow.Advance(-1, 0, 0.024).x == 0); // reverse without stale drift
+	TEST(slow.Advance(-1, 0, 0.024).x == -1);
+	slow.Reset();
+	slow.Advance(1, 1, 0.024);
+	slow.Clamp(true, false);
+	TEST(slow.Advance(1, 1, 0.024) == CPoint(0, 1));
+	slow.Reset();
+	TEST(slow.Advance(48, -48, 3.0) == CPoint(50, -50)); // stalled UI
+	slow.Reset();
+	TEST(slow.Advance(48, -48, -0.1) == CPoint(0, 0));
+
+	// Every newly exposed pixel must be painted exactly once, including the
+	// diagonal corner. Double painting changes semi-transparent shadow colors.
+	const RECT area = { 13, 21, 22, 28 };
+	const auto contains = [](const RECT& rect, int x, int y)
+	{
+		return x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom;
+	};
+	for (int dx = -12; dx <= 12; ++dx)
+	{
+		for (int dy = -10; dy <= 10; ++dy)
+		{
+			const auto bands = GetPanExposedBands(area, dx, dy);
+			for (int y = area.top; y < area.bottom; ++y)
+			{
+				for (int x = area.left; x < area.right; ++x)
+				{
+					const int paints = contains(bands.x, x, y) + contains(bands.y, x, y);
+					TEST(paints == (contains(area, x - dx, y - dy) ? 0 : 1));
+				}
+			}
+		}
+	}
+	REPORT_TEST(true);
 }
 
 namespace

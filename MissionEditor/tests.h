@@ -44,4 +44,5 @@ private:
 	void test_paletted_image_composition();
 	void test_alliance_sync();
 	void test_rules_section_cache();
+	void test_pan_scroll();
 };

@@ -60,6 +60,9 @@
     <ClCompile Include="PalettedImageComposition.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="VulkanScene.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="CellTag.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -341,6 +344,15 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="PalettedImageComposition.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="PanScroll.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="VulkanScene.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\MissionEditorPackLib\RustCore.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="CellTag.h">
@@ -701,5 +713,30 @@
     <Text Include="data\shared\Changelog.txt">
       <Filter>Data\Shared</Filter>
     </Text>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="Rust Core">
+      <UniqueIdentifier>{4A70F535-17F3-4C57-81CD-EE699C8996E4}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\rust_core\Cargo.toml">
+      <Filter>Rust Core</Filter>
+    </None>
+    <None Include="..\rust_core\Cargo.lock">
+      <Filter>Rust Core</Filter>
+    </None>
+    <None Include="..\rust_core\build.rs">
+      <Filter>Rust Core</Filter>
+    </None>
+    <None Include="..\rust_core\src\vulkan.rs">
+      <Filter>Rust Core</Filter>
+    </None>
+    <None Include="..\rust_core\src\vulkan_scene.rs">
+      <Filter>Rust Core</Filter>
+    </None>
+    <None Include="..\rust_core\src\scene.wgsl">
+      <Filter>Rust Core</Filter>
+    </None>
   </ItemGroup>
 </Project>

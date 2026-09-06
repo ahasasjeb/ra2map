@@ -25,7 +25,9 @@
 
 // set NOSURFACES to use palettized tile drawing - probably slower, but using less memory
 #define NOSURFACES
-#define NOSURFACES_EXTRACT // this will cause tiles to be extracted
+// Keep TMP pixels indexed for the Vulkan scene asset cache. Extracting them
+// into packed 32-bit row spans loses the texture layout and palette identity.
+// #define NOSURFACES_EXTRACT
 // #undef NOSURFACES // enable this if display is too slow
 
 // set NOSURFACES_OBJECTS to use palettized object & overlay drawing - slower, but better display

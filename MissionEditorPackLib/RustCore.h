@@ -357,6 +357,22 @@ int rs_vulkan_present(
 // when dst_cap is non-zero. Returns the full diagnostic byte count.
 size_t rs_vulkan_last_error(char* dst, size_t dst_cap);
 
+// GPU scene commands: geometry only. Immutable indexed sprites and palettes
+// are uploaded once; the compute compositor performs all pixel work.
+typedef struct rs_scene_command {
+    int rect[4];
+    int clip[4];
+    unsigned int data[4];
+    unsigned int tint[4];
+    int line[4];
+    unsigned int extra[4];
+} rs_scene_command;
+int rs_vulkan_scene_upload(rs_vulkan_renderer*, uint64_t key, const unsigned int* words, size_t count, unsigned int* offset);
+int rs_vulkan_scene_present(rs_vulkan_renderer*, const rs_scene_command*, size_t count,
+    float left, float top, float scale_x, float scale_y, unsigned int width, unsigned int height, int vsync);
+size_t rs_vulkan_info(const rs_vulkan_renderer*, char* dst, size_t cap);
+int rs_vulkan_scene_reset(rs_vulkan_renderer*);
+
 #ifdef __cplusplus
 }
 #endif

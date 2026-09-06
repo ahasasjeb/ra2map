@@ -257,6 +257,7 @@
     <ClCompile Include="Bitmap2MapConverter.cpp" />
     <ClCompile Include="Building.cpp" />
     <ClCompile Include="PalettedImageComposition.cpp" />
+    <ClCompile Include="VulkanScene.cpp" />
     <ClCompile Include="CellTag.cpp" />
     <ClCompile Include="ChangeSizeDlg.cpp" />
     <ClCompile Include="CliffModifier.cpp" />
@@ -371,6 +372,9 @@
     <ClInclude Include="Bitmap2MapConverter.h" />
     <ClInclude Include="Building.h" />
     <ClInclude Include="PalettedImageComposition.h" />
+    <ClInclude Include="PanScroll.h" />
+    <ClInclude Include="VulkanScene.h" />
+    <ClInclude Include="..\MissionEditorPackLib\RustCore.h" />
     <ClInclude Include="CellTag.h" />
     <ClInclude Include="ChangeSizeDlg.h" />
     <ClInclude Include="CliffModifier.h" />
@@ -515,4 +519,12 @@
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
+  <ItemGroup>
+    <None Include="..\rust_core\Cargo.toml" />
+    <None Include="..\rust_core\Cargo.lock" />
+    <None Include="..\rust_core\build.rs" />
+    <None Include="..\rust_core\src\vulkan.rs" />
+    <None Include="..\rust_core\src\vulkan_scene.rs" />
+    <None Include="..\rust_core\src\scene.wgsl" />
+  </ItemGroup>
 </Project>

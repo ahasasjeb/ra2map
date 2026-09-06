@@ -11,6 +11,9 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::ptr;
 use std::slice;
 
+#[path = "vulkan_scene.rs"]
+mod scene;
+
 const RS_OK: i32 = 0;
 const RS_ERR_BAD_ARG: i32 = -1;
 const RS_ERR_PANIC: i32 = -3;
@@ -68,7 +71,6 @@ impl Default for UploadImage {
 struct FrameResources {
     command_buffer: vk::CommandBuffer,
     image_available: vk::Semaphore,
-    upload_complete: vk::Semaphore,
     fence: vk::Fence,
     staging: StagingBuffer,
     upload_image: UploadImage,
@@ -80,7 +82,6 @@ impl FrameResources {
         Self {
             command_buffer,
             image_available: vk::Semaphore::null(),
-            upload_complete: vk::Semaphore::null(),
             fence: vk::Fence::null(),
             staging: StagingBuffer::default(),
             upload_image: UploadImage::default(),
@@ -101,6 +102,9 @@ struct VulkanRenderer {
     swapchain_loader: ash::khr::swapchain::Device,
     swapchain: vk::SwapchainKHR,
     swapchain_images: Vec<vk::Image>,
+    present_semaphores: Vec<vk::Semaphore>,
+    present_mode: vk::PresentModeKHR,
+    scene: Option<scene::SceneGpu>,
     image_initialized: Vec<bool>,
     swapchain_format: vk::Format,
     swapchain_opaque: bool,
@@ -204,6 +208,9 @@ impl VulkanRenderer {
             swapchain_loader,
             swapchain: vk::SwapchainKHR::null(),
             swapchain_images: Vec::new(),
+            present_semaphores: Vec::new(),
+            present_mode: vk::PresentModeKHR::FIFO,
+            scene: None,
             image_initialized: Vec::new(),
             swapchain_format: vk::Format::UNDEFINED,
             swapchain_opaque: false,
@@ -243,7 +250,10 @@ impl VulkanRenderer {
             let queues =
                 unsafe { instance.get_physical_device_queue_family_properties(physical_device) };
             for (index, properties) in queues.iter().enumerate() {
-                if !properties.queue_flags.contains(vk::QueueFlags::GRAPHICS) {
+                if !properties
+                    .queue_flags
+                    .contains(vk::QueueFlags::GRAPHICS | vk::QueueFlags::COMPUTE)
+                {
                     continue;
                 }
                 let can_present = unsafe {
@@ -300,8 +310,6 @@ impl VulkanRenderer {
         for frame in &mut self.frames {
             frame.image_available = unsafe { self.device.create_semaphore(&semaphore_info, None) }
                 .map_err(|error| format!("vkCreateSemaphore failed: {error:?}"))?;
-            frame.upload_complete = unsafe { self.device.create_semaphore(&semaphore_info, None) }
-                .map_err(|error| format!("vkCreateSemaphore failed: {error:?}"))?;
             frame.fence = unsafe { self.device.create_fence(&fence_info, None) }
                 .map_err(|error| format!("vkCreateFence failed: {error:?}"))?;
         }
@@ -341,7 +349,11 @@ impl VulkanRenderer {
         let size = u64::try_from(len).map_err(|_| "staging buffer size overflow")?;
         let buffer_info = vk::BufferCreateInfo::default()
             .size(size)
-            .usage(vk::BufferUsageFlags::TRANSFER_SRC)
+            .usage(
+                vk::BufferUsageFlags::TRANSFER_SRC
+                    | vk::BufferUsageFlags::TRANSFER_DST
+                    | vk::BufferUsageFlags::STORAGE_BUFFER,
+            )
             .sharing_mode(vk::SharingMode::EXCLUSIVE);
         let buffer = unsafe { self.device.create_buffer(&buffer_info, None) }
             .map_err(|error| format!("vkCreateBuffer failed: {error:?}"))?;
@@ -568,8 +580,6 @@ impl VulkanRenderer {
             vk::PresentModeKHR::FIFO
         } else if present_modes.contains(&vk::PresentModeKHR::MAILBOX) {
             vk::PresentModeKHR::MAILBOX
-        } else if present_modes.contains(&vk::PresentModeKHR::IMMEDIATE) {
-            vk::PresentModeKHR::IMMEDIATE
         } else {
             vk::PresentModeKHR::FIFO
         };
@@ -661,6 +671,19 @@ impl VulkanRenderer {
         }
         self.swapchain = new_swapchain;
         self.swapchain_images = new_images;
+        for semaphore in self.present_semaphores.drain(..) {
+            unsafe { self.device.destroy_semaphore(semaphore, None) };
+        }
+        self.present_mode = present_mode;
+        for _ in &self.swapchain_images {
+            self.present_semaphores.push(
+                unsafe {
+                    self.device
+                        .create_semaphore(&vk::SemaphoreCreateInfo::default(), None)
+                }
+                .map_err(|error| format!("create per-image present semaphore: {error:?}"))?,
+            );
+        }
         self.image_initialized = vec![false; self.swapchain_images.len()];
         self.swapchain_format = format.format;
         self.swapchain_opaque = composite_alpha == vk::CompositeAlphaFlagsKHR::OPAQUE;
@@ -722,7 +745,6 @@ impl VulkanRenderer {
         let frame_index = self.current_frame;
         let frame_fence = self.frames[frame_index].fence;
         let image_available = self.frames[frame_index].image_available;
-        let upload_complete = self.frames[frame_index].upload_complete;
         let command_buffer = self.frames[frame_index].command_buffer;
         unsafe { self.device.wait_for_fences(&[frame_fence], true, u64::MAX) }
             .map_err(|error| format!("vkWaitForFences failed: {error:?}"))?;
@@ -1045,7 +1067,9 @@ impl VulkanRenderer {
         let wait_semaphores = [image_available];
         let wait_stages = [vk::PipelineStageFlags::TRANSFER];
         let command_buffers = [command_buffer];
-        let signal_semaphores = [upload_complete];
+        // Reacquiring this image (and waiting on image_available in submit)
+        // retires its previous present wait. A frame fence alone does not.
+        let signal_semaphores = [self.present_semaphores[image_index as usize]];
         let submit_info = [vk::SubmitInfo::default()
             .wait_semaphores(&wait_semaphores)
             .wait_dst_stage_mask(&wait_stages)
@@ -1087,14 +1111,17 @@ impl Drop for VulkanRenderer {
     fn drop(&mut self) {
         unsafe {
             let _ = self.device.device_wait_idle();
+            if let Some(mut scene) = self.scene.take() {
+                scene.destroy(self);
+            }
+            for semaphore in self.present_semaphores.drain(..) {
+                self.device.destroy_semaphore(semaphore, None);
+            }
             for mut frame in std::mem::take(&mut self.frames) {
                 self.free_staging_buffer(&mut frame.staging);
                 self.free_upload_image(&mut frame.upload_image);
                 if frame.fence != vk::Fence::null() {
                     self.device.destroy_fence(frame.fence, None);
-                }
-                if frame.upload_complete != vk::Semaphore::null() {
-                    self.device.destroy_semaphore(frame.upload_complete, None);
                 }
                 if frame.image_available != vk::Semaphore::null() {
                     self.device.destroy_semaphore(frame.image_available, None);

@@ -20,6 +20,7 @@
 
 #include "StdAfx.h"
 #include "LineDrawer.h"
+#include "VulkanScene.h"
 #include <cassert>
 #include <memory>
 
@@ -58,6 +59,11 @@ void LineDrawer::DrawLine(int from_x, int from_y, int to_x, int to_y, int color,
 	const int h = to_y - from_y;
 	m_last_x = to_x;
 	m_last_y = to_y;
+	if (auto scene = VulkanScene::ForPixels(m_dest))
+	{
+		scene->Line(from_x, from_y, to_x, to_y, color, ModLookup[static_cast<int>(style)], m_width, m_height);
+		return;
+	}
 	if (abs(w) >= abs(h)) {
 		return w >= 0 ? DrawLineImplX(from_x, from_y, to_x, to_y, color, style) : DrawLineImplX(to_x, to_y, from_x, from_y, color, style);
 	}

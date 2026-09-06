@@ -39,6 +39,9 @@
 #include <string>
 #include "MissionEditorPackLib.h"
 #include "Structs.h"
+#include "PanScroll.h"
+#include "VulkanScene.h"
+#include <chrono>
 
 struct rs_vulkan_renderer;
 
@@ -92,6 +95,8 @@ private:
 	int cur_x_mouse;
 	int cur_y_mouse;
 	BOOL rscroll;
+	PanScrollMotion m_panMotion;
+	std::chrono::steady_clock::time_point m_lastPanTick;
 	BOOL m_bAltCliff;
 	bool m_zooming;
 
@@ -283,6 +288,11 @@ public:
 	void Blit(LPDIRECTDRAWSURFACE4 pic, int x, int y, int width=-1, int height=-1)
 	{
 		if(pic==NULL) return;
+		if (m_gpuScene && VulkanScene::Current() == m_gpuScene.get())
+		{
+			m_gpuScene->Bitmap(pic, x + 1, y + 1);
+			return;
+		}
 
 		x+=1;
 		y+=1;
@@ -373,6 +383,8 @@ public:
 	// Opaque Rust-owned Vulkan renderer. DirectDraw remains only as a CPU
 	// raster-surface compatibility layer for the legacy drawing algorithms.
 	rs_vulkan_renderer* m_vulkanRenderer;
+	std::unique_ptr<VulkanScene> m_gpuScene;
+	bool m_lastPresentSucceeded = false;
 	int m_vulkanPresentFailures;
 	bool m_vulkanDisabled;
 	void HandleProperties(int n, int type);

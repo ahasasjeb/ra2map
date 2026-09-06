@@ -56,6 +56,8 @@ static char THIS_FILE[] = __FILE__;
 #include <chrono>
 #include <algorithm>
 #include <array>
+#include <set>
+#include <tuple>
 #include "TextDrawer.h"
 #include "RustCore.h"
 #include "BuildingFoundation.h"
@@ -123,6 +125,8 @@ public:
 
 	DDSURFACEDESC2* ensure_locked()
 	{
+		if (auto scene = VulkanScene::Current(); scene && scene->Describe(m_pDDS, m_ddsd))
+			return &m_ddsd;
 		if (m_locked)
 			return &m_ddsd;
 		if (m_pDDS == nullptr)
@@ -184,6 +188,15 @@ namespace
 			return true;
 		if (targetSurface == nullptr || sourceSurface == nullptr)
 			return false;
+		if (auto scene = VulkanScene::Current(); scene && scene->IsTarget(targetSurface))
+		{
+			for (size_t i = beginIndex; i < items.size(); ++i)
+			{
+				const auto pos = getPosition(items[i]);
+				if (!scene->Bitmap(sourceSurface, pos.x, pos.y)) return false;
+			}
+			return true;
+		}
 
 		SurfaceLocker targetLocker(targetSurface);
 		SurfaceLocker sourceLocker(sourceSurface);
@@ -284,6 +297,7 @@ CIsoView::CIsoView()
 
 CIsoView::~CIsoView()
 {
+	m_gpuScene.reset();
 	rs_vulkan_destroy(m_vulkanRenderer);
 	m_vulkanRenderer = nullptr;
 	bNoThreadDraw = TRUE;
@@ -358,6 +372,11 @@ struct BlitRect
 
 __forceinline void BlitTerrain(void* dst, int x, int y, int dleft, int dtop, int dpitch, int dright, int dbottom, const SUBTILE& st)//BYTE* src, int swidth, int sheight)
 {
+	if (auto scene = VulkanScene::ForPixels(dst))
+	{
+		scene->Indexed(st.pic, st.wWidth, st.wHeight, reinterpret_cast<const short*>(st.vborder), nullptr, iPalIso, nullptr, false, x, y, RECT{dleft, dtop, dright, dbottom});
+		return;
+	}
 	BYTE* src = st.pic;
 	const unsigned short swidth = st.wWidth;
 	const unsigned short sheight = st.wHeight;
@@ -480,6 +499,11 @@ __forceinline void BlitTerrain(void* dst, int x, int y, int dleft, int dtop, int
 
 __forceinline void BlitTerrainHalfTransp(void* dst, int x, int y, int dleft, int dtop, int dpitch, int dright, int dbottom, const SUBTILE& st)//BYTE* src, int swidth, int sheight)
 {
+	if (auto scene = VulkanScene::ForPixels(dst))
+	{
+		scene->Indexed(st.pic, st.wWidth, st.wHeight, reinterpret_cast<const short*>(st.vborder), nullptr, iPalIso, nullptr, true, x, y, RECT{dleft, dtop, dright, dbottom});
+		return;
+	}
 	BYTE* src = st.pic;
 	const unsigned short swidth = st.wWidth;
 	const unsigned short sheight = st.wHeight;
@@ -677,6 +701,13 @@ __forceinline void BlitPic(void* dst, int x, int y, int dleft, int dtop, int dpi
 	ASSERT(pd.bType != PICDATA_TYPE_BMP);
 
 	if (newPal == NULL) newPal = pd.pal;
+	if (auto scene = VulkanScene::ForPixels(dst))
+	{
+		scene->Indexed(static_cast<const BYTE*>(pd.pic), pd.wMaxWidth, pd.wMaxHeight,
+			reinterpret_cast<const short*>(pd.vborder), pd.lighting && !pd.lighting->empty() ? pd.lighting->data() : nullptr,
+			newPal, newPal == iPalUnit ? color : nullptr, false, x, y, RECT{dleft, dtop, dright, dbottom});
+		return;
+	}
 
 	BYTE* src = (BYTE*)pd.pic;
 	int swidth = pd.wMaxWidth;
@@ -791,6 +822,13 @@ __forceinline void BlitPic(void* dst, int x, int y, int dleft, int dtop, int dpi
 
 __forceinline void BlitPicHalfTransp(void* dst, int x, int y, int dleft, int dtop, int dpitch, int dright, int dbottom, PICDATA& pd, int* color = NULL, int* newPal = NULL)//BYTE* src, int swidth, int sheight)
 {
+	if (auto scene = VulkanScene::ForPixels(dst))
+	{
+		if (!newPal) newPal = pd.pal;
+		scene->Indexed(static_cast<const BYTE*>(pd.pic), pd.wMaxWidth, pd.wMaxHeight,
+			reinterpret_cast<const short*>(pd.vborder), nullptr, newPal, color, true, x, y, RECT{dleft, dtop, dright, dbottom});
+		return;
+	}
 	ASSERT(pd.bType != PICDATA_TYPE_BMP);
 
 	if (newPal == NULL) newPal = pd.pal;
@@ -1146,6 +1184,8 @@ void CIsoView::OnMouseMove(UINT nFlags, CPoint point)
 			// yes, begin scrolling!
 
 			rscroll = TRUE;
+			m_panMotion.Reset();
+			m_lastPanTick = std::chrono::steady_clock::now();
 			// 16 ms targets a visually smooth 60 Hz pan. The timer path uses the
 			// incremental renderer, so a full map redraw is not needed per frame.
 			SetTimer(11, 16, NULL);
@@ -1225,7 +1265,9 @@ void CIsoView::OnMouseMove(UINT nFlags, CPoint point)
 	// preview ghosts from other tools, e.g. after a tile preview)
 	const BOOL bFastPreview = (AD.mode == ACTIONMODE_PLACE || AD.mode == ACTIONMODE_RANDOMTERRAIN) && (nFlags & ~MK_CONTROL) == 0 && AD.type != 7 && AD.type != 6;
 
-	if (lpdsBack && !bFastPreview)
+	if (m_gpuScene && !bFastPreview)
+		m_gpuScene->RestoreBase();
+	else if (lpdsBack && !bFastPreview)
 		// reset back buffer to last DrawMap()
 		lpdsBack->BltFast(0, 0, lpdsTemp, NULL, DDBLTFAST_WAIT);
 		//lpdsBack->Blt(NULL, lpdsTemp, NULL, 0, 0);
@@ -1423,7 +1465,8 @@ void CIsoView::OnMouseMove(UINT nFlags, CPoint point)
 	if (r.bottom > static_cast<int>(ddsd.dwHeight)) r.bottom = static_cast<int>(ddsd.dwHeight);
 
 
-			lpdsBack->Lock(NULL, &ddsd, DDLOCK_SURFACEMEMORYPTR | DDLOCK_WAIT | DDLOCK_NOSYSLOCK, NULL);
+			if (m_gpuScene) m_gpuScene->Describe(lpdsBack, ddsd);
+			else lpdsBack->Lock(NULL, &ddsd, DDLOCK_SURFACEMEMORYPTR | DDLOCK_WAIT | DDLOCK_NOSYSLOCK, NULL);
 
 			int i, e;
 			int isosize = Map->GetIsoSize();
@@ -1447,7 +1490,7 @@ void CIsoView::OnMouseMove(UINT nFlags, CPoint point)
 				}
 			}
 
-			lpdsBack->Unlock(NULL);
+			if (!m_gpuScene) lpdsBack->Unlock(NULL);
 
 			BlitBackbufferToHighRes();
 			RenderUIOverlay();
@@ -2185,6 +2228,11 @@ void CIsoView::OnRButtonUp(UINT nFlags, CPoint point)
 	const bool wasScrolling = rscroll != FALSE;
 	if (wasScrolling)
 	{
+		if (m_vulkanRenderer)
+		{
+			char info[1024]{}; rs_vulkan_info(m_vulkanRenderer, info, sizeof(info));
+			errstream << "Pan rendering: " << info << endl;
+		}
 		ReleaseCapture();
 		KillTimer(11);
 		rscroll = FALSE;
@@ -3867,15 +3915,15 @@ void CIsoView::OnDraw(CDC* pDC)
 		FlipHighResBuffer(&m_lastPresentSourceRect);
 		return;
 	}
-	if (m_bPanFastPath && bIncrementalPan && rscroll &&
+	if (!m_gpuScene && m_bPanFastPath && bIncrementalPan && rscroll &&
 		(GetAsyncKeyState(VK_RBUTTON) & 0x8000) != 0 && m_lastFrameValid)
 	{
 		const ProjectedVec delta = m_viewOffset - m_lastViewOffset;
-		const float scaleX = max(0.1f, m_viewScale.x);
-		const float scaleY = max(0.1f, m_viewScale.y);
-		constexpr float maxPreviewShift = 128.0f;
-		if (abs(delta.x) / scaleX < maxPreviewShift &&
-			abs(delta.y) / scaleY < maxPreviewShift && PresentPanPreview())
+		const RECT area = GetScaledDisplayRect();
+		// The cache advances with each preview. Only a jump that loses most of
+		// the viewport needs a full redraw, not every accumulated 128 pixels.
+		if (abs(delta.x) < (area.right - area.left) / 2 &&
+			abs(delta.y) < (area.bottom - area.top) / 2 && PresentPanPreview())
 		{
 			m_bPanFastPath = FALSE;
 			return;
@@ -3900,6 +3948,10 @@ bool CIsoView::HasLostDirectDrawSurface() const
 
 void CIsoView::ReInitializeDDraw()
 {
+	m_gpuScene.reset();
+	rs_vulkan_destroy(m_vulkanRenderer);
+	m_vulkanRenderer = nullptr;
+	m_vulkanDisabled = false;
 	b_IsLoading = TRUE;
 	ReleaseCapture();
 	KillTimer(11);
@@ -4154,6 +4206,13 @@ col specifies the color.
 */
 void CIsoView::DrawCell(int x, int y, int w, int h, COLORREF col, BOOL dotted, HDC hDC_)
 {
+	if (m_gpuScene && VulkanScene::Current() == m_gpuScene.get())
+	{
+		DDSURFACEDESC2 desc{}; m_gpuScene->Describe(lpdsBack, desc);
+		DrawCell(desc.lpSurface, desc.dwWidth, desc.dwHeight, desc.lPitch, x, y, w, h,
+			m_color_converter->GetColor(col), dotted != FALSE);
+		return;
+	}
 
 
 	// correct the y value:
@@ -4915,6 +4974,7 @@ void CIsoView::EnsureHighResSurface()
 
 void CIsoView::BlitBackbufferToHighRes()
 {
+	if (m_gpuScene) return;
 	// MW:
 	// the primary buffer and the (optional) high-res buffer cover the whole screen (Windows automatic high DPI scaling does not change this)
 	// the backbuffer also has the size of the whole screen, however we don't render to the whole screen
@@ -4949,6 +5009,36 @@ void CIsoView::BlitBackbufferToHighRes()
 
 void CIsoView::FlipHighResBuffer(const RECT* sourceRectOverride)
 {
+	m_lastPresentSucceeded = false;
+	if (m_gpuScene && VulkanScene::Current() == m_gpuScene.get())
+	{
+		RECT client{}; GetClientRect(&client);
+		const RECT source = sourceRectOverride ? *sourceRectOverride : GetScaledDisplayRect();
+		if (!m_gpuScene->Present(source, client.right, client.bottom, theApp.m_Options.bVSync))
+		{
+			char error[1024]{}; rs_vulkan_last_error(error, sizeof(error));
+			errstream << "GPU scene frame failed: " << error << endl;
+			// A failure after acquire may leave a signaled acquire semaphore.
+			// Retire the entire renderer before retrying, never reuse that frame
+			// or show a stale software backbuffer in the middle of a GPU frame.
+			m_gpuScene.reset();
+			rs_vulkan_destroy(m_vulkanRenderer);
+			m_vulkanRenderer = nullptr;
+			m_lastFrameValid = false;
+			m_bPanFastPath = FALSE;
+			if (++m_vulkanPresentFailures >= 3)
+			{
+				m_vulkanDisabled = true;
+				errstream << "GPU renderer recovery failed; requesting a complete DirectDraw compatibility redraw" << endl;
+			}
+			Invalidate(FALSE);
+			return;
+		}
+		m_vulkanPresentFailures = 0;
+		m_lastPresentSucceeded = true;
+		m_lastPresentSourceRect = source;
+		return;
+	}
 	LPDIRECTDRAWSURFACE4 presentSurface = lpdsBack;
 	RECT sourceRect = GetScaledDisplayRect();
 	if (m_viewScale != Vec2<CSProjected, float>(1.0f, 1.0f))
@@ -4993,6 +5083,7 @@ void CIsoView::FlipHighResBuffer(const RECT* sourceRectOverride)
 
 			if (result == RS_OK)
 			{
+				m_lastPresentSucceeded = true;
 				m_vulkanPresentFailures = 0;
 				if (sourceRectOverride == nullptr)
 					m_lastPresentSourceRect = sourceRect;
@@ -5019,7 +5110,7 @@ void CIsoView::FlipHighResBuffer(const RECT* sourceRectOverride)
 
 	RECT destinationRect;
 	GetWindowRect(&destinationRect);
-	lpds->Blt(&destinationRect, presentSurface, &sourceRect, DDBLT_WAIT, 0);
+	m_lastPresentSucceeded = lpds->Blt(&destinationRect, presentSurface, &sourceRect, DDBLT_WAIT, 0) == DD_OK;
 	if (sourceRectOverride == nullptr)
 		m_lastPresentSourceRect = sourceRect;
 }
@@ -5076,6 +5167,20 @@ bool CIsoView::PresentPanPreview()
 		}
 	};
 
+	// Disjoint bands keep the diagonal corner from blending shadows twice.
+	const auto bands = GetPanExposedBands(sourceArea, shiftX, shiftY);
+
+	// The shifted cache cannot contain pixels that have just entered the
+	// viewport. Rebuild only those narrow bands so preview frames stay complete
+	// without returning to a full map traversal on every timer tick.
+	if (!PatchPanPreviewBands(bands.x, bands.y))
+	{
+		restoreBaseTexts();
+		return false;
+	}
+
+	// Copy retained pixels last: legacy foundation/line drawing in the patch
+	// can extend beyond its band and must not overwrite the cached interior.
 	RECT shiftedArea = sourceArea;
 	OffsetRect(&shiftedArea, shiftX, shiftY);
 	RECT destination{};
@@ -5090,36 +5195,30 @@ bool CIsoView::PresentPanPreview()
 		}
 	}
 
-	RECT stripX = { sourceArea.left, sourceArea.top, sourceArea.left, sourceArea.bottom };
-	if (shiftX > 0)
-	{
-		stripX.right = min(sourceArea.right, sourceArea.left + shiftX);
-	}
-	else if (shiftX < 0)
-	{
-		stripX.left = max(sourceArea.left, sourceArea.right + shiftX);
-		stripX.right = sourceArea.right;
-	}
-
-	RECT stripY = { sourceArea.left, sourceArea.top, sourceArea.right, sourceArea.top };
-	if (shiftY > 0)
-	{
-		stripY.bottom = min(sourceArea.bottom, sourceArea.top + shiftY);
-	}
-	else if (shiftY < 0)
-	{
-		stripY.top = max(sourceArea.top, sourceArea.bottom + shiftY);
-		stripY.bottom = sourceArea.bottom;
-	}
-
-	// The shifted cache cannot contain pixels that have just entered the
-	// viewport. Rebuild only those narrow bands so preview frames stay complete
-	// without returning to a full map traversal on every timer tick.
-	if (!PatchPanPreviewBands(stripX, stripY))
+	// Commit the complete clean scene before adding cursor/text overlays.
+	// Otherwise every preview patches an increasingly wide band from an old
+	// frame, followed by a periodic expensive traversal to catch the cache up.
+	if (lpdsTemp->Blt(&sourceArea, lpdsBack, &sourceArea, DDBLT_WAIT, nullptr) != DD_OK)
 	{
 		restoreBaseTexts();
+		m_lastFrameValid = false;
 		return false;
 	}
+	m_lastViewOffset = m_viewOffset;
+	m_previewHasSaved = FALSE;
+
+	// Band owner ranges overlap the cached scene and each other. Keep one
+	// copy of each label and discard distant labels so long pans stay bounded.
+	std::set<std::tuple<int, int, int, bool, bool, bool, std::string>> labels;
+	std::erase_if(m_texts_to_render, [&](const TextToRender& text)
+		{
+			if (!text.fixedScreenPos && (text.drawx < sourceArea.left - 512 ||
+				text.drawy < sourceArea.top - 512 || text.drawx > sourceArea.right + 512 ||
+				text.drawy > sourceArea.bottom + 512))
+				return true;
+			return !labels.emplace(text.drawx, text.drawy, text.color, text.fixedScreenPos,
+				text.useFont9, text.centered, text.text).second;
+		});
 
 	auto cursor = pics.find("SCROLLCURSOR");
 	if (cursor != pics.end() && cursor->second.pic != nullptr)
@@ -5141,7 +5240,6 @@ bool CIsoView::PresentPanPreview()
 	BlitBackbufferToHighRes();
 	RenderUIOverlay();
 	FlipHighResBuffer();
-	restoreBaseTexts();
 	last_succeeded_operation = 10101;
 	return true;
 }
@@ -5322,7 +5420,9 @@ bool CIsoView::InitializeVulkanRenderer()
 		if (width <= 0 || height <= 0 ||
 			rs_vulkan_prepare(m_vulkanRenderer, width, height, theApp.m_Options.bVSync ? 1 : 0) == RS_OK)
 		{
-			errstream << "Vulkan presentation initialized; swapchain memory is owned by Rust" << endl;
+			m_gpuScene = std::make_unique<VulkanScene>(m_vulkanRenderer, lpdsBack);
+			char info[1024]{}; rs_vulkan_info(m_vulkanRenderer, info, sizeof(info));
+			errstream << "Vulkan GPU scene initialized: " << info << endl;
 			errstream.flush();
 			return true;
 		}
@@ -6317,6 +6417,7 @@ void CIsoView::DrawObjectPreviewAt(int x, int y)
 // the committed scene rather than forcing a delayed full redraw.
 bool CIsoView::RefreshObjectScene(const MapCoords& oldPos, const MapCoords& newPos, bool eraseOldObject)
 {
+	if (m_gpuScene) return false;
 	if (lpdsBack == NULL || lpdsTemp == NULL || Map->GetIsoSize() == 0 ||
 		m_viewScale.x <= 0.0f || m_viewScale.y <= 0.0f)
 		return false;
@@ -6614,6 +6715,7 @@ bool CIsoView::RefreshObjectScene(const MapCoords& oldPos, const MapCoords& newP
 // be restored later to erase the placement preview ghost without a full map redraw
 void CIsoView::SavePreviewRegion(const RECT& rect)
 {
+	if (m_gpuScene) { m_gpuScene->SavePreview(); m_previewHasSaved = TRUE; return; }
 	m_previewHasSaved = FALSE;
 
 	if (lpdsBack == NULL || bpp <= 0) return;
@@ -6651,6 +6753,7 @@ void CIsoView::SavePreviewRegion(const RECT& rect)
 // preview ghost without a full map redraw
 void CIsoView::RestorePreviewRegion()
 {
+	if (m_gpuScene) { if (m_previewHasSaved) m_gpuScene->RestorePreview(); return; }
 	if (!m_previewHasSaved || m_previewSavedPixels.empty() || lpdsBack == NULL || bpp <= 0) return;
 
 	SurfaceLocker locker(lpdsBack);
@@ -6724,18 +6827,28 @@ void CIsoView::OnTimer(UINT_PTR nIDEvent)
 	}
 	else if (nIDEvent == 11)
 	{
-		if ((GetAsyncKeyState(VK_RBUTTON) & 0x8000) == 0)
+		if (!rscroll || (GetAsyncKeyState(VK_RBUTTON) & 0x8000) == 0)
 			return;
 
-		// BUGSEARCH
-		//if(b_IsLoading) return;	
-		// 
-		const ProjectedVec oldOffset = m_viewOffset;
-		// At 16 ms, dividing by three keeps the previous pan speed (25 ms / 2)
-		// while increasing the visual update rate from about 40 Hz to about 60 Hz.
-		m_viewOffset += ProjectedVec((cur_x_mouse - rclick_x) / 3, (cur_y_mouse - rclick_y) / 3);
+		const auto now = std::chrono::steady_clock::now();
+		const double elapsed = std::chrono::duration<double>(now - m_lastPanTick).count();
+		m_lastPanTick = now;
+		if (b_IsLoading)
+			return;
 
-		SetScroll(m_viewOffset.x, m_viewOffset.y);
+		// Read the latest position even if mouse messages waited behind a draw.
+		CPoint cursor;
+		if (::GetCursorPos(&cursor))
+		{
+			ScreenToClient(&cursor);
+			cur_x_mouse = cursor.x;
+			cur_y_mouse = cursor.y;
+		}
+		const ProjectedVec oldOffset = m_viewOffset;
+		const CPoint movement = m_panMotion.Advance(cur_x_mouse - rclick_x, cur_y_mouse - rclick_y, elapsed);
+		const ProjectedVec requested = oldOffset + ProjectedVec(movement.x, movement.y);
+		SetScroll(requested.x, requested.y);
+		m_panMotion.Clamp(m_viewOffset.x != requested.x, m_viewOffset.y != requested.y);
 
 		// nothing moved (or the scroll position is clamped at the map border) - skip the redraw
 		if (m_viewOffset == oldOffset)
@@ -7129,7 +7242,9 @@ void CIsoView::DrawMap()
 	memset(&fx, 0, sizeof(DDBLTFX));
 	fx.dwSize = sizeof(DDBLTFX);
 	fx.dwFillColor = RGB(255, 255, 255);
-	lpdsBack->Blt(NULL, NULL, NULL, DDBLT_COLORFILL, &fx);
+	InitializeVulkanRenderer();
+	if (m_gpuScene) m_gpuScene->Begin(GetScaledDisplayRect());
+	else lpdsBack->Blt(NULL, NULL, NULL, DDBLT_COLORFILL, &fx);
 
 
 	// get the window rect
@@ -7196,7 +7311,7 @@ void CIsoView::DrawMap()
 
 
 #ifdef NOSURFACES
-	if (m_bPanFastPath && bIncrementalPan && rscroll)
+	if (!m_gpuScene && m_bPanFastPath && bIncrementalPan && rscroll)
 	{
 		m_bPanFastPath = FALSE;
 		if (DrawMapPan(left, right, top, bottom, MM_heightstart, bMarbleHeight))
@@ -7205,7 +7320,8 @@ void CIsoView::DrawMap()
 #endif
 #ifdef NOSURFACES				
 	{
-		HRESULT lockRes = lpdsBack->Lock(NULL, &ddsd, DDLOCK_SURFACEMEMORYPTR | DDLOCK_WAIT | DDLOCK_NOSYSLOCK, NULL);
+		HRESULT lockRes = m_gpuScene && m_gpuScene->Describe(lpdsBack, ddsd) ? DD_OK :
+			lpdsBack->Lock(NULL, &ddsd, DDLOCK_SURFACEMEMORYPTR | DDLOCK_WAIT | DDLOCK_NOSYSLOCK, NULL);
 		if (lockRes != DD_OK || ddsd.lpSurface == NULL)
 		{
 			// Surface lock failed (lost surface / busy). Try to restore once.
@@ -7291,7 +7407,7 @@ void CIsoView::DrawMap()
 	}
 
 #ifdef NOSURFACES
-	lpdsBack->Unlock(NULL);
+	if (!m_gpuScene) lpdsBack->Unlock(NULL);
 #endif
 
 	const bool celltagsComposited = CompositeColorKeySurface(
@@ -7330,7 +7446,9 @@ void CIsoView::DrawMap()
 			AD.tool->render();
 	}
 
-	if (!m_bSkipTempSave)
+	if (m_gpuScene && !m_bSkipTempSave)
+		m_gpuScene->SaveBase();
+	else if (!m_bSkipTempSave)
 		lpdsTemp->Blt(NULL, lpdsBack, NULL, 0, 0); // lpdsTemp always holds the scene drawn above, unscaled to the window (except when suppressed by the fast placement preview, as lpdsTemp must never contain a preview ghost)
 
 	if (m_cellCursor != MapCoords(-1, -1))
@@ -7377,7 +7495,7 @@ void CIsoView::DrawMap()
 	last_succeeded_operation = 10100;
 
 	m_lastViewOffset = m_viewOffset;
-	m_lastFrameValid = true;
+	m_lastFrameValid = m_lastPresentSucceeded;
 
 	if (pics.size() != picsCountAtFrameStart)
 		m_picFileCache.clear();
@@ -8489,7 +8607,7 @@ bool CIsoView::DrawMapPan(int left, int right, int top, int bottom, DWORD MM_hei
 	last_succeeded_operation = 10100;
 
 	m_lastViewOffset = m_viewOffset;
-	m_lastFrameValid = true;
+	m_lastFrameValid = m_lastPresentSucceeded;
 
 	if (pics.size() != picsCountAtFrameStart)
 		m_picFileCache.clear();
@@ -8505,7 +8623,13 @@ void CIsoView::RenderUIOverlay()
 
 	LPDIRECTDRAWSURFACE4 dds = lpdsBack;
 	bool useHighRes = false;
-	if (m_viewScale != Vec2<CSProjected, float>(1.0f, 1.0f) && lpdsBackHighRes)
+	if (m_gpuScene)
+	{
+		useHighRes = theApp.m_Options.bHighResUI && m_viewScale != Vec2<CSProjected, float>(1.0f, 1.0f);
+		RECT screen{}; GetWindowRect(&screen);
+		m_gpuScene->BeginOverlay(screen, useHighRes);
+	}
+	if (!m_gpuScene && m_viewScale != Vec2<CSProjected, float>(1.0f, 1.0f) && lpdsBackHighRes)
 	{
 		dds = lpdsBackHighRes;
 		useHighRes = true;
@@ -8578,15 +8702,16 @@ void CIsoView::RenderUIOverlay()
 		const bool blue = s.color == RGB(0, 0, 255);  // TODO: TextRenderer should support setting the color at render time
 		if (s.fixedScreenPos || !useHighRes)
 		{
-			auto textRenderer = s.useFont9 ? (blue ? *m_textBlue9 : *m_text9) : (blue ? *m_textBlue : *m_textDefault);
+			auto& textRenderer = s.useFont9 ? (blue ? *m_textBlue9 : *m_text9) : (blue ? *m_textBlue : *m_textDefault);
 			textRenderer.RenderText(dds, s.drawx, s.drawy, s.text, s.centered);
 		}
 		else
 		{
-			auto textRenderer = s.useFont9 ? (blue ? *m_textBlue9Scaled : *m_text9Scaled) : (blue ? *m_textBlueScaled : *m_textScaled);
+			auto& textRenderer = s.useFont9 ? (blue ? *m_textBlue9Scaled : *m_text9Scaled) : (blue ? *m_textBlueScaled : *m_textScaled);
 			textRenderer.RenderText(dds, r.left + (s.drawx - r.left) / m_viewScale.x, r.top + (s.drawy - r.top) / m_viewScale.y, s.text, s.centered);
 		}
 	}
+	if (m_gpuScene) m_gpuScene->EndOverlay();
 }
 
 

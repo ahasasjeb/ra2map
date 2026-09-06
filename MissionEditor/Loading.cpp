@@ -5997,6 +5997,7 @@ void CLoading::FreeTileSet()
 
 void CLoading::FreeAll()
 {
+	VulkanScene::InvalidateAssets();
 	last_succeeded_operation=14;
 
 	// MW fix: We need to set tiledata and tiledata_count to the old pointers again
