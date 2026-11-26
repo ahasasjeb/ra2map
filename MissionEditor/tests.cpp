@@ -38,6 +38,7 @@
 #include "VulkanScene.h"
 #include "TileSetVulkanRecovery.h"
 #include "TileSetBrowserView.h"
+#include "CrashReporter.h"
 #include "functions.h"
 
 class TestError : public std::runtime_error
@@ -125,6 +126,7 @@ int Tests::run()
 		[this]() { test_pan_scroll(); },
 		[this]() { test_vulkan_color_and_bitmap(); },
 		[this]() { test_tileset_vulkan_recovery(); },
+		[this]() { test_crash_reporter(); },
 	});
 	for (const auto f : test_functions)
 	{
@@ -1480,5 +1482,117 @@ void Tests::test_tileset_vulkan_recovery()
 		hostWindow.DestroyWindow();
 	}
 
+	REPORT_TEST(true);
+}
+
+void Tests::test_crash_reporter()
+{
+	// 1. Verify exception descriptions (including access violation read/write/DEP details).
+	{
+		const ULONG_PTR readInfo[2] = { 0, 0x12345678ULL };
+		const auto readSummary = CrashReporter::DescribeExceptionCode(EXCEPTION_ACCESS_VIOLATION, readInfo, 2);
+		TEST(readSummary.code == EXCEPTION_ACCESS_VIOLATION);
+		TEST(readSummary.name == "EXCEPTION_ACCESS_VIOLATION");
+		TEST(readSummary.extraDetails.find("Read") != std::string::npos);
+		TEST(readSummary.extraDetails.find("12345678") != std::string::npos);
+
+		const ULONG_PTR writeInfo[2] = { 1, 0xDEADBEEFULL };
+		const auto writeSummary = CrashReporter::DescribeExceptionCode(EXCEPTION_ACCESS_VIOLATION, writeInfo, 2);
+		TEST(writeSummary.extraDetails.find("Write") != std::string::npos);
+		TEST(writeSummary.extraDetails.find("DEADBEEF") != std::string::npos);
+
+		const auto stackSummary = CrashReporter::DescribeExceptionCode(EXCEPTION_STACK_OVERFLOW);
+		TEST(stackSummary.name == "EXCEPTION_STACK_OVERFLOW");
+
+		const auto cppSummary = CrashReporter::DescribeExceptionCode(0xE06D7363u);
+		TEST(cppSummary.name == "MSVC_CPP_EXCEPTION");
+
+		const auto unknownSummary = CrashReporter::DescribeExceptionCode(0x12345678u);
+		TEST(unknownSummary.name == "UNKNOWN_EXCEPTION");
+	}
+
+	// 2. Capture live stack frames and verify module/symbol info is populated.
+	const auto frames = CrashReporter::CaptureStackFrames(nullptr, 0, 16);
+	TEST(!frames.empty());
+	bool foundModuleOrSymbol = false;
+	for (const auto& frame : frames)
+	{
+		TEST(frame.address != 0);
+		if (!frame.moduleName.empty() || !frame.symbolName.empty())
+			foundModuleOrSymbol = true;
+	}
+	TEST(foundModuleOrSymbol);
+
+	// 3. Format crash report + write both .txt report and .dmp minidump to a temp directory.
+	CrashReportData data;
+	data.timestamp = "2026-11-27 07:00:00.000";
+	data.editorVariant = "FinalAlert 2: Yuri's Revenge";
+	data.buildConfig = "Debug x64";
+	data.osVersion = "Windows 10.0";
+	data.processId = GetCurrentProcessId();
+	data.threadId = GetCurrentThreadId();
+	data.crashSource = "UnitTest Synthetic Crash";
+	data.exception = CrashReporter::DescribeExceptionCode(EXCEPTION_INT_DIVIDE_BY_ZERO);
+	data.faultAddress = frames[0].address;
+	data.faultLocation = "FinalAlert2YRTestsd.exe+0x1234";
+	data.cppExceptionType = "std::runtime_error";
+	data.cppExceptionMessage = "synthetic test failure";
+	data.lastSucceededOperation = 42;
+	data.lastLibraryOperation = 7;
+	data.currentMapFile = "C:\\maps\\test.yrm";
+	data.vulkanLastError = "vkQueuePresentKHR: VK_ERROR_DEVICE_LOST";
+	data.stackFrames = frames;
+
+	namespace fs = std::filesystem;
+	const fs::path tempDir = fs::temp_directory_path() / ("ra2map_crash_test_" + std::to_string(GetCurrentProcessId()));
+	std::error_code ec;
+	fs::remove_all(tempDir, ec);
+
+	const CrashArtifacts artifacts = CrashReporter::WriteCrashArtifacts(
+		tempDir.wstring(),
+		data,
+		nullptr,
+		GetCurrentThreadId());
+
+	TEST(artifacts.reportWritten);
+	TEST(fs::exists(artifacts.reportFilePath));
+	TEST(artifacts.dumpWritten);
+	TEST(fs::exists(artifacts.dumpFilePath));
+
+	// Verify UTF-8 BOM + expected report content.
+	{
+		std::ifstream in(artifacts.reportFilePath, std::ios::binary);
+		TEST(in.is_open());
+		const std::string content((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+		TEST(content.size() >= 3);
+		TEST(static_cast<unsigned char>(content[0]) == 0xEF &&
+			static_cast<unsigned char>(content[1]) == 0xBB &&
+			static_cast<unsigned char>(content[2]) == 0xBF);
+		TEST(content.find("EXCEPTION_INT_DIVIDE_BY_ZERO") != std::string::npos);
+		TEST(content.find("synthetic test failure") != std::string::npos);
+		TEST(content.find("vkQueuePresentKHR: VK_ERROR_DEVICE_LOST") != std::string::npos);
+		TEST(content.find("Last Operation   : 42") != std::string::npos);
+		TEST(content.find("Call Stack") != std::string::npos);
+	}
+
+	// Verify minidump header magic ("MDMP").
+	{
+		std::ifstream dumpIn(artifacts.dumpFilePath, std::ios::binary);
+		TEST(dumpIn.is_open());
+		char magic[4] = { 0 };
+		dumpIn.read(magic, 4);
+		TEST(dumpIn.gcount() == 4);
+		TEST(std::memcmp(magic, "MDMP", 4) == 0);
+	}
+
+	// Verify both Chinese and English UI summary texts include key fields.
+	const std::wstring zhSummary = CrashReporter::BuildCrashSummaryText(data, artifacts, true);
+	const std::wstring enSummary = CrashReporter::BuildCrashSummaryText(data, artifacts, false);
+	TEST(zhSummary.find(L"EXCEPTION_INT_DIVIDE_BY_ZERO") != std::wstring::npos);
+	TEST(zhSummary.find(L"synthetic test failure") != std::wstring::npos);
+	TEST(enSummary.find(L"EXCEPTION_INT_DIVIDE_BY_ZERO") != std::wstring::npos);
+	TEST(enSummary.find(L"synthetic test failure") != std::wstring::npos);
+
+	fs::remove_all(tempDir, ec);
 	REPORT_TEST(true);
 }

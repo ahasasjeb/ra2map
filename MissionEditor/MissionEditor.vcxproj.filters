@@ -75,6 +75,9 @@
     <ClCompile Include="ComboUInputDlg.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="CrashReporter.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="DynamicGraphDlg.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -365,6 +368,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="ComboUInputDlg.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CrashReporter.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="defines.h">

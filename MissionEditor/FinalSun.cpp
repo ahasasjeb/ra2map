@@ -30,7 +30,10 @@
 #include "variables.h"
 #include "functions.h"
 #include "inlines.h"
+#include "CrashReporter.h"
 #include <ShlObj.h>
+#include <exception>
+#include <typeinfo>
 
 
 #ifdef _DEBUG
@@ -57,16 +60,12 @@ END_MESSAGE_MAP()
 /////////////////////////////////////////////////////////////////////////////
 // CFinalSunApp construction
 
-void __cdecl term_func()
-{
-	if (MessageBox(0, "Fatal error. Exit FinalSun?", "Fatal error", MB_YESNO) == IDCANCEL) return;
-
-	exit(-1);
-}
-
-
 CFinalSunApp::CFinalSunApp()
 {
+#ifndef TESTS
+	CrashReporter::Install();
+#endif
+
 	m_cf = RegisterClipboardFormat("FINAL*FORMAT");
 
 	if (!m_cf) MessageBox(0, "Failed to register clipboard format, clipboard functions not available", "", 0);
@@ -151,6 +150,12 @@ CFinalSunApp::CFinalSunApp()
 
 BOOL CFinalSunApp::InitInstance()
 {
+#ifndef TESTS
+	CrashReporter::Install();
+#endif
+
+	try
+	{
 	m_hAccel = LoadAccelerators(this->m_hInstance, MAKEINTRESOURCE(IDR_MAIN));
 
 	{
@@ -393,12 +398,58 @@ BOOL CFinalSunApp::InitInstance()
 	// Map and dialog closed, do further work if required	
 
 	return FALSE;
+	}
+	catch (const std::exception& e)
+	{
+		CrashReporter::ReportUnhandledCppException(
+			"CFinalSunApp::InitInstance",
+			typeid(e).name(),
+			e.what(),
+			true);
+		return FALSE;
+	}
+	catch (CException* e)
+	{
+		CrashReporter::ReportMfcException(e, nullptr);
+		if (e)
+			e->Delete();
+		return FALSE;
+	}
+	catch (...)
+	{
+		CrashReporter::ReportUnhandledCppException(
+			"CFinalSunApp::InitInstance",
+			"Unknown C++ exception",
+			"An unknown C++ exception escaped CFinalSunApp::InitInstance().",
+			true);
+		return FALSE;
+	}
 }
 
 int CFinalSunApp::Run()
 {
-	return CWinApp::Run();
-
+	try
+	{
+		return CWinApp::Run();
+	}
+	catch (const std::exception& e)
+	{
+		CrashReporter::ReportUnhandledCppException(
+			"CFinalSunApp::Run",
+			typeid(e).name(),
+			e.what(),
+			true);
+		return -1;
+	}
+	catch (...)
+	{
+		CrashReporter::ReportUnhandledCppException(
+			"CFinalSunApp::Run",
+			"Unknown C++ exception",
+			"An unknown C++ exception escaped CFinalSunApp::Run().",
+			true);
+		return -1;
+	}
 }
 
 BOOL CFinalSunApp::ProcessMessageFilter(int code, LPMSG lpMsg)
@@ -577,11 +628,8 @@ BOOL CFinalSunApp::ProcessMessageFilter(int code, LPMSG lpMsg)
 
 LRESULT CFinalSunApp::ProcessWndProcException(CException* e, const MSG* pMsg)
 {
-	// TODO: Speziellen Code hier einfügen und/oder Basisklasse aufrufen
-	e->ReportError(MB_YESNO);
-
-	return TRUE;
-	//return CWinApp::ProcessWndProcException(e, pMsg);
+	CrashReporter::ReportMfcException(e, pMsg);
+	return 0;
 }
 
 BOOL CFinalSunApp::PreTranslateMessage(MSG* pMsg)
