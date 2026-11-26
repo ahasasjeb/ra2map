@@ -966,6 +966,13 @@ mod tests {
             line.line = [30, 5, 30, 20];
             line.tint[1] = 0x00808000;
             line.extra[0] = 3;
+            let mut invert_line = SceneCommand::default();
+            invert_line.rect = [10, 10, 4, 1];
+            invert_line.clip = [0, 0, 64, 64];
+            invert_line.data[0] = 2;
+            invert_line.line = [10, 10, 13, 10];
+            invert_line.extra[0] = 1;
+            invert_line.extra[1] = 1;
             let light_offset = s.assets.len() as u32;
             s.assets.push(20 | (200 << 8));
             let mut lit = SceneCommand::default();
@@ -975,7 +982,7 @@ mod tests {
             lit.tint = [0, 0x00336699, 2 | 4, 0];
             r.present_scene(
                 &mut s,
-                &[a, bitmap, line, lit],
+                &[a, bitmap, line, invert_line, lit],
                 [0.0, 0.0, 1.0, 1.0],
                 width as u32,
                 height as u32,
@@ -983,8 +990,9 @@ mod tests {
             )
             .unwrap();
             let image = read_output(&r, &s);
-            assert_eq!(image[10 * width + 10], 0xffff00ff);
-            assert_eq!(image[10 * width + 11], 0xff000000);
+            // invert_line flipped bitmap's (10,10)=0xffff00ff -> 0xff00ff00, (11,10)=0xff000000 -> 0xffffffff
+            assert_eq!(image[10 * width + 10], 0xff00ff00);
+            assert_eq!(image[10 * width + 11], 0xffffffff);
             assert_eq!(image[11 * width + 10], 0xffffffff); // transparent texel retains background
             assert_eq!(image[11 * width + 11], 0xff00ff00);
             assert_eq!(image[5 * width + 30], 0xff808000);

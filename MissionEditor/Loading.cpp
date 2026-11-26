@@ -525,11 +525,11 @@ void CLoading::Load()
 	LoadStrings();
 
 
-	// ok now directdraw
+	// initialize renderer and color tables
 	m_cap.SetWindowText(GetLanguageStringACP("LoadInitDDraw"));
 	m_progress.SetRange(0,4);
 	
-	InitDirectDraw();
+	InitRenderer();
 
 	m_progress.SetPos(3);
 	UpdateWindow();
@@ -594,20 +594,18 @@ void CLoading::InitPics(CProgressCtrl* prog)
 				
 				try
 				{
-					pics[(LPCTSTR)ff.GetFileName()].pic = BitmapToSurface(((CFinalSunDlg*)theApp.m_pMainWnd)->m_view.m_isoview->dd, *BitmapFromFile(ff.GetFilePath())).Detach();
-
-					DDSURFACEDESC2 desc;
-					memset(&desc, 0, sizeof(DDSURFACEDESC2));
-					desc.dwSize = sizeof(DDSURFACEDESC2);
-					desc.dwFlags = DDSD_HEIGHT | DDSD_WIDTH;
-					((LPDIRECTDRAWSURFACE4)pics[(LPCTSTR)ff.GetFileName()].pic)->GetSurfaceDesc(&desc);
-					pics[(LPCTSTR)ff.GetFileName()].wHeight = desc.dwHeight;
-					pics[(LPCTSTR)ff.GetFileName()].wWidth = desc.dwWidth;
-					pics[(LPCTSTR)ff.GetFileName()].wMaxWidth = desc.dwWidth;
-					pics[(LPCTSTR)ff.GetFileName()].wMaxHeight = desc.dwHeight;
-					pics[(LPCTSTR)ff.GetFileName()].bType = PICDATA_TYPE_BMP;
-
-					FSunPackLib::SetColorKey(((LPDIRECTDRAWSURFACE4)(pics[(LPCTSTR)ff.GetFileName()].pic)), -1);
+					auto bmp = BitmapToRgbaBitmap(*BitmapFromFile(ff.GetFilePath()), CLR_INVALID);
+					if (bmp)
+					{
+						auto& picData = pics[(LPCTSTR)ff.GetFileName()];
+						picData.bitmap = bmp;
+						picData.pic = bmp.get();
+						picData.wHeight = static_cast<WORD>(bmp->height);
+						picData.wWidth = static_cast<WORD>(bmp->width);
+						picData.wMaxWidth = static_cast<WORD>(bmp->width);
+						picData.wMaxHeight = static_cast<WORD>(bmp->height);
+						picData.bType = PICDATA_TYPE_BMP;
+					}
 				}
 				catch (const BitmapNotFound&)
 				{
@@ -622,42 +620,46 @@ void CLoading::InitPics(CProgressCtrl* prog)
 		}
 	}
 
-	DDSURFACEDESC2 desc;
-
 	try {
-		pics["SCROLLCURSOR"].pic = BitmapToSurface(((CFinalSunDlg*)theApp.m_pMainWnd)->m_view.m_isoview->dd, *BitmapFromResource(IDB_SCROLLCURSOR)).Detach();
-		// The scroll cursor assets use a white background.  Make that explicit
+		// The scroll cursor assets use a white background. Make that explicit
 		// instead of depending on the first pixel surviving the bitmap conversion.
-		FSunPackLib::SetColorKey((LPDIRECTDRAWSURFACE4)pics["SCROLLCURSOR"].pic, RGB(255, 255, 255));
-		memset(&desc, 0, sizeof(DDSURFACEDESC2));
-		desc.dwSize = sizeof(DDSURFACEDESC2);
-		desc.dwFlags = DDSD_HEIGHT | DDSD_WIDTH;
-		((LPDIRECTDRAWSURFACE4)pics["SCROLLCURSOR"].pic)->GetSurfaceDesc(&desc);
-		pics["SCROLLCURSOR"].wHeight = desc.dwHeight;
-		pics["SCROLLCURSOR"].wWidth = desc.dwWidth;
-		pics["SCROLLCURSOR"].bType = PICDATA_TYPE_BMP;
+		auto bmp = BitmapToRgbaBitmap(*BitmapFromResource(IDB_SCROLLCURSOR), RGB(255, 255, 255));
+		if (bmp)
+		{
+			auto& picData = pics["SCROLLCURSOR"];
+			picData.bitmap = bmp;
+			picData.pic = bmp.get();
+			picData.wHeight = static_cast<WORD>(bmp->height);
+			picData.wWidth = static_cast<WORD>(bmp->width);
+			picData.wMaxWidth = static_cast<WORD>(bmp->width);
+			picData.wMaxHeight = static_cast<WORD>(bmp->height);
+			picData.bType = PICDATA_TYPE_BMP;
+		}
 	}
 	catch (const BitmapNotFound&)
 	{
 	}
 
 	try {
-		pics["CELLTAG"].pic = BitmapToSurface(((CFinalSunDlg*)theApp.m_pMainWnd)->m_view.m_isoview->dd, *BitmapFromResource(IDB_CELLTAG)).Detach();
-		FSunPackLib::SetColorKey((LPDIRECTDRAWSURFACE4)pics["CELLTAG"].pic, CLR_INVALID);
-		memset(&desc, 0, sizeof(DDSURFACEDESC2));
-		desc.dwSize = sizeof(DDSURFACEDESC2);
-		desc.dwFlags = DDSD_HEIGHT | DDSD_WIDTH;
-		((LPDIRECTDRAWSURFACE4)pics["CELLTAG"].pic)->GetSurfaceDesc(&desc);
-		pics["CELLTAG"].wHeight = desc.dwHeight;
-		pics["CELLTAG"].wWidth = desc.dwWidth;
+		auto bmp = BitmapToRgbaBitmap(*BitmapFromResource(IDB_CELLTAG), CLR_INVALID);
+		if (bmp)
+		{
+			auto& picData = pics["CELLTAG"];
+			picData.bitmap = bmp;
+			picData.pic = bmp.get();
+			picData.wHeight = static_cast<WORD>(bmp->height);
+			picData.wWidth = static_cast<WORD>(bmp->width);
+			picData.wMaxWidth = static_cast<WORD>(bmp->width);
+			picData.wMaxHeight = static_cast<WORD>(bmp->height);
 #ifdef RA2_MODE
-		pics["CELLTAG"].x = -1;
-		pics["CELLTAG"].y = 0;
+			picData.x = -1;
+			picData.y = 0;
 #else
-		pics["CELLTAG"].x = -1;
-		pics["CELLTAG"].y = -1;
+			picData.x = -1;
+			picData.y = -1;
 #endif
-		pics["CELLTAG"].bType = PICDATA_TYPE_BMP;
+			picData.bType = PICDATA_TYPE_BMP;
+		}
 	}
 	catch (const BitmapNotFound&) 
 	{
@@ -665,70 +667,22 @@ void CLoading::InitPics(CProgressCtrl* prog)
 
 	try
 	{
-		pics["FLAG"].pic = BitmapToSurface(((CFinalSunDlg*)theApp.m_pMainWnd)->m_view.m_isoview->dd, *BitmapFromResource(IDB_FLAG)).Detach();
-		FSunPackLib::SetColorKey((LPDIRECTDRAWSURFACE4)pics["FLAG"].pic, -1);
-		memset(&desc, 0, sizeof(DDSURFACEDESC2));
-		desc.dwSize = sizeof(DDSURFACEDESC2);
-		desc.dwFlags = DDSD_HEIGHT | DDSD_WIDTH;
-		((LPDIRECTDRAWSURFACE4)pics["FLAG"].pic)->GetSurfaceDesc(&desc);
-		pics["FLAG"].wHeight = desc.dwHeight;
-		pics["FLAG"].wWidth = desc.dwWidth;
-		pics["FLAG"].bType = PICDATA_TYPE_BMP;
+		auto bmp = BitmapToRgbaBitmap(*BitmapFromResource(IDB_FLAG), CLR_INVALID);
+		if (bmp)
+		{
+			auto& picData = pics["FLAG"];
+			picData.bitmap = bmp;
+			picData.pic = bmp.get();
+			picData.wHeight = static_cast<WORD>(bmp->height);
+			picData.wWidth = static_cast<WORD>(bmp->width);
+			picData.wMaxWidth = static_cast<WORD>(bmp->width);
+			picData.wMaxHeight = static_cast<WORD>(bmp->height);
+			picData.bType = PICDATA_TYPE_BMP;
+		}
 	}
 	catch (const BitmapNotFound&)
 	{
 	}
-
-
-
-	// MW April 2nd, 2001
-	// prepare 1x1 hidden tile replacement
-	DDSURFACEDESC2 ddsd;
-	memset(&ddsd, 0, sizeof(DDSURFACEDESC2));
-	ddsd.dwSize=sizeof(DDSURFACEDESC2);
-	ddsd.ddsCaps.dwCaps=DDSCAPS_OFFSCREENPLAIN;
-	ddsd.dwFlags=DDSD_CAPS | DDSD_HEIGHT | DDSD_WIDTH;
-	ddsd.dwWidth=f_x;
-	ddsd.dwHeight=f_y;
-
-	LPDIRECTDRAWSURFACE4 srf=NULL;
-	((CFinalSunDlg*)theApp.m_pMainWnd)->m_view.m_isoview->dd->CreateSurface(&ddsd, &srf, 0);
-
-	pics["HTILE"].pic=srf;
-	pics["HTILE"].wHeight=ddsd.dwHeight;
-	pics["HTILE"].wWidth=ddsd.dwWidth;
-	pics["HTILE"].bType=PICDATA_TYPE_BMP;
-	
-	HDC hDC;
-	srf->GetDC(&hDC);
-
-	HPEN p;
-	int width=1;
-	p=CreatePen(PS_DOT, 0, RGB(0,120,0));
-
-	SelectObject(hDC,p);
-
-	POINT p1, p2, p3, p4;
-	p1.x=f_x/2;
-	p1.y=0;
-	p2.x=f_x/2+f_x/2;
-	p2.y=f_y/2;
-	p3.x=f_x/2-f_x/2+f_x/2-1;
-	p3.y=f_y/2+f_y/2-1; 
-	p4.x=f_x/2+f_x/2-1;
-	p4.y=f_y/2-1;
-
-
-	SetBkMode(hDC, TRANSPARENT);
-	MoveToEx(hDC, p1.x,p1.y-1,NULL);
-	LineTo(hDC, p2.x+1,p2.y);
-	LineTo(hDC, p3.x,p3.y+1);
-	LineTo(hDC, p4.x-1, p4.y);
-	LineTo(hDC, p1.x, p1.y-1);
-
-	srf->ReleaseDC(hDC);
-
-	DeleteObject(p);
 
 
 	// new: Prepare building terrain information:
@@ -1054,7 +1008,6 @@ June 15th:
 - Added bib support, works fine.
 */
 
-#ifdef NOSURFACES_OBJECTS // palettized
 
 // blit util
 __forceinline void Blit_Pal(BYTE* dst, int x, int y, int dwidth, int dheight, BYTE* src, int swidth, int sheight)
@@ -1736,12 +1689,6 @@ BOOL CLoading::LoadUnitGraphic(LPCTSTR lpUnittype)
 
 				if(bib!=NULL)
 				{
-					DDBLTFX fx;
-
-					memset(&fx, 0, sizeof(DDBLTFX));
-					fx.dwSize=sizeof(DDBLTFX);
-
-					//lpT[i]->Blt(NULL, bib, NULL, DDBLT_KEYSRC | DDBLT_WAIT , &fx);
 					Blit_Pal(lpT[i], 0, 0, head.cx, head.cy, bib, bib_h.cx, bib_h.cy);
 
 					imghead.cx=head.cx-imghead.x; // update size of main graphic
@@ -1751,52 +1698,22 @@ BOOL CLoading::LoadUnitGraphic(LPCTSTR lpUnittype)
 
 				if(activeanim!=NULL)
 				{
-					DDBLTFX fx;
-
-					memset(&fx, 0, sizeof(DDBLTFX));
-					fx.dwSize=sizeof(DDBLTFX);
-
-					//lpT[i]->Blt(NULL, activeanim, NULL, DDBLT_KEYSRC | DDBLT_WAIT , &fx);
 					Blit_Pal(lpT[i], 0, 0, head.cx, head.cy, activeanim, activeanim_h.cx, activeanim_h.cy);
-
-					
 				}
 
 				if(idleanim!=NULL)
 				{
-					DDBLTFX fx;
-
-					memset(&fx, 0, sizeof(DDBLTFX));
-					fx.dwSize=sizeof(DDBLTFX);
-
-					//lpT[i]->Blt(NULL, idleanim, NULL, DDBLT_KEYSRC | DDBLT_WAIT , &fx);
 					Blit_Pal(lpT[i], 0, 0, head.cx, head.cy, idleanim, idleanim_h.cx, idleanim_h.cy);
-
-					
 				}
 
 				if(activeanim2!=NULL)
 				{
-					DDBLTFX fx;
-
-					memset(&fx, 0, sizeof(DDBLTFX));
-					fx.dwSize=sizeof(DDBLTFX);
-
-					//lpT[i]->Blt(NULL, activeanim2, NULL, DDBLT_KEYSRC | DDBLT_WAIT , &fx);
 					Blit_Pal(lpT[i], 0, 0, head.cx, head.cy, activeanim2, activeanim2_h.cx, activeanim2_h.cy);
-					
 				}
 
 				if(activeanim3!=NULL)
 				{
-					DDBLTFX fx;
-
-					memset(&fx, 0, sizeof(DDBLTFX));
-					fx.dwSize=sizeof(DDBLTFX);
-
-					//lpT[i]->Blt(NULL, activeanim3, NULL, DDBLT_KEYSRC | DDBLT_WAIT , &fx);
 					Blit_Pal(lpT[i], 0, 0, head.cx, head.cy, activeanim3, activeanim3_h.cx, activeanim3_h.cy);
-						
 				}
 				
 				int frameWidth = head.cx;
@@ -1875,12 +1792,8 @@ BOOL CLoading::LoadUnitGraphic(LPCTSTR lpUnittype)
 				// barrels hidden behind turret:
 				if(!bStructure && !vxlBarrelColors[i].empty() && (i == 1 || i == 0 || i == 7))
 				{
-					DDSURFACEDESC2 ddsd;
-					memset(&ddsd, 0, sizeof(DDSURFACEDESC2));
-					ddsd.dwSize = sizeof(DDSURFACEDESC2);
-					ddsd.dwFlags = DDSD_WIDTH | DDSD_HEIGHT;
-					ddsd.dwWidth = barrels_h[i].cx;
-					ddsd.dwHeight = barrels_h[i].cy;
+					const int barrelWidth = barrels_h[i].cx;
+					const int barrelHeight = barrels_h[i].cy;
 
 					int XMover, YMover;
 					char c[50];
@@ -1902,32 +1815,26 @@ BOOL CLoading::LoadUnitGraphic(LPCTSTR lpUnittype)
 
 					srcRect.top = 0;
 					srcRect.left = 0;
-					srcRect.right = ddsd.dwWidth;
-					srcRect.bottom = ddsd.dwHeight;
+					srcRect.right = barrelWidth;
+					srcRect.bottom = barrelHeight;
 					destRect.top = YMover + my;
 					destRect.left = XMover + mx;
-					destRect.right = destRect.left + ddsd.dwWidth;
-					destRect.bottom = destRect.top + ddsd.dwHeight;
+					destRect.right = destRect.left + barrelWidth;
+					destRect.bottom = destRect.top + barrelHeight;
 
 
-					errstream << "vxl barrel: " << i << " size: " << ddsd.dwWidth << " " << ddsd.dwHeight << " at " << destRect.left << " " << destRect.top << endl;
+					errstream << "vxl barrel: " << i << " size: " << barrelWidth << " " << barrelHeight << " at " << destRect.left << " " << destRect.top << endl;
 					errstream.flush();
-					Blit_PalD(lpT[i], destRect, vxlBarrelColors[i].data(), srcRect, ddsd.dwWidth, head.cx, ddsd.dwHeight, head.cy);
-					Blit_PalD(lighting[i].data(), destRect, vxlBarrelLighting[i].data(), srcRect, ddsd.dwWidth, head.cx, ddsd.dwHeight, head.cy, vxlBarrelColors[i].data());
+					Blit_PalD(lpT[i], destRect, vxlBarrelColors[i].data(), srcRect, barrelWidth, head.cx, barrelHeight, head.cy);
+					Blit_PalD(lighting[i].data(), destRect, vxlBarrelLighting[i].data(), srcRect, barrelWidth, head.cx, barrelHeight, head.cy, vxlBarrelColors[i].data());
 									
 				}
 				
 				
 				if(!bStructure && !turretColors[i].empty())
 				{
-					DDSURFACEDESC2 ddsd;
-					memset(&ddsd, 0, sizeof(DDSURFACEDESC2));
-					ddsd.dwSize=sizeof(DDSURFACEDESC2);
-					ddsd.dwFlags=DDSD_WIDTH | DDSD_HEIGHT;
-					//turrets[i]->GetSurfaceDesc(&ddsd);
-					// replace DX code:
-					ddsd.dwWidth=turrets_h[i].cx;
-					ddsd.dwHeight=turrets_h[i].cy;
+					const int turretWidth = turrets_h[i].cx;
+					const int turretHeight = turrets_h[i].cy;
 
 					int XMover, YMover;
 					char c[50];
@@ -1951,12 +1858,12 @@ BOOL CLoading::LoadUnitGraphic(LPCTSTR lpUnittype)
 
 						srcRect.top=0;
 						srcRect.left=0;
-						srcRect.right=ddsd.dwWidth;
-						srcRect.bottom=ddsd.dwHeight;
+						srcRect.right=turretWidth;
+						srcRect.bottom=turretHeight;
 						destRect.top=YMover+my;
 						destRect.left=XMover+mx;
-						destRect.right=destRect.left+ddsd.dwWidth;;
-						destRect.bottom=destRect.top+ddsd.dwHeight;
+						destRect.right=destRect.left+turretWidth;
+						destRect.bottom=destRect.top+turretHeight;
 				
 					}
 					else // !bVoxelTurret
@@ -1977,22 +1884,18 @@ BOOL CLoading::LoadUnitGraphic(LPCTSTR lpUnittype)
 						destRect.bottom = destRect.top + srcRect.bottom;
 					}
 
-					errstream << "vxl turret: " << i << " size: " << ddsd.dwWidth << " " << ddsd.dwHeight << " at " << destRect.left << " " << destRect.top  << endl;
+					errstream << "vxl turret: " << i << " size: " << turretWidth << " " << turretHeight << " at " << destRect.left << " " << destRect.top  << endl;
 					errstream.flush(); 
-					Blit_PalD(lpT[i], destRect, turretColors[i].data(), srcRect, ddsd.dwWidth, head.cx, ddsd.dwHeight, head.cy);
-					Blit_PalD(lighting[i].data(), destRect, turretLighting[i].data(), srcRect, ddsd.dwWidth, head.cx, ddsd.dwHeight, head.cy, turretColors[i].data());
+					Blit_PalD(lpT[i], destRect, turretColors[i].data(), srcRect, turretWidth, head.cx, turretHeight, head.cy);
+					Blit_PalD(lighting[i].data(), destRect, turretLighting[i].data(), srcRect, turretWidth, head.cx, turretHeight, head.cy, turretColors[i].data());
 									
 				}
 
 				// barrels in front of turret
 				if(!bStructure && !vxlBarrelColors[i].empty() && i!=1 && i!=0 && i!=7)
 				{
-					DDSURFACEDESC2 ddsd;
-					memset(&ddsd, 0, sizeof(DDSURFACEDESC2));
-					ddsd.dwSize = sizeof(DDSURFACEDESC2);
-					ddsd.dwFlags = DDSD_WIDTH | DDSD_HEIGHT;
-					ddsd.dwWidth = barrels_h[i].cx;
-					ddsd.dwHeight = barrels_h[i].cy;
+					const int barrelWidth = barrels_h[i].cx;
+					const int barrelHeight = barrels_h[i].cy;
 
 					int XMover, YMover;
 					char c[50];
@@ -2014,18 +1917,18 @@ BOOL CLoading::LoadUnitGraphic(LPCTSTR lpUnittype)
 
 					srcRect.top = 0;
 					srcRect.left = 0;
-					srcRect.right = ddsd.dwWidth;
-					srcRect.bottom = ddsd.dwHeight;
+					srcRect.right = barrelWidth;
+					srcRect.bottom = barrelHeight;
 					destRect.top = YMover + my;
 					destRect.left = XMover + mx;
-					destRect.right = destRect.left + ddsd.dwWidth;
-					destRect.bottom = destRect.top + ddsd.dwHeight;
+					destRect.right = destRect.left + barrelWidth;
+					destRect.bottom = destRect.top + barrelHeight;
 
 
-					errstream << "vxl barrel: " << i << " size: " << ddsd.dwWidth << " " << ddsd.dwHeight << " at " << destRect.left << " " << destRect.top << endl;
+					errstream << "vxl barrel: " << i << " size: " << barrelWidth << " " << barrelHeight << " at " << destRect.left << " " << destRect.top << endl;
 					errstream.flush();
-					Blit_PalD(lpT[i], destRect, vxlBarrelColors[i].data(), srcRect, ddsd.dwWidth, head.cx, ddsd.dwHeight, head.cy);
-					Blit_PalD(lighting[i].data(), destRect, vxlBarrelLighting[i].data(), srcRect, ddsd.dwWidth, head.cx, ddsd.dwHeight, head.cy, vxlBarrelColors[i].data());
+					Blit_PalD(lpT[i], destRect, vxlBarrelColors[i].data(), srcRect, barrelWidth, head.cx, barrelHeight, head.cy);
+					Blit_PalD(lighting[i].data(), destRect, vxlBarrelLighting[i].data(), srcRect, barrelWidth, head.cx, barrelHeight, head.cy, vxlBarrelColors[i].data());
 
 									
 				}
@@ -2295,1211 +2198,6 @@ void CLoading::LoadBuildingSubGraphic(const CString& subkey, const CIniFileSecti
 
 	FSunPackLib::LoadSHPImage(startFrame, 1, &shp);
 }
-#else // surfaces
-BOOL CLoading::LoadUnitGraphic(LPCTSTR lpUnittype)
-{
-	last_succeeded_operation=10;
-
-	CString _rules_image; // the image used
-	CString filename; // filename of the image
-	char theat=cur_theat; // standard theater char is t (Temperat). a is snow.
-
-	BOOL bAlwaysSetChar; // second char is always theater, even if NewTheater not specified!
-	WORD wStep=1; // step is 1 for infantry, buildings, etc, and for shp vehicles it specifies the step rate between every direction
-	WORD wStartWalkFrame=0; // for examply cyborg reaper has another walk starting frame
-	int iTurretOffset=0; // used for centering y pos of turret (if existing)
-	BOOL bStructure=rules.sections["BuildingTypes"].FindValue(lpUnittype)>=0; // is this a structure?
-
-	BOOL bPowerUp=rules.sections[lpUnittype].values["PowersUpBuilding"]!="";
-		
-	HTSPALETTE hPalette;
-	if(theat=='T') hPalette=m_hPalIsoTemp;
-	if(theat=='A') hPalette=m_hPalIsoSnow;
-	if(theat=='U') hPalette=m_hPalIsoUrb;
-	
-	CIsoView& v=*((CFinalSunDlg*)theApp.m_pMainWnd)->m_view.m_isoview;
-
-	_rules_image = lpUnittype;
-	if (rules.sections[lpUnittype].values.find("Image") != rules.sections[lpUnittype].values.end())
-		_rules_image = rules.sections[lpUnittype].values["Image"];
-
-	CString _art_image = _rules_image;
-	if (art.sections[_rules_image].values.find("Image") != art.sections[_rules_image].values.end())
-	{
-		if (!isTrue(g_data.sections["IgnoreArtImage"].values[_rules_image]))
-			_art_image = art.sections[_rules_image].values["Image"];
-	}
-
-	const CString& image = _art_image;
-	const auto& rulesSection = rules.sections[lpUnittype];
-	const auto& artSection = art.sections[image];
-
-	if(!isTrue(art.sections[image].values["Voxel"])) // is it a shp graphic?
-	{
-		try
-		{
-
-		filename=image+".shp";
-
-				
-		BYTE bTerrain=0;
-
-		
-		
-		BOOL isNewTerrain=FALSE;
-		if(isTrue(art.sections[image].values["NewTheater"]))//&& isTrue(artSection.GetValueByName("TerrainPalette")))//(filename.GetAt(0)=='G' || filename.GetAt(0)=='N' || filename.GetAt(0)=='C') && filename.GetAt(1)=='A')
-		{
-			hPalette=m_hPalUnitTemp;
-			if(theat=='A') hPalette=m_hPalUnitSnow;
-			if(theat=='U') hPalette=m_hPalUnitUrb;
-			filename.SetAt(1, theat);
-			isNewTerrain=TRUE;
-		}
-		
-		
-		HMIXFILE hShpMix=FindFileInMix(filename, &bTerrain);
-		
-		BYTE bIgnoreTerrain=TRUE;
-		
-		if(hShpMix==NULL && isNewTerrain)
-		{
-			filename.SetAt(1, 'G');
-			hShpMix=FindFileInMix(filename, &bTerrain);
-			if(hShpMix) theat='G';
-			
-		}
-
-		
-		
-		if(hShpMix==NULL && isNewTerrain)
-		{
-			filename.SetAt(1, 'A');
-			hShpMix=FindFileInMix(filename, &bTerrain);
-			if(hShpMix) theat='A';
-		}
-		
-		if(hShpMix==NULL && isNewTerrain)
-		{
-			filename.SetAt(1, 'T');
-			hShpMix=FindFileInMix(filename, &bTerrain);
-			if(hShpMix){
-				theat='T';
-				hPalette=m_hIsoTemp;
-			}
-		}
-
-		
-		if(isTrue(artSection.GetValueByName("TerrainPalette")))
-		{
-			bIgnoreTerrain=FALSE;
-			
-			if(cur_theat=='T')
-			hPalette=m_hPalIsoTemp;
-			else if(cur_theat=='A')
-				hPalette=m_hPalIsoSnow;
-			else if (cur_theat=='U')
-				hPalette=m_hPalIsoUrb;
-				
-			
-			
-		}
-
-
-		
-		if(hShpMix==0) 
-		{
-			filename=image;
-			filename+=".shp";
-			hShpMix=FindFileInMix(filename, &bTerrain);
-
-			
-			
-			if(hShpMix==NULL)
-			{
-				filename=image;
-				if(theat=='T') filename+=".tem";
-				if(theat=='A') filename+=".sno";
-				if(theat=='U') filename+=".urb";
-				filename.MakeLower();
-				hShpMix=FindFileInMix(filename, &bTerrain);
-				
-				if(hShpMix==NULL)
-				{
-					filename=image;
-					filename+=".tem";
-					hShpMix=FindFileInMix(filename, &bTerrain);
-					if(hShpMix)
-					{
-						hPalette=m_hPalIsoTemp;
-					}
-				}
-				
-				if(hShpMix!=NULL)
-				{
-				
-					
-					
-				}
-				else
-				{
-					filename=image+".shp";
-
-					filename.SetAt(1, 'A');
-
-					hShpMix=FindFileInMix(filename);
-
-					if(hShpMix!=NULL)
-					{
-						bAlwaysSetChar=TRUE;
-					}
-					else
-					{
-						filename.SetAt(1, 'A');
-						hShpMix=FindFileInMix(filename);
-
-						if(hShpMix!=NULL)
-						{
-							theat='A';
-							bAlwaysSetChar=TRUE;
-						}
-						else
-						{
-							filename.SetAt(1, 'U');
-							hShpMix=FindFileInMix(filename);
-							if(hShpMix) theat='U';
-							else
-							{
-								filename.SetAt(1, 'T');
-								hShpMix=FindFileInMix(filename);
-								if(hShpMix) theat='T';
-							}
-						}
-					}
-				}
-			}
-			else
-			{
-				theat='T';
-			}
-
-		}
-		else
-		{
-
-			// now we need to find out the palette
-			
-				if(isTrue(artSection.GetValueByName("TerrainPalette"))) // it´s a file in isotemp.mix/isosno.mix
-				{
-										
-				}
-				else // it´s a file in temperat.mix/snow.mix
-				{
-					if(cur_theat=='T') hPalette=m_hPalUnitTemp;
-					if(cur_theat=='A') hPalette=m_hPalUnitSnow;
-					if(cur_theat=='U') hPalette=m_hPalUnitUrb;
-				}
-			
-		}
-
-						
-
-		if(filename=="tibtre01.tem" || filename=="tibtre02.tem" || filename=="tibtre03.tem" || filename=="veinhole.tem")
-		{
-			hPalette=m_hPalUnitTemp;
-		}
-
-		
-		SHPHEADER head;
-		CString bibname;
-		CString bibfilename;
-		CString activeanim_name;
-		CString activeanim_filename;
-		CString idleanim_name;
-		CString idleanim_filename;
-		CString activeanim2_name;
-		CString activeanim2_filename;
-		CString activeanim3_name;
-		CString activeanim3_filename;
-		CString superanim1_name,superanim1_filename;
-		CString superanim2_name,superanim2_filename;
-		CString superanim3_name,superanim3_filename;
-		CString superanim4_name,superanim4_filename;
-		CString specialanim1_name,specialanim1_filename;
-		CString specialanim2_name,specialanim2_filename;
-		CString specialanim3_name,specialanim3_filename;
-		CString specialanim4_name,specialanim4_filename;
-
-		CString turretanim_name;
-		CString turretanim_filename;
-		LPDIRECTDRAWSURFACE4 bib=NULL;
-		LPDIRECTDRAWSURFACE4 activeanim=NULL;
-		LPDIRECTDRAWSURFACE4 idleanim=NULL;
-		LPDIRECTDRAWSURFACE4 activeanim2=NULL;
-		LPDIRECTDRAWSURFACE4 activeanim3=NULL;
-		LPDIRECTDRAWSURFACE4 superanim1=NULL;
-		LPDIRECTDRAWSURFACE4 superanim2=NULL;
-		LPDIRECTDRAWSURFACE4 superanim3=NULL;
-		LPDIRECTDRAWSURFACE4 superanim4=NULL;
-		LPDIRECTDRAWSURFACE4 specialanim1=NULL;
-		LPDIRECTDRAWSURFACE4 specialanim2=NULL;
-		LPDIRECTDRAWSURFACE4 specialanim3=NULL;
-		LPDIRECTDRAWSURFACE4 specialanim4=NULL;
-		LPDIRECTDRAWSURFACE4* lpT=NULL;
-		LPDIRECTDRAWSURFACE4 turrets[8] = { 0 };
-		SHPIMAGEHEADER turretinfo[8];
-		
-		if(hShpMix>0)
-		{		
-				
-
-			//errstream << (LPCTSTR)filename << " found " ;
-			//errstream.flush();
-
-			    
-			if(rules.sections[lpUnittype].values["Bib"]!="no") // seems to be ignored by TS, art.ini overwrites???
-			{
-				
-				bibname=art.sections[image].values["BibShape"];
-				if(bibname.GetLength()>0)
-				{
-					bibfilename=bibname+".shp";
-
-					if(isTrue(art.sections[image].values["NewTheater"]))
-						bibfilename.SetAt(1, theat);
-
-					if(bAlwaysSetChar) bibfilename.SetAt(1, theat);
-
-					if(FSunPackLib::XCC_DoesFileExist(bibfilename, hShpMix))
-					{
-						FSunPackLib::SetCurrentSHP(bibfilename, hShpMix);
-						FSunPackLib::LoadSHPImageInSurface(v.dd, hPalette, 0, 1, &bib);
-						
-					}
-				}
-			}
-
-			activeanim_name=art.sections[image].values["ActiveAnim"];
-			if(activeanim_name.GetLength()>0)
-			{
-				activeanim_filename=activeanim_name+".shp";
-
-				if(isTrue(art.sections[image].values["NewTheater"]))
-					activeanim_filename.SetAt(1, theat);
-
-				if(bAlwaysSetChar) activeanim_filename.SetAt(1, theat);
-
-				if(FSunPackLib::XCC_DoesFileExist(activeanim_filename, hShpMix))
-				{
-					FSunPackLib::SetCurrentSHP(activeanim_filename, hShpMix);
-					
-					FSunPackLib::LoadSHPImageInSurface(v.dd, hPalette, 0, 1, &activeanim);
-					
-					
-				}
-			}
-
-			idleanim_name=art.sections[image].values["IdleAnim"];
-			if(idleanim_name.GetLength()>0)
-			{
-				idleanim_filename=idleanim_name+".shp";
-
-				if(isTrue(art.sections[image].values["NewTheater"]))
-					idleanim_filename.SetAt(1, theat);
-
-				if(bAlwaysSetChar) idleanim_filename.SetAt(1, theat);
-
-				if(FSunPackLib::XCC_DoesFileExist(idleanim_filename, hShpMix))
-				{
-					FSunPackLib::SetCurrentSHP(idleanim_filename, hShpMix);
-					
-					FSunPackLib::LoadSHPImageInSurface(v.dd, hPalette, 0, 1, &idleanim);
-				}
-			}
-
-
-			activeanim2_name=art.sections[image].values["ActiveAnimTwo"];
-			if(activeanim2_name.GetLength()>0)
-			{
-				activeanim2_filename=activeanim2_name+".shp";
-
-				if(isTrue(art.sections[image].values["NewTheater"]))
-					activeanim2_filename.SetAt(1, theat);
-
-				if(bAlwaysSetChar) activeanim2_filename.SetAt(1, theat);
-				
-				if(FSunPackLib::XCC_DoesFileExist(activeanim2_filename, hShpMix))
-				{
-					FSunPackLib::SetCurrentSHP(activeanim2_filename, hShpMix);
-					
-					FSunPackLib::LoadSHPImageInSurface(v.dd, hPalette, 0, 1, &activeanim2);
-					
-				}
-			}
-
-			activeanim3_name=art.sections[image].values["ActiveAnimThree"];
-			if(activeanim3_name.GetLength()>0)
-			{
-				activeanim3_filename=activeanim3_name+".shp";
-
-				if(isTrue(art.sections[image].values["NewTheater"]))
-					activeanim3_filename.SetAt(1, theat);
-
-				if(bAlwaysSetChar) activeanim3_filename.SetAt(1, theat);
-				
-				if(FSunPackLib::XCC_DoesFileExist(activeanim3_filename, hShpMix))
-				{
-					FSunPackLib::SetCurrentSHP(activeanim3_filename, hShpMix);
-					
-					FSunPackLib::LoadSHPImageInSurface(v.dd, hPalette, 0, 1, &activeanim3);
-					
-				}
-			}
-
-			superanim1_name=art.sections[image].values["SuperAnim"];
-			if(superanim1_name.GetLength()>0)
-			{
-				superanim1_filename=superanim1_name+".shp";
-
-				if(isTrue(art.sections[image].values["NewTheater"]))
-					superanim1_filename.SetAt(1, theat);
-
-				if(bAlwaysSetChar) superanim1_filename.SetAt(1, theat);
-				
-				if(FSunPackLib::XCC_DoesFileExist(superanim1_filename, hShpMix))
-				{
-					FSunPackLib::SetCurrentSHP(superanim1_filename, hShpMix);					
-					FSunPackLib::LoadSHPImageInSurface(v.dd, hPalette, 0, 1, &superanim1);
-				}
-			}
-
-			superanim2_name=art.sections[image].values["SuperAnimTwo"];
-			if(superanim2_name.GetLength()>0)
-			{
-				superanim2_filename=superanim2_name+".shp";
-
-				if(isTrue(art.sections[image].values["NewTheater"]))
-					superanim2_filename.SetAt(1, theat);
-
-				if(bAlwaysSetChar) superanim2_filename.SetAt(1, theat);
-				
-				if(FSunPackLib::XCC_DoesFileExist(superanim2_filename, hShpMix))
-				{
-					FSunPackLib::SetCurrentSHP(superanim2_filename, hShpMix);					
-					FSunPackLib::LoadSHPImageInSurface(v.dd, hPalette, 0, 1, &superanim2);
-				}
-			}
-
-			superanim3_name=art.sections[image].values["SuperAnimThree"];
-			if(superanim3_name.GetLength()>0)
-			{
-				superanim3_filename=superanim3_name+".shp";
-
-				if(isTrue(art.sections[image].values["NewTheater"]))
-					superanim3_filename.SetAt(1, theat);
-
-				if(bAlwaysSetChar) superanim3_filename.SetAt(1, theat);
-				
-				if(FSunPackLib::XCC_DoesFileExist(superanim3_filename, hShpMix))
-				{
-					FSunPackLib::SetCurrentSHP(superanim3_filename, hShpMix);					
-					FSunPackLib::LoadSHPImageInSurface(v.dd, hPalette, 0, 1, &superanim3);
-				}
-			}
-
-			superanim4_name=art.sections[image].values["SuperAnimFour"];
-			if(superanim4_name.GetLength()>0)
-			{
-				superanim4_filename=superanim4_name+".shp";
-
-				if(isTrue(art.sections[image].values["NewTheater"]))
-					superanim4_filename.SetAt(1, theat);
-
-				if(bAlwaysSetChar) superanim4_filename.SetAt(1, theat);
-				
-				if(FSunPackLib::XCC_DoesFileExist(superanim4_filename, hShpMix))
-				{
-					FSunPackLib::SetCurrentSHP(superanim4_filename, hShpMix);					
-					FSunPackLib::LoadSHPImageInSurface(v.dd, hPalette, 0, 1, &superanim4);
-				}
-			}
-
-			specialanim1_name=art.sections[image].values["SpecialAnim"];
-			if(specialanim1_name.GetLength()>0)
-			{
-				specialanim1_filename=specialanim1_name+".shp";
-
-				if(isTrue(art.sections[image].values["NewTheater"]))
-					specialanim1_filename.SetAt(1, theat);
-
-				if(bAlwaysSetChar) specialanim1_filename.SetAt(1, theat);
-				
-				if(FSunPackLib::XCC_DoesFileExist(specialanim1_filename, hShpMix))
-				{
-					FSunPackLib::SetCurrentSHP(specialanim1_filename, hShpMix);					
-					FSunPackLib::LoadSHPImageInSurface(v.dd, hPalette, 0, 1, &specialanim1);
-				}
-			}
-
-			specialanim2_name=art.sections[image].values["SpecialAnimTwo"];
-			if(specialanim2_name.GetLength()>0)
-			{
-				specialanim2_filename=specialanim2_name+".shp";
-
-				if(isTrue(art.sections[image].values["NewTheater"]))
-					specialanim2_filename.SetAt(1, theat);
-
-				if(bAlwaysSetChar) specialanim2_filename.SetAt(1, theat);
-				
-				if(FSunPackLib::XCC_DoesFileExist(specialanim2_filename, hShpMix))
-				{
-					FSunPackLib::SetCurrentSHP(specialanim2_filename, hShpMix);					
-					FSunPackLib::LoadSHPImageInSurface(v.dd, hPalette, 0, 1, &specialanim2);
-				}
-			}
-
-			specialanim3_name=art.sections[image].values["SpecialAnimThree"];
-			if(specialanim3_name.GetLength()>0)
-			{
-				specialanim3_filename=specialanim3_name+".shp";
-
-				if(isTrue(art.sections[image].values["NewTheater"]))
-					specialanim3_filename.SetAt(1, theat);
-
-				if(bAlwaysSetChar) specialanim3_filename.SetAt(1, theat);
-				
-				if(FSunPackLib::XCC_DoesFileExist(specialanim3_filename, hShpMix))
-				{
-					FSunPackLib::SetCurrentSHP(specialanim3_filename, hShpMix);					
-					FSunPackLib::LoadSHPImageInSurface(v.dd, hPalette, 0, 1, &specialanim3);
-				}
-			}
-
-			specialanim4_name=art.sections[image].values["SpecialAnimFour"];
-			if(specialanim4_name.GetLength()>0)
-			{
-				specialanim4_filename=specialanim4_name+".shp";
-
-				if(isTrue(art.sections[image].values["NewTheater"]))
-					specialanim4_filename.SetAt(1, theat);
-
-				if(bAlwaysSetChar) specialanim4_filename.SetAt(1, theat);
-				
-				if(FSunPackLib::XCC_DoesFileExist(specialanim4_filename, hShpMix))
-				{
-					FSunPackLib::SetCurrentSHP(specialanim4_filename, hShpMix);					
-					FSunPackLib::LoadSHPImageInSurface(v.dd, hPalette, 0, 1, &specialanim4);
-				}
-			}
-
-			BOOL bVoxelTurret=FALSE;
-
-			turretanim_name=rules.sections[image].values["TurretAnim"];
-			if(bStructure && rules.sections[image].values["Turret"]=="yes" && turretanim_name.GetLength()>0 && rules.sections[image].values["TurretAnimIsVoxel"]!="true")
-			{
-				turretanim_filename=turretanim_name+".shp";
-				if(art.sections[turretanim_name].values.find("Image")!=art.sections[turretanim_name].values.end()) turretanim_filename=art.sections[turretanim_name].values["Image"]+".shp";
-
-				if(isTrue(art.sections[image].values["NewTheater"]))
-					turretanim_filename.SetAt(1, theat);
-				
-			
-				FSunPackLib::SetCurrentSHP(turretanim_filename, hShpMix);
-				FSunPackLib::XCC_GetSHPHeader(&head);
-
-				int iStartTurret=0;
-				const WORD wAnimCount=4; // anims between each "normal" direction, seems to be hardcoded
-				
-				int i;
-
-				for(i=0;i<8;i++)
-				{
-					if(iStartTurret+i*wAnimCount<head.c_images)
-					{
-						FSunPackLib::XCC_GetSHPImageHeader(iStartTurret+i*wAnimCount, &turretinfo[i]);
-						FSunPackLib::LoadSHPImageInSurface(v.dd, hPalette, iStartTurret+i*wAnimCount, 1, &turrets[i]);
-					}
-					
-				}
-			}
-			else if(bStructure && rules.sections[image].values["Turret"]=="yes" && turretanim_name.GetLength()>0 && rules.sections[image].values["TurretAnimIsVoxel"]=="true")
-			{
-				turretanim_filename=turretanim_name+".vxl";
-				if(art.sections[turretanim_name].values.find("Image")!=art.sections[turretanim_name].values.end()) turretanim_filename=art.sections[turretanim_name].values["Image"]+".vxl";
-
-				//if(isTrue(art.sections[image].values["NewTheater"]))
-				//	turretanim_filename.SetAt(1, theat);
-				
-				HMIXFILE hVXL=FindFileInMix(turretanim_filename);
-			
-				if(hVXL)
-				{
-					bVoxelTurret=TRUE;
-
-					if(
-					FSunPackLib::SetCurrentVXL(turretanim_filename, hVXL)
-					)
-					{					
-						int i;
-
-						for(i=0;i<8;i++)
-						{
-							float r_x,r_y,r_z;
-				
-
-							r_x=300;
-							r_y=0;
-							r_z=45*i+90;
-
-							// convert
-							const double pi = 3.141592654;
-							r_x=r_x/180.0f*pi;
-							r_y=r_y/180.0f*pi;
-							r_z=r_z/180.0f*pi;						
-
-							int center_x, center_y;
-							if(!
-							FSunPackLib::LoadVXLImageInSurface(*m_voxelNormalTables, lightDirection, v.dd, 0, 1, r_x, r_y, r_z, &turrets[i], hPalette,&center_x, &center_y,atoi(rules.sections[image].values["TurretAnimZAdjust"]))
-							)
-							{
-								
-							}
-							else
-							{
-								DDSURFACEDESC2 ddsd;
-								memset(&ddsd, 0, sizeof(DDSURFACEDESC2));
-								ddsd.dwSize=sizeof(DDSURFACEDESC2);
-								ddsd.dwFlags=DDSD_WIDTH | DDSD_HEIGHT;
-								turrets[i]->GetSurfaceDesc(&ddsd);
-								turretinfo[i].x=-center_x;
-								turretinfo[i].y=-center_y;
-								turretinfo[i].cx=ddsd.dwWidth;
-								turretinfo[i].cy=ddsd.dwHeight;
-							}
-							
-						}
-					}
-				}
-			}
-
-
-			if(art.sections[image].values.find("WalkFrames")!=art.sections[image].values.end())
-				wStep=atoi(art.sections[image].values["WalkFrames"]);
-			if(art.sections[image].values.find("StartWalkFrame")!=art.sections[image].values.end())
-				wStartWalkFrame=atoi(art.sections[image].values["StartWalkFrame"]);
-			if(art.sections[image].values.find("TurretOffset")!=art.sections[image].values.end())
-				iTurretOffset=atoi(art.sections[image].values["TurretOffset"]);
-
-			
-			if(art.sections[image].values["Palette"]=="lib")
-				hPalette=m_hPalLib;
-
-			BOOL bSuccess=FSunPackLib::SetCurrentSHP(filename, hShpMix);
-			if(
-			!bSuccess
-			)
-			{
-				filename=image+=".sno";
-				if(cur_theat=='T' || cur_theat=='U') hPalette=m_hPalIsoTemp;
-				hShpMix=FindFileInMix(filename, &bTerrain);
-				bSuccess=FSunPackLib::SetCurrentSHP(filename, hShpMix);
-				
-				if(!bSuccess)
-				{
-					missingimages[lpUnittype]=TRUE;	
-				}
-			}
-			
-			if(bSuccess)
-			{
-			
-			FSunPackLib::XCC_GetSHPHeader(&head);
-			int i;
-			int maxPics=head.c_images;
-			if(maxPics>8) maxPics=8; // we only need 8 pictures for every direction!
-			if(bStructure && !bPowerUp) maxPics=1;
-			if(bVoxelTurret) maxPics=8;
-
-
-			if(!bStructure && rules.sections[image].values["Turret"]=="yes")
-			{
-				int iStartTurret=wStartWalkFrame+8*wStep;
-				const WORD wAnimCount=4; // anims between each "normal" direction, seems to be hardcoded
-				
-				int i;
-
-				for(i=0;i<8;i++)
-				{
-					if(!bStructure && iStartTurret+i*wAnimCount<head.c_images)
-					{
-						FSunPackLib::XCC_GetSHPImageHeader(iStartTurret+i*wAnimCount, &turretinfo[i]);
-						FSunPackLib::LoadSHPImageInSurface(v.dd, hPalette, iStartTurret+i*wAnimCount, 1, &turrets[i]);
-					}
-					
-				}
-			}
-
-			
-			
-			// create an array of pointers to directdraw surfaces
-			lpT=new(LPDIRECTDRAWSURFACE4[maxPics]);
-			memset(lpT, 0, sizeof(LPDIRECTDRAWSURFACE4)*maxPics);
-			
-			if(bVoxelTurret)
-			{
-				for(i=0;i<maxPics; i++)
-				{
-					FSunPackLib::LoadSHPImageInSurface(v.dd, hPalette, 0, 1, &lpT[i]);
-				}
-			}
-			else if(wStep==1 && (rules.sections[lpUnittype].values["PowersUpBuilding"].GetLength()==0 || !isTrue(rules.sections[lpUnittype].values["Turret"]))) 
-			{ // standard case...
-
-				FSunPackLib::LoadSHPImageInSurface(v.dd, hPalette, wStartWalkFrame, maxPics, lpT);
-			
-			}
-			else if(rules.sections[lpUnittype].values["PowersUpBuilding"].GetLength()!=0 && isTrue(rules.sections[lpUnittype].values["Turret"]))
-			{ // a "real" turret (vulcan cannon, etc...)
-				for(i=0;i<maxPics; i++)
-				{
-					FSunPackLib::LoadSHPImageInSurface(v.dd, hPalette, i*4, 1, &lpT[i]);
-				}
-			}
-			else	 
-			{ // walk frames used
-				for(i=0;i<maxPics; i++)
-				{
-					int pic_in_file=i;
-					FSunPackLib::LoadSHPImageInSurface(v.dd, hPalette, i*wStep+wStartWalkFrame, 1, &lpT[i]);
-				}
-			}
-
-			for(i=0; i<maxPics; i++)
-			{
-				int pic_in_file=i;
-				if(bStructure && bVoxelTurret) pic_in_file=0;
-				SHPIMAGEHEADER imghead;
-				FSunPackLib::XCC_GetSHPImageHeader(pic_in_file, &imghead);
-
-				if(bib!=NULL)
-				{
-					DDBLTFX fx;
-
-					memset(&fx, 0, sizeof(DDBLTFX));
-					fx.dwSize=sizeof(DDBLTFX);
-
-					lpT[i]->Blt(NULL, bib, NULL, DDBLT_KEYSRC | DDBLT_WAIT , &fx);
-
-					imghead.cx=head.cx-imghead.x; // update size of main graphic
-					imghead.cy=head.cy-imghead.y;
-
-				}
-
-				if(activeanim!=NULL)
-				{
-					DDBLTFX fx;
-
-					memset(&fx, 0, sizeof(DDBLTFX));
-					fx.dwSize=sizeof(DDBLTFX);
-
-					lpT[i]->Blt(NULL, activeanim, NULL, DDBLT_KEYSRC | DDBLT_WAIT , &fx);
-
-					
-				}
-
-				if(idleanim!=NULL)
-				{
-					DDBLTFX fx;
-
-					memset(&fx, 0, sizeof(DDBLTFX));
-					fx.dwSize=sizeof(DDBLTFX);
-
-					lpT[i]->Blt(NULL, idleanim, NULL, DDBLT_KEYSRC | DDBLT_WAIT , &fx);
-
-					
-				}
-
-				if(activeanim2!=NULL)
-				{
-					DDBLTFX fx;
-
-					memset(&fx, 0, sizeof(DDBLTFX));
-					fx.dwSize=sizeof(DDBLTFX);
-
-					lpT[i]->Blt(NULL, activeanim2, NULL, DDBLT_KEYSRC | DDBLT_WAIT , &fx);
-
-					
-				}
-
-				if(activeanim3!=NULL)
-				{
-					DDBLTFX fx;
-
-					memset(&fx, 0, sizeof(DDBLTFX));
-					fx.dwSize=sizeof(DDBLTFX);
-
-					lpT[i]->Blt(NULL, activeanim3, NULL, DDBLT_KEYSRC | DDBLT_WAIT , &fx);
-
-					
-				}
-				
-				if(superanim1!=NULL)
-				{
-					DDBLTFX fx;
-
-					memset(&fx, 0, sizeof(DDBLTFX));
-					fx.dwSize=sizeof(DDBLTFX);
-
-					lpT[i]->Blt(NULL, superanim1, NULL, DDBLT_KEYSRC | DDBLT_WAIT , &fx);
-
-					
-				}
-
-				if(superanim2!=NULL)
-				{
-					DDBLTFX fx;
-
-					memset(&fx, 0, sizeof(DDBLTFX));
-					fx.dwSize=sizeof(DDBLTFX);
-
-					lpT[i]->Blt(NULL, superanim2, NULL, DDBLT_KEYSRC | DDBLT_WAIT , &fx);
-
-					
-				}
-
-				if(superanim3!=NULL)
-				{
-					DDBLTFX fx;
-
-					memset(&fx, 0, sizeof(DDBLTFX));
-					fx.dwSize=sizeof(DDBLTFX);
-
-					lpT[i]->Blt(NULL, superanim3, NULL, DDBLT_KEYSRC | DDBLT_WAIT , &fx);
-
-					
-				}
-
-				if(superanim4!=NULL)
-				{
-					DDBLTFX fx;
-
-					memset(&fx, 0, sizeof(DDBLTFX));
-					fx.dwSize=sizeof(DDBLTFX);
-
-					lpT[i]->Blt(NULL, superanim4, NULL, DDBLT_KEYSRC | DDBLT_WAIT , &fx);
-
-					
-				}
-
-				if(specialanim1!=NULL)
-				{
-					DDBLTFX fx;
-
-					memset(&fx, 0, sizeof(DDBLTFX));
-					fx.dwSize=sizeof(DDBLTFX);
-
-					lpT[i]->Blt(NULL, specialanim1, NULL, DDBLT_KEYSRC | DDBLT_WAIT , &fx);
-
-					
-				}
-
-				if(specialanim2!=NULL)
-				{
-					DDBLTFX fx;
-
-					memset(&fx, 0, sizeof(DDBLTFX));
-					fx.dwSize=sizeof(DDBLTFX);
-
-					lpT[i]->Blt(NULL, specialanim2, NULL, DDBLT_KEYSRC | DDBLT_WAIT , &fx);
-
-					
-				}
-
-				if(specialanim3!=NULL)
-				{
-					DDBLTFX fx;
-
-					memset(&fx, 0, sizeof(DDBLTFX));
-					fx.dwSize=sizeof(DDBLTFX);
-
-					lpT[i]->Blt(NULL, specialanim3, NULL, DDBLT_KEYSRC | DDBLT_WAIT , &fx);
-
-					
-				}
-
-				if(specialanim4!=NULL)
-				{
-					DDBLTFX fx;
-
-					memset(&fx, 0, sizeof(DDBLTFX));
-					fx.dwSize=sizeof(DDBLTFX);
-
-					lpT[i]->Blt(NULL, specialanim4, NULL, DDBLT_KEYSRC | DDBLT_WAIT , &fx);
-
-					
-				}
-				
-				
-				
-				if(turrets[i]!=NULL)
-				{
-					DDBLTFX fx;
-					int iMove=0;
-
-					DDSURFACEDESC2 ddsd;
-					memset(&ddsd, 0, sizeof(DDSURFACEDESC2));
-					ddsd.dwSize=sizeof(DDSURFACEDESC2);
-					ddsd.dwFlags=DDSD_WIDTH | DDSD_HEIGHT;
-					turrets[i]->GetSurfaceDesc(&ddsd);
-					
-
-					memset(&fx, 0, sizeof(DDBLTFX));
-					fx.dwSize=sizeof(DDBLTFX);
-
-					RECT srcRect, destRect;
-					srcRect.left=0;					
-					srcRect.right=ddsd.dwWidth;
-					destRect.left=(head.cx-ddsd.dwWidth)/2;					
-					destRect.right=head.cx-destRect.left;
-					
-					if(iMove<0)
-					{
-						srcRect.top=-iMove;
-						srcRect.bottom=ddsd.dwHeight;
-						destRect.top=0;
-						destRect.bottom=head.cy+iMove-(head.cy-ddsd.dwHeight);
-					}
-					else
-					{
-						int mx=imghead.x/2+imghead.cx/2+(-turretinfo[i].x/2-turretinfo[i].cx)+ atoi(rules.sections[image].values["TurretAnimX"]);
-						int my=imghead.y/2+imghead.cy/2+(-turretinfo[i].y/2-turretinfo[i].cy) + atoi(rules.sections[image].values["TurretAnimY"]);//+atoi(rules.sections[image].values["TurretAnimZAdjust"]);
-						
-						if(ddsd.dwWidth!=head.cx || ddsd.dwHeight!=head.cy)
-						{
-							// voxel turret
-							//mx=head.cx/2-ddsd.dwWidth/2;//+atoi(rules.sections[image].values["TurretAnimX"]);
-							//my=head.cy/2-ddsd.dwHeight/2+atoi(rules.sections[image].values["TurretAnimY"])+atoi(rules.sections[image].values["TurretAnimZAdjust"])/2;
-							mx=imghead.x+imghead.cx/2+turretinfo[i].x+atoi(rules.sections[image].values["TurretAnimX"]);
-							my=imghead.y+imghead.cy/2+turretinfo[i].y+atoi(rules.sections[image].values["TurretAnimY"]);//+atoi(rules.sections[image].values["TurretAnimZAdjust"])/2;
-							
-							errstream << turretinfo[i].x << " y:" << turretinfo[i].y << " mx:" << mx << " my:" << my << endl;
-							errstream.flush();
-							
-							int XMover, YMover;
-#ifdef RA2_MODE
-							XMover=atoi(g_data.sections["BuildingVoxelTurretsRA2"].values[(CString)lpUnittype+"X"]);
-							YMover=atoi(g_data.sections["BuildingVoxelTurretsRA2"].values[(CString)lpUnittype+"Y"]);
-#else
-							XMover=atoi(g_data.sections["BuildingVoxelTurrets"].values[(CString)lpUnittype+"X"]);
-							YMover=atoi(g_data.sections["BuildingVoxelTurrets"].values[(CString)lpUnittype+"Y"]);
-#endif
-
-							mx+=XMover;
-							my+=YMover;
-
-							srcRect.top=0;
-							srcRect.left=0;
-							srcRect.right=ddsd.dwWidth;
-							srcRect.bottom=ddsd.dwHeight;
-							destRect.top=my;
-							destRect.left=mx;
-							destRect.right=destRect.left+ddsd.dwWidth;
-							destRect.bottom=destRect.top+ddsd.dwHeight;
-							if(destRect.top<0)
-							{
-								int old=destRect.top;
-								destRect.top=0;
-								srcRect.top-=old-destRect.top;
-
-							}
-							if(destRect.right>=head.cx)
-							{
-								int old=destRect.right;
-								destRect.right=head.cx;
-								srcRect.right-=old-destRect.right;
-							}
-							if(destRect.bottom>=head.cy)
-							{
-								int old=destRect.bottom;
-								destRect.bottom=head.cy;
-								srcRect.bottom-=old-destRect.bottom;
-							}
-						}
-						else
-						{
-
-							if(mx<0)mx=0;
-							if(my<0)my=0;
-							srcRect.top=0;
-							srcRect.right=ddsd.dwWidth-mx;
-							srcRect.bottom=ddsd.dwHeight-my;
-							destRect.top=my;
-							destRect.left=mx+(head.cx-ddsd.dwWidth)/2;
-							destRect.right=destRect.left+ddsd.dwWidth;;
-							destRect.bottom=destRect.top+ddsd.dwHeight;
-						}
-					}
-						
-										
-					
-
-					if(lpT[i]->Blt(&destRect, turrets[i], &srcRect, DDBLT_KEYSRC | DDBLT_WAIT, &fx)!=DD_OK)
-					{
-						
-						errstream << "vxl turret: " << i << " size: " << ddsd.dwWidth << " " << ddsd.dwHeight << "  failed" << endl;
-						errstream.flush(); 
-						//exit(-99);
-					}
-
-									
-				}
-
-				if(!bPowerUp && i!=0 && imghead.unknown==0 && bStructure)
-				{
-					if(lpT[i]) lpT[i]->Release();
-				}
-				else
-				{
-					PICDATA p;
-					p.pic=lpT[i];				
-					p.x=imghead.x;
-					p.y=imghead.y;
-					p.wHeight=imghead.cy;
-					p.wWidth=imghead.cx;
-					p.wMaxWidth=head.cx;
-					p.wMaxHeight=head.cy;
-					p.bType=PICDATA_TYPE_SHP;
-					p.bTerrain=bTerrain;
-					if(bIgnoreTerrain) p.bTerrain=0;
-
-					
-					pics[MakeUnitPictureCacheKey(lpUnittype, i)] = p;
-				}
-				
-			
-			}
-			
-			delete[] lpT;
-
-			
-			if(bib) bib->Release();
-			if(activeanim)activeanim->Release();
-			if(idleanim)idleanim->Release();
-			if(activeanim2)activeanim2->Release();
-			if(activeanim3)activeanim3->Release();
-			if(superanim1)superanim1->Release();
-			if(superanim2)superanim2->Release();
-			if(superanim3)superanim3->Release();
-			if(superanim4)superanim4->Release();
-			if(specialanim1)specialanim1->Release();
-			if(specialanim2)specialanim2->Release();
-			if(specialanim3)specialanim3->Release();
-			if(specialanim4)specialanim4->Release();
-			
-			for(i=0;i<8;i++)
-				if(turrets[i])turrets[i]->Release();
-			
-			}
-
-			//errstream << " --> Finished" << endl;
-			//errstream.flush();
-		}
-		
-		else
-		{
-			errstream << "File in theater " << cur_theat << " not found: " << (LPCTSTR)filename << endl;
-			errstream.flush();
-
-			missingimages[lpUnittype]=TRUE;			
-		}
-
-		}
-		catch(...)
-		{
-			errstream << " exception " << endl;
-			errstream.flush();
-		}
-	
-		
-	}
-	else
-	{
-		filename=image+".vxl"; 
-
-		HMIXFILE hMix=FindFileInMix(filename);
-		if(hMix==FALSE)
-		{
-			missingimages[lpUnittype]=TRUE;
-			return FALSE;
-		}
-
-		
-		int i;
-
-		try
-		{
-		
-		for(i=0;i<8;i++)
-		{
-			float r_x,r_y,r_z;
-			
-
-			r_x=300;
-			r_y=0;
-			r_z=45*i+90;
-
-			// convert
-			const double pi = 3.141592654;
-			r_x=r_x/180.0f*pi;
-			r_y=r_y/180.0f*pi;
-			r_z=r_z/180.0f*pi;
-
-			
-
-			LPDIRECTDRAWSURFACE4 lpT;//=new(LPDIRECTDRAWSURFACE4[1]);
-			LPDIRECTDRAWSURFACE4 lpTurret=NULL;
-			LPDIRECTDRAWSURFACE4 lpBarrel=NULL;
-			int turret_x,turret_y,turret_x_zmax,turret_y_zmax,barrel_x,barrel_y;
-
-			if(isTrue(rules.sections[lpUnittype].values["Turret"]))
-			{
-				if(FSunPackLib::SetCurrentVXL(image+"tur.vxl", hMix))
-				{
-					FSunPackLib::LoadVXLImageInSurface(*m_voxelNormalTables, lightDirection, v.dd, 0, 1, r_x, r_y, r_z, &lpTurret, m_hPalUnitTemp,&turret_x,&turret_y,0,&turret_x_zmax, &turret_y_zmax,-1,-1);
-				}
-				if(FSunPackLib::SetCurrentVXL(image+"barl.vxl", hMix))
-				{
-					FSunPackLib::LoadVXLImageInSurface(*m_voxelNormalTables, lightDirection, v.dd, 0, 1, r_x, r_y, r_z, &lpBarrel, m_hPalUnitTemp,&barrel_x,&barrel_y,0,NULL,NULL,0,0);
-				}	
-			}
-
-
-			if(!FSunPackLib::SetCurrentVXL(filename, hMix))
-			{
-				if(lpTurret) lpTurret->Release();
-				if(lpBarrel) lpBarrel->Release();
-				return FALSE;
-			}
-
-			
-
-			int xcenter,ycenter,xcenter_zmax,ycenter_zmax;
-
-			if(!
-			FSunPackLib::LoadVXLImageInSurface(*m_voxelNormalTables, lightDirection, v.dd, 0, 1, r_x, r_y, r_z, &lpT, m_hPalUnitTemp,&xcenter, &ycenter,0,&xcenter_zmax,&ycenter_zmax)
-			)
-			{
-				if(lpTurret) lpTurret->Release();
-				if(lpBarrel) lpBarrel->Release();
-				return FALSE;
-			}
-
-			DDSURFACEDESC2 ddsd;
-			memset(&ddsd, 0, sizeof(DDSURFACEDESC2));
-			ddsd.dwSize=sizeof(DDSURFACEDESC2);
-			ddsd.dwFlags=DDSD_WIDTH | DDSD_HEIGHT;
-			lpT->GetSurfaceDesc(&ddsd);
-
-			// turret
-			if(lpTurret)
-			{
-				DDSURFACEDESC2 ddsdT;
-				memset(&ddsdT, 0, sizeof(DDSURFACEDESC2));
-				ddsdT.dwSize=sizeof(DDSURFACEDESC2);
-				ddsdT.dwFlags=DDSD_WIDTH | DDSD_HEIGHT;
-				lpTurret->GetSurfaceDesc(&ddsdT);
-
-				DDBLTFX fx;
-				memset(&fx, 0, sizeof(DDBLTFX));
-				fx.dwSize=sizeof(DDBLTFX);
-
-				RECT srcRect, destRect;
-				srcRect.left=0;					
-				srcRect.right=ddsdT.dwWidth;
-				destRect.left=xcenter_zmax-turret_x;					
-				destRect.right=destRect.left+ddsdT.dwWidth;
-				srcRect.top=0;					
-				srcRect.bottom=ddsdT.dwHeight;
-				destRect.top=ycenter_zmax-turret_y;					
-				destRect.bottom=destRect.top+ddsdT.dwHeight;
-
-				lpT->Blt(&destRect, lpTurret, &srcRect, DDBLT_KEYSRC | DDBLT_WAIT, &fx);
-				
-			}
-
-			// barrel
-			if(lpBarrel)
-			{
-				DDSURFACEDESC2 ddsdB;
-				memset(&ddsdB, 0, sizeof(DDSURFACEDESC2));
-				ddsdB.dwSize=sizeof(DDSURFACEDESC2);
-				ddsdB.dwFlags=DDSD_WIDTH | DDSD_HEIGHT;
-				lpBarrel->GetSurfaceDesc(&ddsdB);
-				
-				DDSURFACEDESC2 ddsdT;
-				memset(&ddsdT, 0, sizeof(DDSURFACEDESC2));
-				ddsdT.dwSize=sizeof(DDSURFACEDESC2);
-				ddsdT.dwFlags=DDSD_WIDTH | DDSD_HEIGHT;
-				
-				if(lpTurret) lpTurret->GetSurfaceDesc(&ddsdT);
-
-
-				DDBLTFX fx;
-				memset(&fx, 0, sizeof(DDBLTFX));
-				fx.dwSize=sizeof(DDBLTFX);
-
-				RECT srcRect, destRect;
-				srcRect.left=0;					
-				srcRect.right=ddsdB.dwWidth;
-				destRect.left=xcenter_zmax-barrel_x+(turret_x_zmax-turret_x);					
-				destRect.right=destRect.left+ddsdB.dwWidth;
-				srcRect.top=0;					
-				srcRect.bottom=ddsdB.dwHeight;
-				destRect.top=ycenter_zmax-barrel_y+(turret_y_zmax-turret_y);					
-				destRect.bottom=destRect.top+ddsdB.dwHeight;
-
-				lpT->Blt(&destRect, lpBarrel, &srcRect, DDBLT_KEYSRC | DDBLT_WAIT, &fx);
-				
-			}
-
-			char ic[50];
-			itoa(7-i, ic, 10);
-
-			errstream << ddsd.dwWidth << " " << ddsd.dwHeight << "\n";
-			PICDATA p;
-			p.pic=lpT;				
-			p.x=-xcenter;
-			p.y=-ycenter;
-			p.wHeight=ddsd.dwHeight;
-			p.wWidth=ddsd.dwWidth;
-			p.wMaxWidth=ddsd.dwWidth;
-			p.wMaxHeight=ddsd.dwHeight;
-			p.bType=PICDATA_TYPE_VXL;
-			p.bTerrain=0;
-					
-			pics[MakeUnitPictureCacheKey(lpUnittype, 7 - i)] = p;
-
-			errstream << "vxl saved as " << (LPCSTR)image << (LPCSTR)ic << endl;
-			errstream.flush();
-
-			if(lpBarrel) lpBarrel->Release();
-			if(lpTurret) lpTurret->Release();
-
-			//delete[] lpT;
-			
-		}
-		}
-		catch(...)
-		{
-
-		}
-
-	}
-
-	
-
-	return FALSE;	
-}
-#endif
 
 
 BOOL CLoading::InitMixFiles()
@@ -4620,7 +3318,6 @@ void CLoading::InitTMPs(CProgressCtrl* prog)
 			
 }
 
-#ifdef NOSURFACES // first version, using palettized (or extracted) data
 BOOL CLoading::LoadTile(LPCSTR lpFilename, HMIXFILE hOwner, HTSPALETTE hPalette, DWORD dwID, BOOL bReplacement)
 {
 	last_succeeded_operation=12;
@@ -4698,46 +3395,13 @@ BOOL CLoading::LoadTile(LPCSTR lpFilename, HMIXFILE hOwner, HTSPALETTE hPalette,
 						td->tiles[i].vborder=new(VBORDER[cy]);
 
 						int k;
-						int size=0;
-						BOOL TranspInside=FALSE;
 						for(k=0;k<cy;k++)
 						{
 							int l,r;
-							BOOL* ti=NULL;
-							if(!TranspInside) ti=&TranspInside;
-							GetDrawBorder(pics[i], cx, k, l, r, 0, ti); 
+							GetDrawBorder(pics[i], cx, k, l, r, 0, NULL); 
 							td->tiles[i].vborder[k].left=l;
 							td->tiles[i].vborder[k].right=r;
-
-							if(r>=l)
-							size+=r-l+1;
 						}
-
-#ifdef NOSURFACES_EXTRACT
-
-						if(!TranspInside)
-						{
-							// extract the palette data!
-							td->tiles[i].bNotExtracted=FALSE;
-							td->tiles[i].pic=new(BYTE[size*bpp]);
-							int l;
-							int pos=0;
-							for(k=0;k<cy;k++)
-							{
-								int left, right;
-								left=td->tiles[i].vborder[k].left;
-								right=td->tiles[i].vborder[k].right;
-								for(l=left;l<=right;l++)
-								{
-									memcpy(&td->tiles[i].pic[pos], &iPalIso[pics[i][l+k*cx]], bpp);
-									pos+=bpp;
-								}
-							}
-							delete[] pics[i];
-						}
-						else
-							td->tiles[i].bNotExtracted=TRUE;
-#endif
 
 
 						if(terraintype==0xa) 
@@ -4820,186 +3484,7 @@ BOOL CLoading::LoadTile(LPCSTR lpFilename, HMIXFILE hOwner, HTSPALETTE hPalette,
 	
 
 }
-#else // now standard version, with surfaces
-BOOL CLoading::LoadTile(LPCSTR lpFilename, HMIXFILE hOwner, HTSPALETTE hPalette, DWORD dwID, BOOL bReplacement)
-{
-	last_succeeded_operation=12;
 
-	//errstream << "Loading " << lpFilename << " owned by " << hOwner << ", palette " << hPalette ;
-	//errstream << lpFilename << endl;
-	//errstream.flush();
-
-	CIsoView& v=*((CFinalSunDlg*)theApp.m_pMainWnd)->m_view.m_isoview;
-
-
-	//DeleteFile((CString)AppPath+(CString)"\\TmpTmp.tmp");
-	//FSunPackLib::XCC_ExtractFile(lpFilename, (CString)AppPath+(CString)"\\TmpTmp.tmp" /*lpFilename*//*, hOwner);
-
-	int tileCount;
-	try{
-	if(FSunPackLib::XCC_DoesFileExist(lpFilename, hOwner))
-	//if(DoesFileExist((CString)AppPath+(CString)"\\TmpTmp.tmp"))
-	{
-		//if(
-		FSunPackLib::SetCurrentTMP(lpFilename, hOwner);
-		//)
-		{
-
-			//FSunPackLib::SetCurrentTMP((CString)AppPath+"\\TmpTmp.tmp"/* lpFilename*//*, NULL/*hOwner*//*);
-			int tileWidth, tileHeight;
-			RECT rect;
-			FSunPackLib::XCC_GetTMPInfo(&rect, &tileCount, &tileWidth, &tileHeight);
-
-		
-			LPDIRECTDRAWSURFACE4* pics=new(LPDIRECTDRAWSURFACE4[tileCount]);
-			if(FSunPackLib::LoadTMPImageInSurface(v.dd,0, tileCount, pics, hPalette))
-			//if(FSunPackLib::LoadTMPImageInSurface(v.dd,lpFilename, 0, tileCount, pics, hPalette, hOwner))
-			{
-				TILEDATA* td;
-				if(!bReplacement) td=&(*tiledata)[dwID];
-				else
-				{
-
-				// Grow the replacements array by one slot. Keep a pointer to
-				// the old array, allocate the new one, copy the existing
-				// entries, then free the old array. The previous code copied
-				// into a temporary buffer and never freed the original member
-				// array, leaking it every time a replacement TMP was loaded.
-				TILEDATA* const lpOldReplacements = (*tiledata)[dwID].lpReplacements;
-				const int nOldReplacementCount = (*tiledata)[dwID].bReplacementCount;
-				(*tiledata)[dwID].lpReplacements = new TILEDATA[nOldReplacementCount + 1];
-				if (nOldReplacementCount)
-				{
-					memcpy((*tiledata)[dwID].lpReplacements, lpOldReplacements, sizeof(TILEDATA) * nOldReplacementCount);
-					delete[] lpOldReplacements;
-				}
-
-					td=&(*tiledata)[dwID].lpReplacements[(*tiledata)[dwID].bReplacementCount];
-					(*tiledata)[dwID].bReplacementCount++;
-				}
-
-							
-				td->tiles=new(SUBTILE[tileCount]);
-				td->wTileCount=tileCount;
-				td->cx=tileWidth;
-				td->cy=tileHeight;
-				td->rect=rect;
-				
-				int i;
-				for(i=0;i<tileCount;i++)
-				{
-					if(pics[i]!=NULL)
-					{
-
-						int cx,cy;
-						BYTE height,terraintype,direction;
-						POINT p;
-						FSunPackLib::XCC_GetTMPTileInfo(i, &p, &cx, &cy, &direction, &height, &terraintype, &td->tiles[i].rgbLeft, &td->tiles[i].rgbRight);
-						td->tiles[i].pic=pics[i];
-						td->tiles[i].sX=p.x;
-						td->tiles[i].sY=p.y;
-						td->tiles[i].wWidth=cx;
-						td->tiles[i].wHeight=cy;
-						td->tiles[i].bZHeight=height;
-						td->tiles[i].bTerrainType=terraintype;
-						td->tiles[i].bHackedTerrainType=terraintype;
-						td->tiles[i].bDirection=direction;
-
-						if(terraintype==0xa) 
-						{
-#ifdef RA2_MODE
-							td->tiles[i].bHackedTerrainType=TERRAINTYPE_WATER;
-#else
-							td->tiles[i].bHackedTerrainType=TERRAINTYPE_WATER;
-#endif
-						}
-						if(terraintype==TERRAINTYPE_ROUGH) td->tiles[i].bHackedTerrainType=TERRAINTYPE_GROUND;
-
-						//if((*tiledata)[dwID].wTileSet==waterset) (*tiledata)[dwID].tiles[i].bHackedTerrainType=TERRAINTYPE_WATER;
-
-						// shore hack: check fsdata.ini for new shore terrain
-						if(td->wTileSet==shoreset)
-						{
-							int h;
-							for(h=0;h<(*tiledata_count);h++)
-							{
-								if((*tiledata)[h].wTileSet==shoreset) break;
-							}
-
-							int pos=dwID-h;
-							char c[50];
-							itoa(pos,c,10);
-							CString hack=c;
-							hack+="_";
-							itoa(i, c, 10);
-							hack+=c;/*
-							hack+="_";
-							itoa(i/tileWidth, c, 10);
-							hack+=c;*/
-
-							CString section="ShoreTerrainTS";
-#ifdef RA2_MODE
-							section="ShoreTerrainRA2";
-#endif
-							
-							if(g_data.sections[section].FindName(hack)>=0)
-							{
-								int t=atoi(g_data.sections[section].values[hack]);
-								if(t) td->tiles[i].bHackedTerrainType=TERRAINTYPE_WATER;
-								else
-									td->tiles[i].bHackedTerrainType=0xe;
-							}
-						}
-						if((*tiledata)[dwID].wTileSet==waterset) (*tiledata)[dwID].tiles[i].bHackedTerrainType=TERRAINTYPE_WATER;
-					}
-					else
-					{
-						td->tiles[i].pic=NULL;
-						td->tiles[i].sX=0;
-						td->tiles[i].sY=0;
-						td->tiles[i].wWidth=0;
-						td->tiles[i].wHeight=0;
-						td->tiles[i].bZHeight=0;
-						td->tiles[i].bTerrainType=0;
-						td->tiles[i].bDirection=0;
-					}
-				}
-			}
-			
-			if(tileCount>0) delete[] pics;
-		}
-	}	
-	else
-	{
-		//errstream << " not found" << endl;
-		return FALSE;
-	}
-	}
-	catch(...)
-	{
-
-	}
-	
-	if((*tiledata)[dwID].wTileCount==0 || (*tiledata)[dwID].tiles[0].pic==NULL)
-	{
-		//errstream << " failed" << endl;
-		//errstream.flush();
-
-		return FALSE;
-	}
-	else
-	{
-		//errstream << " succeeded" << endl;
-		//errstream.flush();
-	}
-
-	return TRUE;
-	
-
-}
-#endif
-
-#ifdef NOSURFACES_OBJECTS // palettized
 void CLoading::LoadOverlayGraphic(LPCTSTR lpOvrlName_, int iOvrlNum)
 {
 	last_succeeded_operation=11;
@@ -5361,280 +3846,6 @@ void CLoading::LoadOverlayGraphic(LPCTSTR lpOvrlName_, int iOvrlNum)
 	
 }
 
-#else // surfaces
-void CLoading::LoadOverlayGraphic(LPCTSTR lpOvrlName_, int iOvrlNum)
-{
-	last_succeeded_operation=11;
-
-	CString image; // the image used
-	CString filename; // filename of the image
-	SHPHEADER head;
-	char theat=cur_theat;
-	LPDIRECTDRAWSURFACE4* lpT=NULL;
-
-	char OvrlID[50];
-	itoa(iOvrlNum, OvrlID, 10);
-
-	HTSPALETTE hPalette;
-	if(cur_theat=='T')
-	{
-		hPalette=m_hPalIsoTemp;
-	#ifdef RA2_MODE
-		hPalette=m_hPalIsoTemp;
-	#endif
-	}
-	if(cur_theat=='A')
-	{
-		hPalette=m_hPalIsoSnow;
-	#ifdef RA2_MODE
-		hPalette=m_hPalIsoSnow;
-	#endif
-	}
-	if(cur_theat=='U' && m_hPalIsoUrb)
-	{
-		hPalette=m_hPalIsoUrb;
-	#ifdef RA2_MODE
-		hPalette=m_hPalIsoUrb;
-	#endif		
-	}
-	
-	HMIXFILE hMix;
-
-	CIsoView& v=*((CFinalSunDlg*)theApp.m_pMainWnd)->m_view.m_isoview;
-
-	CString lpOvrlName = lpOvrlName_;
-	if (lpOvrlName.Find(' ') >= 0) lpOvrlName = lpOvrlName.Left(lpOvrlName.Find(' '));
-
-	CString isveinhole_t=rules.sections[lpOvrlName].values["IsVeinholeMonster"];
-	CString istiberium_t=rules.sections[lpOvrlName].values["Tiberium"];
-	CString isveins_t=rules.sections[lpOvrlName].values["IsVeins"];
-	isveinhole_t.MakeLower();
-	istiberium_t.MakeLower();
-	isveins_t.MakeLower();
-	BOOL isveinhole=FALSE, istiberium=FALSE, isveins=FALSE;
-	if(isTrue(isveinhole_t)) isveinhole=TRUE;
-	if(isTrue(istiberium_t)) istiberium=TRUE;
-	if(isTrue(isveins_t)) isveins=TRUE;
-
-
-	
-
-
-	image=lpOvrlName;
-	if(rules.sections[lpOvrlName].values.find("Image")!=rules.sections[lpOvrlName].values.end())
-		image=rules.sections[lpOvrlName].values["Image"];
-
-	TruncSpace(image);
-
-	CString imagerules=image;
-	if(art.sections[image].values.find("Image")!=art.sections[image].values.end())
-		image=art.sections[image].values["Image"];
-
-	TruncSpace(image);
-
-	if(cur_theat=='T') filename=image+".tem";
-	if(cur_theat=='A') filename=image+".sno";
-	if(cur_theat=='U') filename=image+".urb";
-
-
-	hMix=FindFileInMix(filename);
-	
-	
-	if(hMix==NULL)
-	{
-		filename=image+".shp";
-		if(isTrue(art.sections[image].values["NewTheater"])) 
-			filename.SetAt(1, theat);
-
-		if(cur_theat=='U' && m_hPalUnitUrb) hPalette=m_hPalUnitUrb;
-		if(cur_theat=='T') hPalette=m_hPalUnitTemp;
-		if(cur_theat=='A') hPalette=m_hPalUnitSnow;
-
-		hMix=FindFileInMix(filename);
-
-		// errstream << (LPCSTR)filename << " " << hMix;
-
-		if(hMix==NULL)
-		{
-			filename.SetAt(1, 'T');
-			hMix=FindFileInMix(filename);
-		}
-		if(hMix==NULL)
-		{
-			filename.SetAt(1, 'A');
-			hMix=FindFileInMix(filename);
-		}
-		if(hMix==NULL)
-		{
-			filename.SetAt(1, 'U');
-			hMix=FindFileInMix(filename);
-		}
-
-		if(cur_theat=='T' || cur_theat=='U')
-		{
-			hPalette=m_hPalUnitTemp;
-		}
-		else
-			hPalette=m_hPalUnitSnow;
-
-	}
-	
-	if(hMix==NULL)
-	{
-		filename=image+".tem";
-		hMix=FindFileInMix(filename);
-		if(hMix) hPalette=m_hPalIsoTemp;
-	}
-	if(hMix==NULL)
-	{
-		filename=image+".sno";
-		hMix=FindFileInMix(filename);
-		if(hMix) hPalette=m_hPalIsoSnow;
-	}
-	if(hMix==NULL)
-	{
-		filename=image+".urb";
-		hMix=FindFileInMix(filename);
-		if(hMix && m_hPalIsoUrb) hPalette=m_hPalIsoUrb;
-	}
-
-	if(isveinhole==TRUE || isveins==TRUE || istiberium==TRUE)
-	{
-		hPalette=m_hPalTemp;
-#ifndef RA2_MODE
-		hPalette=m_hPalUnitTemp;
-#endif
-	}
-
-	if(hMix!=NULL)
-	{
-		
-		FSunPackLib::SetCurrentSHP(filename, hMix);
-		{
-		
-			FSunPackLib::XCC_GetSHPHeader(&head);
-
-			int i;
-			int maxPics=head.c_images;
-			if(maxPics>max_ovrl_img) maxPics=max_ovrl_img; // max may_ovrl_img pictures (memory usage!)
-			//errstream << ", loading " << maxPics << " of " << head.c_images << " pictures. ";
-			//errstream.flush();
-
-				
-			// create an array of pointers to directdraw surfaces
-			lpT=new(LPDIRECTDRAWSURFACE4[maxPics]);
-			memset(lpT, 0, sizeof(LPDIRECTDRAWSURFACE4)*maxPics);
-
-			// if tiberium, change color
-			BOOL bIsBlueTib=FALSE;
-			BOOL bIsGreenTib=FALSE;
-			RGBTRIPLE rgbOld[16], rgbNew;
-	#ifndef RA2_MODE
-			if(istiberium)
-			{
-				if(lpOvrlName[4]=='_') // other than green!
-					bIsBlueTib=TRUE;
-				else
-					bIsGreenTib=TRUE;
-
-				
-
-				int i;
-				for(i=0;i<16;i++)
-				{
-					if(bIsGreenTib)
-					{
-						rgbNew.rgbtBlue=0;
-						if(i!=0)
-							rgbNew.rgbtGreen=255-i*16+1;
-						else
-							rgbNew.rgbtGreen=255;
-						rgbNew.rgbtRed=0;
-					}
-					else if(bIsBlueTib)
-					{
-						if(i!=0)
-							rgbNew.rgbtBlue=255-i*16+1;
-						else
-							rgbNew.rgbtBlue=255;
-						rgbNew.rgbtGreen=0;
-						rgbNew.rgbtRed=0;
-					}
-
-					FSunPackLib::SetTSPaletteEntry(hPalette, 0x10+i, &rgbNew, &rgbOld[i]);
-				}
-			}
-	#endif
-
-			FSunPackLib::LoadSHPImageInSurface(v.dd, hPalette, 0, maxPics, lpT);
-
-	#ifndef RA2_MODE
-			if(istiberium)
-				for(i=0;i<16;i++)
-					FSunPackLib::SetTSPaletteEntry(hPalette, 0x10+i, &rgbOld[i], NULL);
-	#endif
-
-			for(i=0; i<maxPics; i++)
-			{
-				SHPIMAGEHEADER imghead;
-				FSunPackLib::XCC_GetSHPImageHeader(i, &imghead);
-				
-				if(imghead.unknown==0) // is it a shadow or not used image?
-					if(lpT[i]) lpT[i]->Release();
-				
-				if(imghead.unknown && lpT[i])
-				{
-					char ic[50];
-					itoa(i, ic, 10);
-
-					PICDATA p;
-					p.pic=lpT[i];				
-					p.x=imghead.x;
-					p.y=imghead.y;
-
-					p.wHeight=imghead.cy;
-					p.wWidth=imghead.cx;
-					p.wMaxWidth=head.cx;
-					p.wMaxHeight=head.cy;
-					p.bType=PICDATA_TYPE_SHP;
-					
-
-
-					pics[(CString)"OVRL"+ OvrlID + "_" + ic]=p;	
-				}
-			}
-
-				
-			delete[] lpT;
-
-			//errstream << " --> Finished" << endl;
-			//errstream.flush();
-		} 
-		/*else
-		{
-			errstream << " failed";
-			errstream.flush();
-		}*/
-	}
-
-	else
-	{
-		//errstream << "File not found: " << (LPCTSTR)filename << endl;
-		//errstream.flush();	
-	}	
-
-	int i;
-	for(i=0; i<0xFF; i++)
-	{
-		char ic[50];
-		itoa(i, ic, 10);
-
-		pics[(CString)"OVRL"+ OvrlID + "_" + ic].bTried=TRUE;	
-	}
-
-	
-}
-#endif
 
 void CLoading::OnDestroy() 
 {
@@ -5683,228 +3894,18 @@ void CLoading::CalcPicCount()
 }
 
 
-BOOL CLoading::InitDirectDraw()
+BOOL CLoading::InitRenderer()
 {
 	last_succeeded_operation=7;
 
-	errstream << "\n\nDirectDrawCreate() will be called now\n";
-	errstream.flush();
-		
 	CIsoView& v=*((CFinalSunDlg*)theApp.m_pMainWnd)->m_view.m_isoview;
-	if(DirectDrawCreate(NULL, &v.dd_1, NULL)!=DD_OK)
-	{
-		errstream << "DirectDrawCreate() failed\n";
-		errstream.flush();
-		ShowWindow(SW_HIDE);
-		MessageBox(TranslateStringACP("DirectDraw could not be initialized! Quitting..."));
-		exit(-1);
-
-		return FALSE;
-	} 
-
-	errstream << "DirectDrawCreate() successful\n\n";
-	errstream.flush();
-
-	if(m_progress.m_hWnd) m_progress.SetPos(1);
-	if(m_hWnd) UpdateWindow();
-
-	errstream << "Now querying the DirectX 7 or 6 interface\n";
-	errstream.flush();
-
-	if(v.dd_1->QueryInterface(IID_IDirectDraw7, (void**)&v.dd)!=DD_OK)
-	{
-		errstream << "QueryInterface() failed -> Using DirectX 6.0\n";
-		errstream.flush();
-		//ShowWindow(SW_HIDE);
-		//MessageBox("You don´t have DirectX 6.0 but an older version. Quitting...");
-		//exit(-1);
-
-		//return FALSE;
-
-		if(v.dd_1->QueryInterface(IID_IDirectDraw4, (void**)&v.dd)!=DD_OK)
-		{
-			MessageBox(TranslateStringACP("You need at least DirectX 6.0 to run this program"), TranslateStringACP("Error"));
-			exit(-1);
-			return FALSE;
-		}
-	}
-
-	errstream << "QueryInterface() successful\n\nNow setting cooperative level\n";
-	errstream.flush();
-		
-	if(v.dd->SetCooperativeLevel(v.m_hWnd, DDSCL_NORMAL | DDSCL_NOWINDOWCHANGES )!=DD_OK)
-	{
-		errstream << "SetCooperativeLevel() failed\n";
-		errstream.flush();
-		ShowWindow(SW_HIDE);
-		MessageBox(TranslateStringACP("Cooperative Level could not be set! Quitting..."));
-		v.dd->Release();
-		v.dd=NULL;
-		exit(-2);
-
-		return FALSE;
-	}
-
-	errstream << "SetCooperativeLevel() successful\n\nCreating primary surface\n";
-	errstream.flush();
-
+	v.m_color_converter = std::make_unique<FSunPackLib::ColorConverter>();
 
 	if(m_progress.m_hWnd) m_progress.SetPos(2);
 	if(m_hWnd) UpdateWindow();
-		
-	DDSURFACEDESC2 ddsd;
 
-
-	memset(&ddsd, 0, sizeof(DDSURFACEDESC2));
-	ddsd.dwSize=sizeof(DDSURFACEDESC2);
-	ddsd.ddsCaps.dwCaps=DDSCAPS_PRIMARYSURFACE ;
-	ddsd.dwFlags=DDSD_CAPS ;
-
-    
-
-	int res=0;
-	int trycount=0;
-	do
-	{
-		res=v.dd->CreateSurface(&ddsd, &v.lpds, NULL);
-		errstream << "Return code: " << res << endl;
-		errstream.flush();
-
-		//if(res!=DD_OK && (res!=DDERR_PRIMARYSURFACEALREADYEXISTS || trycount>100))
-		if(res!=DD_OK && trycount>=300)
-		{
-			
-			errstream << "CreateSurface() failed\n";
-			
-			errstream.flush();
-			ShowWindow(SW_HIDE);
-			MessageBox(TranslateStringACP("Primary surface could not be initialized! Quitting..."));
-			v.dd->Release();
-			v.dd=NULL;
-			exit(-3);
-
-			return FALSE;
-		}
-		trycount++;
-		if(res!=DD_OK)
-		{ 
-			Sleep(50);
-		}
-
-		
-	}while(res!=DD_OK);
-
-#ifdef NOSURFACES
-	DDPIXELFORMAT pf;
-	memset(&pf, 0, sizeof(DDPIXELFORMAT));
-	pf.dwSize=sizeof(DDPIXELFORMAT);
-
-	v.lpds->GetPixelFormat(&pf);
-
-	if(!pf.dwBBitMask || !pf.dwRBitMask || !pf.dwGBitMask)
-	{
-		ShowWindow(SW_HIDE);
-		MessageBox(TranslateStringACP("You must not use a palette color mode like 8 bit in order to run FinalSun/FinalAlert 2. Please check readme.txt"), TranslateStringACP("Error"),MB_OK);
-
-		v.lpds->Release();
-		v.lpds=NULL;
-		v.dd->Release();
-		v.dd=NULL;
-		exit(-3);
-		return FALSE;
-	}
-	bpp=(pf.dwRGBBitCount+7)/8;
-#endif
-
-
-	errstream << "CreateSurface() successful\n\nCreating backbuffer surface\n";
-	errstream.flush();
-
-	memset(&ddsd, 0, sizeof(DDSURFACEDESC2));
-	ddsd.dwSize=sizeof(DDSURFACEDESC2);
-	ddsd.dwFlags=DDSD_WIDTH | DDSD_HEIGHT;
-	v.lpds->GetSurfaceDesc(&ddsd);
-	ddsd.ddsCaps.dwCaps=DDSCAPS_OFFSCREENPLAIN;
-
-
-	ddsd.dwFlags=DDSD_CAPS | DDSD_HEIGHT | DDSD_WIDTH;
-
-	
-	if(v.dd->CreateSurface(&ddsd, &v.lpdsBack, NULL)!=DD_OK)
-	{
-		errstream << "CreateSurface() failed\n";
-		errstream.flush();
-		ShowWindow(SW_HIDE);
-		MessageBox(TranslateStringACP("Backbuffer surface could not be initialized! Quitting..."));
-		v.lpds->Release();
-		v.lpds=NULL;
-		v.dd->Release();
-		v.dd=NULL;
-		exit(-4);
-
-		return FALSE;
-	}
-	// lpdsBackHighRes is created lazily by CIsoView::EnsureHighResSurface()
-	// when the user actually zooms (m_viewScale != 1.0), so an idle startup
-	// does not hold a full-desktop-size surface.
-	if(v.dd->CreateSurface(&ddsd, &v.lpdsTemp, NULL)!=DD_OK)
-	{
-		errstream << "CreateSurface() failed\n";
-		errstream.flush();
-		ShowWindow(SW_HIDE);
-		MessageBox(TranslateStringACP("Tempbuffer surface could not be initialized! Quitting..."));
-		v.lpdsBack->Release();
-		v.lpdsBack=NULL;
-		if (v.lpdsBackHighRes)
-			v.lpdsBackHighRes->Release();
-		v.lpdsBackHighRes = nullptr;
-		v.lpds->Release();
-		v.lpds=NULL;
-		v.dd->Release();
-		v.dd=NULL;
-		exit(-4);
-
-		return FALSE;
-	}
-
-	errstream << "CreateSurface() successful\n\nNow creating clipper\n";
-	errstream.flush();
-
-	LPDIRECTDRAWCLIPPER ddc;
-	if(v.dd->CreateClipper(0, &ddc, NULL)!=DD_OK)
-	{
-		errstream << "CreateClipper() failed\n";
-		errstream.flush();
-		ShowWindow(SW_HIDE);
-		MessageBox(TranslateStringACP("Clipper could not be created! Quitting..."));
-		v.lpdsTemp->Release();
-		v.lpdsTemp=NULL;
-		v.lpdsBack->Release();
-		v.lpdsBack=NULL;
-		if (v.lpdsBackHighRes)
-			v.lpdsBackHighRes->Release();
-		v.lpdsBackHighRes = nullptr;
-		v.lpds->Release();
-		v.lpds=NULL;
-		v.dd->Release();
-		v.dd=NULL;
-		exit(-6);
-	}
-
-	errstream << "CreateClipper() successful\n\n";
-	errstream.flush();
-
-	v.lpds->SetClipper(ddc);
-
-	ddc->SetHWnd(0, v.m_hWnd);
-	// Release the reference we obtained from CreateClipper. SetClipper added
-	// the surface's own reference, so the clipper survives until the surface
-	// is released. Without this the caller-owned reference leaks.
-	ddc->Release();
-	// The Vulkan renderer is initialized lazily by
-	// CIsoView::FlipHighResBuffer() on the first presented frame, so an idle
-	// startup does not allocate device/swapchain/staging memory.
-
+	// The Vulkan renderer is initialized lazily by CIsoView::DrawMap() once the
+	// view window is sized and ready to present frames.
 	return TRUE;
 }
 
@@ -5953,14 +3954,9 @@ void CLoading::FreeTileSet()
 			
 			for(e=0;e<rept.wTileCount;e++)
 			{
-#ifdef NOSURFACES
 				BYTE* curSur=rept.tiles[e].pic;
 				if(curSur) delete[] curSur;
 				if(rept.tiles[e].vborder) delete[] rept.tiles[e].vborder;
-#else
-				LPDIRECTDRAWSURFACE4 curSur=rept.tiles[e].pic;
-				if(curSur) curSur->Release();
-#endif
 			}
 			
 			delete[] rept.tiles;
@@ -5973,14 +3969,9 @@ void CLoading::FreeTileSet()
 
 		for(e=0;e<(*tiledata)[i].wTileCount;e++)
 		{
-#ifdef NOSURFACES
 			BYTE* curSur=(*tiledata)[i].tiles[e].pic;
 			if(curSur) delete[] curSur;
 			if((*tiledata)[i].tiles[e].vborder) delete[] (*tiledata)[i].tiles[e].vborder;
-#else
-			LPDIRECTDRAWSURFACE4 curSur=(*tiledata)[i].tiles[e].pic;
-			if(curSur) curSur->Release();
-#endif
 		}
 
 		delete[] ((*tiledata)[i].tiles);
@@ -6048,13 +4039,9 @@ void CLoading::FreeAll()
 	for (int e=0;e<pics.size();e++)
 	{
 		try{
-#ifdef NOSURFACES_OBJECTS			
 			if(i->second.bType==PICDATA_TYPE_BMP)
 			{
-				if(i->second.pic!=NULL) 
-				{
-					((LPDIRECTDRAWSURFACE4)i->second.pic)->Release();
-				}
+				i->second.bitmap.reset();
 			}
 			else
 			{
@@ -6064,16 +4051,13 @@ void CLoading::FreeAll()
 				}
 				if(i->second.vborder) delete[] i->second.vborder;
 			}
-#else
-			if(i->second.pic!=NULL) i->second.pic->Release();
-#endif
 
 			i->second.pic=NULL;
 		}
 		catch(...)
 		{
 			CString err;
-			err="Access violation while trying to release surface ";
+			err="Access violation while trying to release picture ";
 			char c[6];
 			itoa(e,c,10);
 			err+=c;
@@ -6084,28 +4068,6 @@ void CLoading::FreeAll()
 		}
 			
 		i++;
-	}
-
-
-
-	try{
-	CFinalSunDlg* dlg=((CFinalSunDlg*)theApp.m_pMainWnd);
-	if(dlg->m_view.m_isoview->lpds!=NULL) dlg->m_view.m_isoview->lpds->Release();
-	dlg->m_view.m_isoview->lpds=NULL;
-	if(dlg->m_view.m_isoview->lpdsBack!=NULL) dlg->m_view.m_isoview->lpdsBack->Release();
-	dlg->m_view.m_isoview->lpdsBack=NULL;
-	if (dlg->m_view.m_isoview->lpdsBackHighRes != NULL) dlg->m_view.m_isoview->lpdsBackHighRes->Release();
-	dlg->m_view.m_isoview->lpdsBackHighRes = NULL;
-	if(dlg->m_view.m_isoview->lpdsTemp!=NULL) dlg->m_view.m_isoview->lpdsTemp->Release();
-	dlg->m_view.m_isoview->lpdsTemp=NULL;
-	if(dlg->m_view.m_isoview->dd!=NULL) dlg->m_view.m_isoview->dd->Release();
-	dlg->m_view.m_isoview->dd=NULL;
-	if(dlg->m_view.m_isoview->dd_1!=NULL) dlg->m_view.m_isoview->dd_1->Release();
-	dlg->m_view.m_isoview->dd_1=NULL;
-	}
-	catch(...)
-	{
-		errstream << "Exception while freeing DirectDraw" << endl;	
 	}
 } 
 
@@ -6589,15 +4551,9 @@ void CLoading::FetchPalettes()
 
 	CIsoView& v=*((CFinalSunDlg*)theApp.m_pMainWnd)->m_view.m_isoview;
 
-	DDPIXELFORMAT pf;
-	memset(&pf, 0, sizeof(DDPIXELFORMAT));
-	pf.dwSize=sizeof(DDPIXELFORMAT);
+	v.m_color_converter = std::make_unique<FSunPackLib::ColorConverter>();
 
-	v.lpds->GetPixelFormat(&pf);
-	v.pf = pf;
-	v.m_color_converter.reset(new FSunPackLib::ColorConverter(v.pf));
-
-	FSunPackLib::ColorConverter conf(pf);
+	FSunPackLib::ColorConverter conf;
 
 	const auto& rulesColors = rules.sections["Colors"];
 	for(i=0;i< rulesColors.values.size();i++)
@@ -6612,15 +4568,7 @@ void CLoading::FetchPalettes()
 
 void CLoading::CreateConvTable(RGBTRIPLE *pal, int *iPal)
 {
-	CIsoView& v=*((CFinalSunDlg*)theApp.m_pMainWnd)->m_view.m_isoview;
-
-	DDPIXELFORMAT pf;
-	memset(&pf, 0, sizeof(DDPIXELFORMAT));
-	pf.dwSize=sizeof(DDPIXELFORMAT);
-
-	v.lpds->GetPixelFormat(&pf);
-
-	FSunPackLib::ColorConverter conf(pf);
+	FSunPackLib::ColorConverter conf;
 
 	int i;
 	for(i=0;i<256;i++)

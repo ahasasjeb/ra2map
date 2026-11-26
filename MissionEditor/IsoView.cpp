@@ -90,175 +90,12 @@ IMPLEMENT_DYNCREATE(CIsoView, CScrollView)
 
 BOOL bNoThreadDraw = FALSE;
 BOOL bDrawStats = TRUE;
-BOOL bIncrementalPan = TRUE;
 
 namespace
 {
 	constexpr UINT VULKAN_RESIZE_TIMER_ID = 12;
 	constexpr UINT VULKAN_RESIZE_DEBOUNCE_MS = 75;
 }
-
-/*UINT PaintThreadProc( LPVOID pParam )
-{
-	while(!bNoThreadDraw)
-	{
-		if(((CFinalSunDlg*)theApp.m_pMainWnd)->m_view.m_isoview!=NULL) ((CFinalSunDlg*)theApp.m_pMainWnd)->m_view.m_isoview->UpdateWindow();
-	}
-
-	return 0;   // Thread erfolgreich ausgeführt
-}
-*/
-
-class SurfaceLocker
-{
-public:
-	SurfaceLocker(IDirectDrawSurface4* pDDS, LPRECT rect = nullptr) :
-		SurfaceLocker()
-	{
-		m_hasRect = rect != nullptr;
-		if (rect)
-			m_rect = *rect;
-		m_pDDS = pDDS;
-		m_ddsd.dwSize = sizeof(DDSURFACEDESC2);
-		m_ddsd.dwFlags = DDSD_WIDTH | DDSD_HEIGHT;
-	}
-
-	DDSURFACEDESC2* ensure_locked()
-	{
-		if (auto scene = VulkanScene::Current(); scene && scene->Describe(m_pDDS, m_ddsd))
-			return &m_ddsd;
-		if (m_locked)
-			return &m_ddsd;
-		if (m_pDDS == nullptr)
-			return nullptr;
-
-		if (m_pDDS->GetSurfaceDesc(&m_ddsd) != DD_OK)
-			return nullptr;
-
-		if (m_pDDS->Lock(m_hasRect ? &m_rect : nullptr, &m_ddsd, DDLOCK_SURFACEMEMORYPTR | DDLOCK_WAIT | DDLOCK_NOSYSLOCK, NULL) != DD_OK)
-			return nullptr;
-
-		m_locked = true;
-
-		if (!m_ddsd.lpSurface)
-			return nullptr;  // probably does not happen in reality
-
-		return &m_ddsd;
-	}
-
-	void ensure_unlocked()
-	{
-		if (m_locked)
-		{
-			m_pDDS->Unlock(m_hasRect ? &m_rect : nullptr);
-		}
-		m_locked = false;
-	}
-
-	~SurfaceLocker()
-	{
-		ensure_unlocked();
-	}
-
-	SurfaceLocker(const SurfaceLocker& other) = delete;
-	SurfaceLocker& operator=(const SurfaceLocker& other) = delete;
-
-private:
-	SurfaceLocker() = default;
-
-private:
-	IDirectDrawSurface4* m_pDDS = nullptr;
-	DDSURFACEDESC2 m_ddsd = { 0 };
-	RECT m_rect = { 0 };
-	bool m_hasRect = false;
-	bool m_locked = false;
-};
-
-namespace
-{
-	template <typename TItems, typename TGetPosition>
-	bool CompositeColorKeySurface(
-		IDirectDrawSurface4* targetSurface,
-		IDirectDrawSurface4* sourceSurface,
-		const TItems& items,
-		size_t beginIndex,
-		TGetPosition getPosition)
-	{
-		if (beginIndex >= items.size())
-			return true;
-		if (targetSurface == nullptr || sourceSurface == nullptr)
-			return false;
-		if (auto scene = VulkanScene::Current(); scene && scene->IsTarget(targetSurface))
-		{
-			for (size_t i = beginIndex; i < items.size(); ++i)
-			{
-				const auto pos = getPosition(items[i]);
-				if (!scene->Bitmap(sourceSurface, pos.x, pos.y)) return false;
-			}
-			return true;
-		}
-
-		SurfaceLocker targetLocker(targetSurface);
-		SurfaceLocker sourceLocker(sourceSurface);
-		DDSURFACEDESC2* target = targetLocker.ensure_locked();
-		DDSURFACEDESC2* source = sourceLocker.ensure_locked();
-		if (target == nullptr || source == nullptr ||
-			target->lpSurface == nullptr || source->lpSurface == nullptr ||
-			target->lPitch <= 0 || source->lPitch <= 0)
-			return false;
-
-		const int targetBpp = (target->ddpfPixelFormat.dwRGBBitCount + 7) / 8;
-		const int sourceBpp = (source->ddpfPixelFormat.dwRGBBitCount + 7) / 8;
-		if (targetBpp != sourceBpp || targetBpp <= 0 || targetBpp > 4)
-			return false;
-
-		DDCOLORKEY sourceKey = {};
-		if (sourceSurface->GetColorKey(DDCKEY_SRCBLT, &sourceKey) != DD_OK)
-		{
-			memcpy(&sourceKey.dwColorSpaceLowValue, source->lpSurface, sourceBpp);
-			sourceKey.dwColorSpaceHighValue = sourceKey.dwColorSpaceLowValue;
-		}
-
-		const DWORD colorMask = source->ddpfPixelFormat.dwRBitMask |
-			source->ddpfPixelFormat.dwGBitMask |
-			source->ddpfPixelFormat.dwBBitMask;
-		const DWORD keyLow = sourceKey.dwColorSpaceLowValue & colorMask;
-		const DWORD keyHigh = sourceKey.dwColorSpaceHighValue & colorMask;
-		const BYTE* sourcePixels = static_cast<const BYTE*>(source->lpSurface);
-		BYTE* targetPixels = static_cast<BYTE*>(target->lpSurface);
-
-		for (size_t itemIndex = beginIndex; itemIndex < items.size(); ++itemIndex)
-		{
-			const auto position = getPosition(items[itemIndex]);
-			for (int sourceY = 0; sourceY < static_cast<int>(source->dwHeight); ++sourceY)
-			{
-				const int targetY = position.y + sourceY;
-				if (targetY < 0 || targetY >= static_cast<int>(target->dwHeight))
-					continue;
-
-				for (int sourceX = 0; sourceX < static_cast<int>(source->dwWidth); ++sourceX)
-				{
-					const int targetX = position.x + sourceX;
-					if (targetX < 0 || targetX >= static_cast<int>(target->dwWidth))
-						continue;
-
-					const BYTE* sourcePixel = sourcePixels + sourceY * source->lPitch + sourceX * sourceBpp;
-					DWORD sourceColor = 0;
-					memcpy(&sourceColor, sourcePixel, sourceBpp);
-					sourceColor &= colorMask;
-					if (sourceColor >= keyLow && sourceColor <= keyHigh)
-						continue;
-
-					BYTE* targetPixel = targetPixels + targetY * target->lPitch + targetX * targetBpp;
-					memcpy(targetPixel, sourcePixel, targetBpp);
-				}
-			}
-		}
-
-		return true;
-	}
-}
-
 
 CIsoView::CIsoView()
 {
@@ -267,17 +104,9 @@ CIsoView::CIsoView()
 	m_NoMove = FALSE;
 	b_IsLoading = FALSE;
 	m_viewOffset = ProjectedVec(0, 0);
-	m_lastViewOffset = ProjectedVec(0, 0);
-	dd = NULL;
-	dd_1 = NULL;
+	m_color_converter = std::make_unique<FSunPackLib::ColorConverter>();
 	m_vulkanRenderer = nullptr;
 	m_vulkanPresentFailures = 0;
-	m_vulkanDisabled = false;
-	lpds = NULL;
-	lpdsBack = NULL;
-	lpdsBackHighRes = nullptr;
-	lpdsTemp = NULL;
-	pf = DDPIXELFORMAT{ 0 };
 	line.left = 0;
 	line.top = 0;
 	line.right = 0;
@@ -297,9 +126,7 @@ CIsoView::CIsoView()
 
 CIsoView::~CIsoView()
 {
-	m_gpuScene.reset();
-	rs_vulkan_destroy(m_vulkanRenderer);
-	m_vulkanRenderer = nullptr;
+	ReleaseVulkanRenderer();
 	bNoThreadDraw = TRUE;
 }
 
@@ -316,6 +143,8 @@ BEGIN_MESSAGE_MAP(CIsoView, CView)
 	ON_WM_LBUTTONUP()
 	ON_WM_MOVE()
 	ON_WM_SIZE()
+	ON_WM_ERASEBKGND()
+	ON_WM_DESTROY()
 	ON_WM_CHAR()
 	ON_WM_DEADCHAR()
 	ON_WM_KEYDOWN()
@@ -360,571 +189,47 @@ DWORD WINAPI ChangeHeightThread(
 /*
 dst must be surface data, src must be a 8 bit palette image
 */
-#ifdef NOSURFACES
-
-struct BlitRect
+inline void BlitTerrain(VulkanScene& scene, int x, int y, const RECT& clip, const SUBTILE& st)
 {
-	short left;
-	short top;
-	short right;
-	short bottom;
-};
+	scene.Indexed(st.pic, st.wWidth, st.wHeight,
+		reinterpret_cast<const short*>(st.vborder), nullptr, iPalIso, nullptr, false, x, y, clip);
+}
 
-__forceinline void BlitTerrain(void* dst, int x, int y, int dleft, int dtop, int dpitch, int dright, int dbottom, const SUBTILE& st)//BYTE* src, int swidth, int sheight)
+inline void BlitTerrainHalfTransp(VulkanScene& scene, int x, int y, const RECT& clip, const SUBTILE& st)
 {
-	if (auto scene = VulkanScene::ForPixels(dst))
+	scene.Indexed(st.pic, st.wWidth, st.wHeight,
+		reinterpret_cast<const short*>(st.vborder), nullptr, iPalIso, nullptr, true, x, y, clip);
+}
+
+inline void BlitPic(VulkanScene& scene, int x, int y, const RECT& clip, const PICDATA& pd, const int* color = nullptr, const int* newPal = nullptr)
+{
+	if (pd.bType == PICDATA_TYPE_BMP)
 	{
-		scene->Indexed(st.pic, st.wWidth, st.wHeight, reinterpret_cast<const short*>(st.vborder), nullptr, iPalIso, nullptr, false, x, y, RECT{dleft, dtop, dright, dbottom});
+		if (pd.bitmap)
+			scene.Bitmap(*pd.bitmap, x, y);
 		return;
 	}
-	BYTE* src = st.pic;
-	const unsigned short swidth = st.wWidth;
-	const unsigned short sheight = st.wHeight;
-
-
-	if (src == NULL || dst == NULL) return;
-
-	//x += 1;
-	//y += 1;
-	//y -= f_y;
-
-	if (x + swidth < dleft || y + sheight < dtop) return;
-	if (x >= dright || y >= dbottom) return;
-
-
-	BlitRect blrect;
-	BlitRect srcRect;
-	srcRect.left = 0;
-	srcRect.top = 0;
-	srcRect.right = swidth;
-	srcRect.bottom = sheight;
-	blrect.left = x;
-
-
-	if (blrect.left < 0)
-	{
-		srcRect.left = 1 - blrect.left;
-		blrect.left = 1;
-	}
-	blrect.top = y;
-	if (blrect.top < 0)
-	{
-		srcRect.top = 1 - blrect.top;
-		blrect.top = 1;
-	}
-	blrect.right = (x + swidth);
-	if (x + swidth > dright)
-	{
-		srcRect.right = dright - x;//swidth-((x+swidth)-dright);
-		blrect.right = dright;
-	}
-	blrect.bottom = (y + sheight);
-	if (y + sheight > dbottom)
-	{
-		srcRect.bottom = dbottom - y;//sheight-((y+sheight)-dbottom);
-		blrect.bottom = dbottom;
-	}
-
-
-	short i, e;
-
-
-#ifdef NOSURFACES_EXTRACT
-	int pos = 0;
-	if (!st.bNotExtracted)
-	{
-		for (e = srcRect.top;e < srcRect.bottom;e++)
-		{
-			short left = st.vborder[e].left;
-			short right = st.vborder[e].right;
-
-			short realright = right;
-			//short realleft=left;
-			//short addx_s=0;
-
-			if (right >= srcRect.right) right = srcRect.right - 1;
-			if (srcRect.left > 0)
-			{
-				pos += (realright - left + 1) * bpp;
-				continue; // just cancel. this area is used by object browser. saves some performance
-				//addx_s=srcRect.left;
-				//left=max(left, srcRect.left);
-				//left=//addx=left-srcRect.left;
-			}
-
-			if (realright >= left)
-			{
-				if (/*left<srcRect.left ||*/ left >= srcRect.right)
-				{
-					pos += (realright - left + 1) * bpp;
-					continue;
-				}
-
-
-				void* dest = ((BYTE*)dst + (blrect.left + left) * bpp + (blrect.top + e) * dpitch);
-
-				memcpy(dest, &st.pic[pos], bpp * (right - left + 1));
-				pos += (realright - left + 1) * bpp;
-			}
-		}
-	}
-	else
-
-#endif
-		for (e = srcRect.top;e < srcRect.bottom;e++)
-		{
-			const short left = st.vborder[e].left;
-			const short right = st.vborder[e].right;
-
-			auto l = max(left, srcRect.left);
-			auto r = min(right, static_cast<short>(srcRect.right - 1));
-			if (l > r)
-				continue;
-
-			const BYTE* srcPixel = src + e * swidth + l;
-			BYTE* destPixel = static_cast<BYTE*>(dst) + (blrect.left + l) * bpp + (blrect.top + e) * dpitch;
-			for (i = l;i <= r;i++, ++srcPixel, destPixel += bpp)
-			{
-				const BYTE val = *srcPixel;
-				if (val)
-				{
-					memcpy(destPixel, &iPalIso[val], bpp);
-				}
-			}
-
-		}
-
+	if (newPal == nullptr) newPal = pd.pal;
+	scene.Indexed(static_cast<const BYTE*>(pd.pic), pd.wMaxWidth, pd.wMaxHeight,
+		reinterpret_cast<const short*>(pd.vborder),
+		pd.lighting && !pd.lighting->empty() ? pd.lighting->data() : nullptr,
+		newPal, newPal == iPalUnit ? color : nullptr, false, x, y, clip);
 }
 
-
-__forceinline void BlitTerrainHalfTransp(void* dst, int x, int y, int dleft, int dtop, int dpitch, int dright, int dbottom, const SUBTILE& st)//BYTE* src, int swidth, int sheight)
+inline void BlitPicHalfTransp(VulkanScene& scene, int x, int y, const RECT& clip, const PICDATA& pd, const int* color = nullptr, const int* newPal = nullptr)
 {
-	if (auto scene = VulkanScene::ForPixels(dst))
+	if (pd.bType == PICDATA_TYPE_BMP)
 	{
-		scene->Indexed(st.pic, st.wWidth, st.wHeight, reinterpret_cast<const short*>(st.vborder), nullptr, iPalIso, nullptr, true, x, y, RECT{dleft, dtop, dright, dbottom});
+		if (pd.bitmap)
+			scene.Bitmap(*pd.bitmap, x, y);
 		return;
 	}
-	BYTE* src = st.pic;
-	const unsigned short swidth = st.wWidth;
-	const unsigned short sheight = st.wHeight;
-
-
-	if (src == NULL || dst == NULL) return;
-
-	//x += 1;
-	//y += 1;
-	//y -= f_y;
-
-	if (x + swidth < dleft || y + sheight < dtop) return;
-	if (x >= dright || y >= dbottom) return;
-
-
-	BlitRect blrect;
-	BlitRect srcRect;
-	srcRect.left = 0;
-	srcRect.top = 0;
-	srcRect.right = swidth;
-	srcRect.bottom = sheight;
-	blrect.left = x;
-
-
-	if (blrect.left < 0)
-	{
-		srcRect.left = 1 - blrect.left;
-		blrect.left = 1;
-	}
-	blrect.top = y;
-	if (blrect.top < 0)
-	{
-		srcRect.top = 1 - blrect.top;
-		blrect.top = 1;
-	}
-	blrect.right = (x + swidth);
-	if (x + swidth > dright)
-	{
-		srcRect.right = dright - x;//swidth-((x+swidth)-dright);
-		blrect.right = dright;
-	}
-	blrect.bottom = (y + sheight);
-	if (y + sheight > dbottom)
-	{
-		srcRect.bottom = dbottom - y;//sheight-((y+sheight)-dbottom);
-		blrect.bottom = dbottom;
-	}
-
-
-	short i, e;
-
-
-#ifdef NOSURFACES_EXTRACT
-	int pos = 0;
-	if (!st.bNotExtracted)
-	{
-		int a = 0;
-		for (e = srcRect.top;e < srcRect.bottom;e += 1)
-		{
-			short left = st.vborder[e].left;
-			short right = st.vborder[e].right;
-
-			short realright = right;
-
-			if (right >= srcRect.right) right = srcRect.right - 1;
-			if (srcRect.left > 0)
-			{
-				pos += (realright - left + 1) * bpp;
-				continue; // just cancel. this area is used by object browser. saves some performance
-			}
-
-			a++;
-
-			if (realright >= left)
-			{
-				if (/*left<srcRect.left ||*/ left >= srcRect.right)
-				{
-					pos += (realright - left + 1) * bpp;
-					continue;
-				}
-
-
-				void* dest = ((BYTE*)dst + (blrect.left + left) * bpp + (blrect.top + e) * dpitch);
-
-				//memcpy(dest, &st.pic[pos], bpp*(right-left+1));
-				//pos+=(right-left+1)*bpp;
-
-				for (i = left + a % 2;i <= right;i += 2)
-				{
-					if (i < srcRect.left || i >= srcRect.right)
-					{
-						//dest+=bpp;
-					}
-					else
-					{
-
-						//BYTE& val=st.pic[pos+i*bpp];
-						//if(val)
-						{
-							void* dest2 = (BYTE*)dest + (i - left) * bpp; //((BYTE*)dst+(blrect.left+i)*bpp+(blrect.top+e)*dpitch);
-
-							memcpy(dest2, &st.pic[pos + (i - left) * bpp], bpp);
-						}
-					}
-				}
-
-				pos += (realright - left + 1) * bpp;
-			}
-		}
-	}
-	else
-
-#endif
-	{
-		int a = 0;
-		for (e = srcRect.top;e < srcRect.bottom;e++)
-		{
-			short& left = st.vborder[e].left;
-			short& right = st.vborder[e].right;
-
-
-			a++;
-
-			for (i = left + a % 2;i <= right;i += 2)
-			{
-				if (i < srcRect.left || i >= srcRect.right)
-				{
-					//dest+=bpp;
-				}
-				else
-				{
-
-					BYTE& val = src[i + e * swidth];
-					if (val)
-					{
-						void* dest = ((BYTE*)dst + (blrect.left + i) * bpp + (blrect.top + e) * dpitch);
-
-						memcpy(dest, &iPalIso[val], bpp);
-					}
-				}
-			}
-
-
-		}
-	}
-
+	if (newPal == nullptr) newPal = pd.pal;
+	scene.Indexed(static_cast<const BYTE*>(pd.pic), pd.wMaxWidth, pd.wMaxHeight,
+		reinterpret_cast<const short*>(pd.vborder),
+		pd.lighting && !pd.lighting->empty() ? pd.lighting->data() : nullptr,
+		newPal, newPal == iPalUnit ? color : nullptr, true, x, y, clip);
 }
-
-
-const int houseColorMin = 0x10;
-const int houseColorMax = 0x1f;
-const int houseColorRelMax = houseColorMax - houseColorMin;
-
-inline void CalculateHouseColorPalette(int house_pal[houseColorRelMax + 1], const int* default_pal, const int* color = NULL)
-{
-	if (color)
-	{
-		if (bpp == 4)
-		{
-			for (int n = 0; n <= houseColorRelMax; ++n)
-			{
-				const int v = (houseColorRelMax - n);
-				auto src = reinterpret_cast<const BYTE*>(color);
-				auto bdest = reinterpret_cast<BYTE*>(&house_pal[n]);
-				bdest[0] = src[0] * v / houseColorRelMax;
-				bdest[1] = src[1] * v / houseColorRelMax;
-				bdest[2] = src[2] * v / houseColorRelMax;
-				bdest[3] = src[3];
-			}
-		}
-		else
-		{
-			// nowadays only 32 bit rendering should be used, so we take a shortcut here
-			for (int n = 0; n <= houseColorRelMax; ++n)
-			{
-				house_pal[n] = *color;
-			}
-		}
-	}
-	else
-	{
-		for (int n = 0; n <= houseColorRelMax; ++n)
-		{
-			house_pal[n] = default_pal[n + houseColorMin];
-		}
-	}
-}
-
-
-/*
-There is no need for newpal
-*/
-__forceinline void BlitPic(void* dst, int x, int y, int dleft, int dtop, int dpitch, int dright, int dbottom, PICDATA& pd, int* color = NULL, int* newPal = NULL)//BYTE* src, int swidth, int sheight)
-{
-	ASSERT(pd.bType != PICDATA_TYPE_BMP);
-
-	if (newPal == NULL) newPal = pd.pal;
-	if (auto scene = VulkanScene::ForPixels(dst))
-	{
-		scene->Indexed(static_cast<const BYTE*>(pd.pic), pd.wMaxWidth, pd.wMaxHeight,
-			reinterpret_cast<const short*>(pd.vborder), pd.lighting && !pd.lighting->empty() ? pd.lighting->data() : nullptr,
-			newPal, newPal == iPalUnit ? color : nullptr, false, x, y, RECT{dleft, dtop, dright, dbottom});
-		return;
-	}
-
-	BYTE* src = (BYTE*)pd.pic;
-	int swidth = pd.wMaxWidth;
-	int sheight = pd.wMaxHeight;
-
-	if (src == NULL || dst == NULL) return;
-
-	//x += 1;
-	//y += 1;
-	//y -= f_y;
-
-	if (x + swidth < dleft || y + sheight < dtop) return;
-	if (x >= dright || y >= dbottom) return;
-
-
-	RECT blrect;
-	RECT srcRect;
-	srcRect.left = 0;
-	srcRect.top = 0;
-	srcRect.right = swidth;
-	srcRect.bottom = sheight;
-	blrect.left = x;
-	if (blrect.left < 0)
-	{
-		srcRect.left = 1 - blrect.left;
-		//blrect.left=1;
-	}
-	blrect.top = y;
-	if (blrect.top < 0)
-	{
-		srcRect.top = 1 - blrect.top;
-		//blrect.top=1;
-	}
-	blrect.right = (x + swidth);
-	if (x + swidth > dright)
-	{
-		srcRect.right = swidth - ((x + swidth) - dright);
-		blrect.right = dright;
-	}
-	blrect.bottom = (y + sheight);
-	if (y + sheight > dbottom)
-	{
-		srcRect.bottom = sheight - ((y + sheight) - dbottom);
-		blrect.bottom = dbottom;
-	}
-
-
-	int i, e;
-
-	// calculate a palette for given color for values 0x10 to 0x1f - we might move this outside
-	const int houseColorMin = 0x10;
-	const int houseColorMax = 0x1f;
-	const int houseColorRelMax = houseColorMax - houseColorMin;
-	int houseColors[houseColorRelMax + 1] = { 0 };
-	CalculateHouseColorPalette(houseColors, newPal, color);
-	const BYTE* const pLighting = (bpp == 4 && pd.lighting && !pd.lighting->empty()) ? pd.lighting->data() : nullptr;
-
-	for (e = srcRect.top;e < srcRect.bottom;e++)
-	{
-		int left = pd.vborder[e].left;
-		int right = pd.vborder[e].right;
-
-		if (left < srcRect.left)
-			left = srcRect.left;
-		if (right >= srcRect.right)
-			right = srcRect.right - 1;
-
-		if (left > right)
-			continue;
-
-		const BYTE* srcPixel = src + e * swidth + left;
-		const BYTE* lightingPixel = pLighting ? pLighting + e * swidth + left : nullptr;
-		BYTE* destPixel = static_cast<BYTE*>(dst) + (blrect.left + left) * bpp + (blrect.top + e) * dpitch;
-		for (i = left;i <= right;i++, ++srcPixel, destPixel += bpp)
-		{
-			const BYTE val = *srcPixel;
-
-			if (val)
-			{
-				if (destPixel >= static_cast<BYTE*>(dst))
-				{
-					int c;
-					if (!color || newPal != iPalUnit || val < houseColorMin || val > houseColorMax)
-					{
-						c = newPal[val];
-					}
-					else
-					{
-						// Replace the original palette color with the house color
-						ASSERT(val >= houseColorMin && val <= houseColorMax);
-						const int v = (val - houseColorMin);
-						c = houseColors[v];
-					}
-					if (pLighting)
-					{
-						// bpp == 4
-						ASSERT(bpp == 4);
-						int l = *lightingPixel;
-						BYTE* bc = reinterpret_cast<BYTE*>(&c);
-						for (int i = 0; i < 4; ++i)
-							bc[i] = min(255, bc[i] * (200 + l * 300 / 255) / 255);  // game seems to overbrighten and have a lot of ambient - if you change this, also change Loading.cpp shp lighting value so that shp light stays at 1.0
-							//bc[i] = min(255, bc[i] * (0 + l * (255 - 0) / 255) / 255);
-					}
-					memcpy(destPixel, &c, bpp);
-				}
-			}
-			if (lightingPixel)
-				++lightingPixel;
-		}
-	}
-}
-
-__forceinline void BlitPicHalfTransp(void* dst, int x, int y, int dleft, int dtop, int dpitch, int dright, int dbottom, PICDATA& pd, int* color = NULL, int* newPal = NULL)//BYTE* src, int swidth, int sheight)
-{
-	if (auto scene = VulkanScene::ForPixels(dst))
-	{
-		if (!newPal) newPal = pd.pal;
-		scene->Indexed(static_cast<const BYTE*>(pd.pic), pd.wMaxWidth, pd.wMaxHeight,
-			reinterpret_cast<const short*>(pd.vborder), nullptr, newPal, color, true, x, y, RECT{dleft, dtop, dright, dbottom});
-		return;
-	}
-	ASSERT(pd.bType != PICDATA_TYPE_BMP);
-
-	if (newPal == NULL) newPal = pd.pal;
-
-	BYTE* src = (BYTE*)pd.pic;
-	int swidth = pd.wMaxWidth;
-	int sheight = pd.wMaxHeight;
-
-	if (src == NULL || dst == NULL) return;
-
-	//x += 1;
-	//y += 1;
-	//y -= f_y;
-
-	if (x + swidth < dleft || y + sheight < dtop) return;
-	if (x >= dright || y >= dbottom) return;
-
-
-	RECT blrect;
-	RECT srcRect;
-	srcRect.left = 0;
-	srcRect.top = 0;
-	srcRect.right = swidth;
-	srcRect.bottom = sheight;
-	blrect.left = x;
-	if (blrect.left < 0)
-	{
-		srcRect.left = 1 - blrect.left;
-		//blrect.left=1;
-	}
-	blrect.top = y;
-	if (blrect.top < 0)
-	{
-		srcRect.top = 1 - blrect.top;
-		//blrect.top=1;
-	}
-	blrect.right = (x + swidth);
-	if (x + swidth > dright)
-	{
-		srcRect.right = swidth - ((x + swidth) - dright);
-		blrect.right = dright;
-	}
-	blrect.bottom = (y + sheight);
-	if (y + sheight > dbottom)
-	{
-		srcRect.bottom = sheight - ((y + sheight) - dbottom);
-		blrect.bottom = dbottom;
-	}
-
-
-	int i, e;
-
-
-
-
-	for (e = srcRect.top;e < srcRect.bottom;e++)
-	{
-
-
-		int left = pd.vborder[e].left;
-		int right = pd.vborder[e].right;
-		if (left < srcRect.left) left = srcRect.left;
-		if (right >= srcRect.right) right = srcRect.right - 1;
-
-		int a = e % 2 + left % 2;
-
-		for (i = left + a;i <= right;i += 2)
-		{
-			//a++;
-
-			if (blrect.left + i < 0) continue;
-			//if(a%2) continue;
-
-			BYTE& val = src[i + e * swidth];
-			//0x10-0x1f,
-			if (val)
-			{
-				void* dest = ((BYTE*)dst + (blrect.left + i) * bpp + (blrect.top + e) * dpitch);
-				//*dest=newPal[val];
-				if (dest >= dst)
-				{
-					if (!color || newPal != iPalUnit || val < 0x10 || val>0x1f)
-					{
-						memcpy(dest, &newPal[val], bpp);
-					}
-					else
-					{
-						//int col=0;
-						memcpy(dest, color, bpp);
-					}
-				}
-			}
-		}
-	}
-}
-#endif
 
 
 
@@ -958,17 +263,14 @@ void CIsoView::updateFontScaled()
 	m_fontDefaultHeight = -MulDiv(12, dpiY, 72);
 	m_Font9Height = -MulDiv(9, dpiY, 72);
 
-	if (dd)
-	{
-		m_textDefault.reset(new TextDrawer(dd, m_fontDefaultHeight, RGB(0,0,0), RGB(255, 255, 255)));
-		m_text9.reset(new TextDrawer(dd, m_Font9Height, RGB(0, 0, 0), RGB(255, 255, 255)));
-		m_textScaled.reset(new TextDrawer(dd, m_fontDefaultHeight / m_viewScale.y, RGB(0, 0, 0), RGB(255, 255, 255)));
-		m_text9Scaled.reset(new TextDrawer(dd, m_Font9Height / m_viewScale.y, RGB(0, 0, 0), RGB(255, 255, 255)));
-		m_textBlue.reset(new TextDrawer(dd, m_fontDefaultHeight, RGB(0, 0, 255), RGB(255, 255, 255)));
-		m_textBlueScaled.reset(new TextDrawer(dd, m_fontDefaultHeight / m_viewScale.y, RGB(0, 0, 255), RGB(255, 255, 255)));
-		m_textBlue9.reset(new TextDrawer(dd, m_Font9Height, RGB(0, 0, 255), RGB(255, 255, 255)));
-		m_textBlue9Scaled.reset(new TextDrawer(dd, m_Font9Height / m_viewScale.y, RGB(0, 0, 255), RGB(255, 255, 255)));
-	}
+	m_textDefault = std::make_unique<TextDrawer>(m_fontDefaultHeight, RGB(0, 0, 0), RGB(255, 255, 255));
+	m_text9 = std::make_unique<TextDrawer>(m_Font9Height, RGB(0, 0, 0), RGB(255, 255, 255));
+	m_textScaled = std::make_unique<TextDrawer>(static_cast<int>(m_fontDefaultHeight / m_viewScale.y), RGB(0, 0, 0), RGB(255, 255, 255));
+	m_text9Scaled = std::make_unique<TextDrawer>(static_cast<int>(m_Font9Height / m_viewScale.y), RGB(0, 0, 0), RGB(255, 255, 255));
+	m_textBlue = std::make_unique<TextDrawer>(m_fontDefaultHeight, RGB(0, 0, 255), RGB(255, 255, 255));
+	m_textBlueScaled = std::make_unique<TextDrawer>(static_cast<int>(m_fontDefaultHeight / m_viewScale.y), RGB(0, 0, 255), RGB(255, 255, 255));
+	m_textBlue9 = std::make_unique<TextDrawer>(m_Font9Height, RGB(0, 0, 255), RGB(255, 255, 255));
+	m_textBlue9Scaled = std::make_unique<TextDrawer>(static_cast<int>(m_Font9Height / m_viewScale.y), RGB(0, 0, 255), RGB(255, 255, 255));
 }
 
 BOOL CIsoView::Create(LPCTSTR lpszClassName, LPCTSTR lpszWindowName, DWORD dwStyle, const RECT& rect, CWnd* pParentWnd, UINT nID, CCreateContext* pContext)
@@ -1135,15 +437,6 @@ BOOL CIsoView::PreCreateWindow(CREATESTRUCT& cs)
 void CIsoView::OnMouseMove(UINT nFlags, CPoint point)
 {
 	if (b_IsLoading) return;
-	if (lpds == nullptr || HasLostDirectDrawSurface())
-	{
-		// Mouse previews bypass DrawMap(), which is normally responsible for
-		// recovering surfaces lost while the screen saver/display mode is active.
-		// Recover before any preview code locks or writes to those surfaces.
-		if (lpds != nullptr && dd != nullptr)
-			ReInitializeDDraw();
-		return;
-	}
 
 	static BOOL isMoving = FALSE;
 
@@ -1161,7 +454,6 @@ void CIsoView::OnMouseMove(UINT nFlags, CPoint point)
 			ReleaseCapture();
 			KillTimer(11);
 			rscroll = FALSE;
-			m_bPanFastPath = FALSE;
 			ShowCursor(TRUE);
 			RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_NOERASE);
 
@@ -1260,17 +552,20 @@ void CIsoView::OnMouseMove(UINT nFlags, CPoint point)
 
 
 
-	// the fast placement preview is self-contained: it erases the previous ghost using its own
-	// saved clean pixels, so it must not restore from lpdsTemp here (lpdsTemp can hold stale
-	// preview ghosts from other tools, e.g. after a tile preview)
 	const BOOL bFastPreview = (AD.mode == ACTIONMODE_PLACE || AD.mode == ACTIONMODE_RANDOMTERRAIN) && (nFlags & ~MK_CONTROL) == 0 && AD.type != 7 && AD.type != 6;
 
-	if (m_gpuScene && !bFastPreview)
+	if (!m_gpuScene || !m_gpuScene->IsActive())
+	{
+		DrawMap();
+		if (!m_gpuScene || !m_gpuScene->IsActive())
+		{
+			isMoving = FALSE;
+			return;
+		}
+	}
+
+	if (!bFastPreview)
 		m_gpuScene->RestoreBase();
-	else if (lpdsBack && !bFastPreview)
-		// reset back buffer to last DrawMap()
-		lpdsBack->BltFast(0, 0, lpdsTemp, NULL, DDBLTFAST_WAIT);
-		//lpdsBack->Blt(NULL, lpdsTemp, NULL, 0, 0);
 
 	//int cell_x = x;
 	//int cell_y = y;
@@ -1448,26 +743,6 @@ void CIsoView::OnMouseMove(UINT nFlags, CPoint point)
 				y2 = m_mapy;
 			}
 
-			DDSURFACEDESC2 ddsd;
-			ZeroMemory(&ddsd, sizeof(ddsd));
-			ddsd.dwSize = sizeof(DDSURFACEDESC2);
-			ddsd.dwFlags = DDSD_WIDTH | DDSD_HEIGHT;
-
-	lpdsBack->GetSurfaceDesc(&ddsd);
-
-	// Clamp the display rect to the backbuffer. When the window sticks out
-	// of the screen (maximized borders report negative coordinates, and a
-	// window at a screen edge can extend past it), drawing functions must
-	// never write past the backbuffer.
-	if (r.left < 0) r.left = 0;
-	if (r.top < 0) r.top = 0;
-	if (r.right > static_cast<int>(ddsd.dwWidth)) r.right = static_cast<int>(ddsd.dwWidth);
-	if (r.bottom > static_cast<int>(ddsd.dwHeight)) r.bottom = static_cast<int>(ddsd.dwHeight);
-
-
-			if (m_gpuScene) m_gpuScene->Describe(lpdsBack, ddsd);
-			else lpdsBack->Lock(NULL, &ddsd, DDLOCK_SURFACEMEMORYPTR | DDLOCK_WAIT | DDLOCK_NOSYSLOCK, NULL);
-
 			int i, e;
 			int isosize = Map->GetIsoSize();
 			for (i = 0;i < x2 - x1 + 1;i++)
@@ -1485,14 +760,11 @@ void CIsoView::OnMouseMove(UINT nFlags, CPoint point)
 					y_s -= m_viewOffset.y;
 
 					last_succeeded_operation = 80305;
-					DrawCell(ddsd.lpSurface, ddsd.dwWidth, ddsd.dwHeight, ddsd.lPitch, x_s, y_s, 1, 1, m_color_converter->GetColor(255, 0, 0));
+					DrawCell(*m_gpuScene, x_s, y_s, 1, 1, m_color_converter->GetColor(255, 0, 0));
 					last_succeeded_operation = 80303;
 				}
 			}
 
-			if (!m_gpuScene) lpdsBack->Unlock(NULL);
-
-			BlitBackbufferToHighRes();
 			RenderUIOverlay();
 			FlipHighResBuffer();
 			last_succeeded_operation = 80304;
@@ -1583,22 +855,13 @@ void CIsoView::OnMouseMove(UINT nFlags, CPoint point)
 		}
 		else
 		{
-
-			SurfaceLocker locker(lpdsBack);
-			auto desc = locker.ensure_locked();
-			if (desc)
-				DrawCellCursor(mapCoords, *desc);
+			DrawCellCursor(mapCoords);
 			m_cellCursor = mapCoords;
-			//RedrawWindow(NULL, NULL, RDW_INVALIDATE);
-			locker.ensure_unlocked();
 
-			const bool fastObjectPlacement = (nFlags & MK_LBUTTON) &&
-				((AD.mode == ACTIONMODE_PLACE && (AD.type == 1 || AD.type == 3 || AD.type == 4 || AD.type == 5)) ||
-					AD.mode == ACTIONMODE_RANDOMTERRAIN);
-			// Dragging and fast placement add their final graphics below, then present once.
-			if (!(m_drag && AD.mode == 0) && !fastObjectPlacement)
+			const bool isBridgeDrag = (nFlags & MK_LBUTTON) && AD.mode == ACTIONMODE_PLACE && AD.type == 6 && AD.data == 5;
+			// Dragging adds its guide line below, then presents once.
+			if (!(m_drag && AD.mode == 0) && !isBridgeDrag)
 			{
-				BlitBackbufferToHighRes();
 				RenderUIOverlay();
 				FlipHighResBuffer();
 			}
@@ -1629,21 +892,13 @@ void CIsoView::OnMouseMove(UINT nFlags, CPoint point)
 	// drag
 	if (m_drag && AD.mode == 0)
 	{
-		// The back buffer was restored from the clean scene at the start of this mouse
-		// move. Draw the guide into it directly instead of repainting the complete view.
-		HDC dc = NULL;
-		if (lpdsBack && lpdsBack->GetDC(&dc) == DD_OK)
-		{
-			SetROP2(dc, R2_NOT);
-			const auto renderOffset = ProjectedVec(f_x / 2, f_y / 2);
-			const auto from = GetRenderTargetCoordinates(MapCoords(m_mapx, m_mapy)) + renderOffset;
-			const auto to = GetRenderTargetCoordinates(mapCoords) + renderOffset;
-			MoveToEx(dc, from.x, from.y, NULL);
-			LineTo(dc, to.x, to.y);
-			lpdsBack->ReleaseDC(dc);
-		}
+		// The GPU scene was restored to the clean base at the start of this mouse move.
+		// Draw the inverted (R2_NOT-style) drag guide directly on the GPU.
+		const auto renderOffset = ProjectedVec(f_x / 2, f_y / 2);
+		const auto from = GetRenderTargetCoordinates(MapCoords(m_mapx, m_mapy)) + renderOffset;
+		const auto to = GetRenderTargetCoordinates(mapCoords) + renderOffset;
+		m_gpuScene->Line(from.x, from.y, to.x, to.y, 0, 1, true);
 
-		BlitBackbufferToHighRes();
 		RenderUIOverlay();
 		FlipHighResBuffer();
 	}
@@ -2063,47 +1318,13 @@ void CIsoView::OnMouseMove(UINT nFlags, CPoint point)
 				x = m_mapx;
 			}
 
-			// draw a line
+			const auto renderOffset = ProjectedVec(f_x / 2, f_y / 2);
+			const auto from = GetRenderTargetCoordinates(MapCoords(m_mapx, m_mapy)) + renderOffset;
+			const auto to = GetRenderTargetCoordinates(MapCoords(x, y)) + renderOffset;
+			m_gpuScene->Line(from.x, from.y, to.x, to.y, m_color_converter->GetColor(0, 0, 0), 1, false);
 
-			int px1, py1, px2, py2;
-			px1 = m_mapx;
-			py1 = m_mapy;
-			px2 = x;
-			py2 = y;
-			if (theApp.m_Options.bFlat)
-				ToPhys(&px1, &py1);
-			else
-				ToPhys3d(&px1, &py1);
-			if (theApp.m_Options.bFlat)
-				ToPhys(&px2, &py2);
-			else
-				ToPhys3d(&px2, &py2);
-			px1 += f_x / 2 - m_viewOffset.x - r.left;
-			py1 += f_y / 2 - m_viewOffset.y - r.top;
-			px2 += f_x / 2 - m_viewOffset.x - r.left;
-			py2 += f_y / 2 - m_viewOffset.y - r.top;
-
-			CRect r;
-			GetWindowRect(r);
-			px1 += r.left;
-			px2 += r.left;
-			py1 += r.top;
-			py2 += r.top;
-
-
-			HDC dc;
-			lpdsBack->GetDC(&dc);
-
-			POINT p;
-			MoveToEx(dc, px1, py1, &p);
-			LineTo(dc, px2, py2);
-
-			lpdsBack->ReleaseDC(dc);
-
-			BlitBackbufferToHighRes();
 			RenderUIOverlay();
 			FlipHighResBuffer();
-			//lpds->Blt(NULL, lpdsBack, NULL, 0, 0);
 
 		}
 		else
@@ -2119,11 +1340,7 @@ void CIsoView::OnMouseMove(UINT nFlags, CPoint point)
 				PlaceCurrentObjectAt(x, y);
 				m_lastPlacementCell = mapCoords;
 				m_lastPlacementPoint = point;
-				const bool supportsFastCommit =
-					(AD.mode == ACTIONMODE_RANDOMTERRAIN) ||
-					(AD.mode == ACTIONMODE_PLACE && (AD.type == 1 || AD.type == 3 || AD.type == 4 || AD.type == 5));
-				if (!supportsFastCommit || !RefreshObjectScene(mapCoords, mapCoords, false))
-					RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW);
+				RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW);
 			}
 		}
 
@@ -2149,8 +1366,11 @@ void CIsoView::OnMouseMove(UINT nFlags, CPoint point)
 
 
 
-void CIsoView::DrawCellCursor(const MapCoords& mapCoords, const DDSURFACEDESC2& desc)
+void CIsoView::DrawCellCursor(const MapCoords& mapCoords)
 {
+	if (!m_gpuScene || !m_gpuScene->IsActive())
+		return;
+
 	ProjectedVec drawOffset(0*4, 0*3);
 	ProjectedCoords drawCoords2d = GetRenderTargetCoordinates(mapCoords, 0) + drawOffset;
 	ProjectedCoords drawCoords = GetRenderTargetCoordinates(mapCoords) + drawOffset;
@@ -2176,11 +1396,11 @@ void CIsoView::DrawCellCursor(const MapCoords& mapCoords, const DDSURFACEDESC2& 
 
 	const FIELDDATA& m = *Map->GetFielddataAt(mapCoords.x + mapCoords.y * Map->GetIsoSize());
 	int tileheight = m.bHeight;
-	int new_tileheight = std::clamp(tileheight, 0, 16);
+	int new_tileheight = std::clamp(tileheight, 0, 15);
 
-	DrawCell(desc.lpSurface, desc.dwWidth, desc.dwHeight, desc.lPitch, drawCoords.x, drawCoords.y, 1, 1, m_color_converter->GetColor(_cell_hilight_colors[new_tileheight]), false, true, m_color_converter->GetColor(60, 60, 255));
+	DrawCell(*m_gpuScene, drawCoords.x, drawCoords.y, 1, 1, m_color_converter->GetColor(_cell_hilight_colors[new_tileheight]), false, true, m_color_converter->GetColor(60, 60, 255));
 	
-	LineDrawer l(desc.lpSurface, bpp, desc.dwWidth, desc.dwHeight, desc.lPitch);
+	LineDrawer l(*m_gpuScene);
 
 	POINT p1, p2, p3, p4;
 	p2.x = drawCoords2d.x + 1 * f_x / 2 + f_x / 2;
@@ -2236,7 +1456,6 @@ void CIsoView::OnRButtonUp(UINT nFlags, CPoint point)
 		ReleaseCapture();
 		KillTimer(11);
 		rscroll = FALSE;
-		m_bPanFastPath = FALSE;
 		ShowCursor(TRUE);
 
 		if (!b_IsLoading)
@@ -3387,8 +2606,7 @@ void CIsoView::OnLButtonUp(UINT nFlags, CPoint point)
 		line.right = 0;
 		line.bottom = 0;
 
-		if (!supportsFastRefresh || !RefreshObjectScene(oldObjectPos, newObjectPos, !isCopy))
-			RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW);
+		RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW);
 	}
 	else if (AD.mode == ACTIONMODE_MAPTOOL)
 	{
@@ -3632,78 +2850,62 @@ void CIsoView::OnLButtonUp(UINT nFlags, CPoint point)
 
 
 
-void CIsoView::TextOut(int x, int y, const char* text, COLORREF col)
-{
-	HDC hdc;
-	lpdsBack->GetDC(&hdc);
-
-	SetTextColor(hdc, col);
-	SetBkMode(hdc, TRANSPARENT);
-	::TextOut(hdc, x, y, text, strlen(text));
-
-
-	lpdsBack->ReleaseDC(hdc);
-}
-
-void CIsoView::TextOut(HDC hDC, int x, int y, const char* text, COLORREF col)
-{
-	SetTextColor(hDC, col);
-	SetBkMode(hDC, TRANSPARENT);
-	::TextOut(hDC, x, y, text, strlen(text));
-}
-
-
-
 void CIsoView::OnMove(int x, int y)
 {
 	CView::OnMove(x, y);
 
-	if (lpds == NULL) return;
-	LPDIRECTDRAWCLIPPER ddc = nullptr;
-
-	if (lpds->GetClipper(&ddc) == DD_OK && ddc != nullptr)
-	{
-		ddc->SetHWnd(0, m_hWnd);
-		ddc->Release();
-	}
+	if (m_hWnd == NULL) return;
 
 	// Moving the top/left resize borders generates WM_MOVE together with WM_SIZE.
 	// Reuse the same cached-frame path so those borders do not accidentally force
 	// a full map render for every pointer step.
-	m_resizePreview = true;
-	KillTimer(VULKAN_RESIZE_TIMER_ID);
-	if (SetTimer(VULKAN_RESIZE_TIMER_ID, VULKAN_RESIZE_DEBOUNCE_MS, NULL) == 0)
-		m_resizePreview = false;
+	if (m_lastPresentSucceeded)
+	{
+		m_resizePreview = true;
+		KillTimer(VULKAN_RESIZE_TIMER_ID);
+		if (SetTimer(VULKAN_RESIZE_TIMER_ID, VULKAN_RESIZE_DEBOUNCE_MS, NULL) == 0)
+			m_resizePreview = false;
+	}
 	InvalidateRect(NULL, FALSE);
 }
 
 void CIsoView::OnSize(UINT nType, int cx, int cy)
 {
-	// CView::OnSize(nType, cx, cy);
-	if (lpds == NULL) return;
-
-	LPDIRECTDRAWCLIPPER ddc = nullptr;
-
-	if (lpds->GetClipper(&ddc) == DD_OK && ddc != nullptr)
-	{
-		ddc->SetHWnd(0, m_hWnd);
-		ddc->Release();
-	}
+	if (m_hWnd == NULL) return;
 
 	UpdateScrollRanges();
 
 	GetWindowRect(&m_myRect);
 
 	// Keep presenting the last complete frame during live resize. Re-rendering the
-	// map, recreating eight font surfaces and repainting the minimap for every
-	// intermediate WM_SIZE made the newly exposed client area visibly lag behind.
-	// The cached frame is stretched immediately; one accurate map/minimap redraw is
-	// coalesced after resizing pauses.
-	m_resizePreview = cx > 0 && cy > 0;
-	KillTimer(VULKAN_RESIZE_TIMER_ID);
-	if (SetTimer(VULKAN_RESIZE_TIMER_ID, VULKAN_RESIZE_DEBOUNCE_MS, NULL) == 0)
+	// map and repainting the minimap for every intermediate WM_SIZE made the newly
+	// exposed client area visibly lag behind. The cached frame is stretched
+	// immediately; one accurate map/minimap redraw is coalesced after resizing pauses.
+	if (m_lastPresentSucceeded && cx > 0 && cy > 0)
+	{
+		m_resizePreview = true;
+		KillTimer(VULKAN_RESIZE_TIMER_ID);
+		if (SetTimer(VULKAN_RESIZE_TIMER_ID, VULKAN_RESIZE_DEBOUNCE_MS, NULL) == 0)
+			m_resizePreview = false;
+	}
+	else
+	{
 		m_resizePreview = false;
+	}
 	InvalidateRect(NULL, FALSE);
+}
+
+BOOL CIsoView::OnEraseBkgnd(CDC* pDC)
+{
+	if (m_vulkanRenderer != nullptr && m_lastPresentSucceeded)
+		return TRUE;
+	return CView::OnEraseBkgnd(pDC);
+}
+
+void CIsoView::OnDestroy()
+{
+	ReleaseVulkanRenderer();
+	CView::OnDestroy();
 }
 
 COLORREF CIsoView::GetColor(const char* house, const char* vcolor)
@@ -3908,141 +3110,15 @@ inline PICDATA* GetOverlayPic(BYTE ovrl, BYTE ovrldata)
 
 void CIsoView::OnDraw(CDC* pDC)
 {
-	if (m_resizePreview && m_lastFrameValid &&
+	if (m_resizePreview && m_lastPresentSucceeded && m_gpuScene && m_gpuScene->IsActive() &&
 		m_lastPresentSourceRect.right > m_lastPresentSourceRect.left &&
 		m_lastPresentSourceRect.bottom > m_lastPresentSourceRect.top)
 	{
 		FlipHighResBuffer(&m_lastPresentSourceRect);
 		return;
 	}
-	if (!m_gpuScene && m_bPanFastPath && bIncrementalPan && rscroll &&
-		(GetAsyncKeyState(VK_RBUTTON) & 0x8000) != 0 && m_lastFrameValid)
-	{
-		const ProjectedVec delta = m_viewOffset - m_lastViewOffset;
-		const RECT area = GetScaledDisplayRect();
-		// The cache advances with each preview. Only a jump that loses most of
-		// the viewport needs a full redraw, not every accumulated 128 pixels.
-		if (abs(delta.x) < (area.right - area.left) / 2 &&
-			abs(delta.y) < (area.bottom - area.top) / 2 && PresentPanPreview())
-		{
-			m_bPanFastPath = FALSE;
-			return;
-		}
-	}
 
 	DrawMap();
-}
-
-
-bool CIsoView::HasLostDirectDrawSurface() const
-{
-	if (lpds == nullptr || lpdsBack == nullptr || lpdsTemp == nullptr)
-		return true;
-
-	if (lpds->IsLost() != DD_OK || lpdsBack->IsLost() != DD_OK || lpdsTemp->IsLost() != DD_OK)
-		return true;
-
-	return lpdsBackHighRes != nullptr && lpdsBackHighRes->IsLost() != DD_OK;
-}
-
-
-void CIsoView::ReInitializeDDraw()
-{
-	m_gpuScene.reset();
-	rs_vulkan_destroy(m_vulkanRenderer);
-	m_vulkanRenderer = nullptr;
-	m_vulkanDisabled = false;
-	b_IsLoading = TRUE;
-	ReleaseCapture();
-	KillTimer(11);
-	// rscroll=FALSE;
-
-
-
-#ifdef NOSURFACES
-	while (true)
-	{
-		// Query the desktop DC fresh each iteration (the user may change the
-		// color depth between prompts) and always pair it with ReleaseDC.
-		// The previous code leaked a DC on every loop iteration.
-		HDC hDesktopDC = ::GetDC(::GetDesktopWindow());
-		const int bitsPerPixel = GetDeviceCaps(hDesktopDC, BITSPIXEL);
-		::ReleaseDC(::GetDesktopWindow(), hDesktopDC);
-		if (bitsPerPixel > 8)
-			break;
-		if (MessageBox(TranslateStringACP("You currently only have 8 bit color mode enabled. FinalAlert 2 does not work in 8 bit color mode. Please change the color mode and then click on OK. Click Cancel to quit (and save the map as backup.map)."), TranslateStringACP("Error"), MB_OKCANCEL) == IDCANCEL)
-		{
-			((CFinalSunDlg*)theApp.m_pMainWnd)->SaveMap((u8AppDataPath + "\\backup.map").c_str());
-			PostQuitMessage(0);
-			return;
-		}
-	}
-#endif
-
-
-	CDynamicGraphDlg dlg;
-
-	dlg.ShowWindow(SW_SHOW);
-	dlg.UpdateWindow();
-
-	dd->RestoreAllSurfaces();
-
-	updateFontScaled();
-
-
-	missingimages.clear();
-	m_picFileCache.clear();
-
-	theApp.m_loading->FreeAll();
-	// InitDirectDraw() no longer creates the high-res surface; release a
-	// surface from the previous DirectDraw object so it is re-created lazily
-	// against the new one
-	if (lpdsBackHighRes != nullptr)
-	{
-		lpdsBackHighRes->Release();
-		lpdsBackHighRes = nullptr;
-	}
-	theApp.m_loading->InitDirectDraw();
-	theApp.m_loading->InitPics();
-	theApp.m_loading->InitTMPs(&dlg.m_Progress);
-
-	memset(ovrlpics, 0, max_ovrl_img * 0xFF * sizeof(LPDIRECTDRAWSURFACE4));
-	//UpdateOverlayPictures(-1);
-	//Map->UpdateIniFile(MAPDATA_UPDATE_FROM_INI);
-	Map->UpdateBuildingInfo();
-	Map->UpdateTreeInfo();
-#ifdef SMUDGE_SUPP
-	Map->UpdateSmudgeInfo();
-#endif
-
-
-
-	b_IsLoading = FALSE;
-
-	// the last rendered frame does not match the new map content anymore
-	m_lastFrameValid = false;
-
-	// the tile set browser caches tile surfaces created from the old
-	// DirectDraw objects - rebuild them so it does not paint white
-	// after the recovery
-	{
-		CMyViewFrame& viewFrame = *(CMyViewFrame*)owner;
-		if (viewFrame.m_browser != NULL && viewFrame.m_browser->m_view.m_hWnd != NULL)
-			viewFrame.m_browser->m_view.ReInitializeTileSurfaces();
-	}
-
-	//Sleep(2500);
-
-
-
-	dlg.DestroyWindow();
-
-
-
-
-
-	RedrawWindow();
-
 }
 
 void CIsoView::OnChar(UINT nChar, UINT nRepCnt, UINT nFlags)
@@ -4062,7 +3138,6 @@ void CIsoView::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
 {
 	int nPos;
 
-	m_bPanFastPath = FALSE;
 	if (AD.mode == ACTIONMODE_MAPTOOL && AD.tool && AD.tool->onKeyDown(nChar))
 		return;
 
@@ -4204,80 +3279,18 @@ w is the width, h is the height (in cells).
 x and y are pixel coordinates.
 col specifies the color.
 */
-void CIsoView::DrawCell(int x, int y, int w, int h, COLORREF col, BOOL dotted, HDC hDC_)
+void CIsoView::DrawCell(int x, int y, int w, int h, COLORREF col, BOOL dotted)
 {
-	if (m_gpuScene && VulkanScene::Current() == m_gpuScene.get())
-	{
-		DDSURFACEDESC2 desc{}; m_gpuScene->Describe(lpdsBack, desc);
-		DrawCell(desc.lpSurface, desc.dwWidth, desc.dwHeight, desc.lPitch, x, y, w, h,
-			m_color_converter->GetColor(col), dotted != FALSE);
+	if (!m_gpuScene || !m_gpuScene->IsActive())
 		return;
-	}
 
-
-	// correct the y value:
-	//y -= f_y;
-
-	POINT p1, p2, p3, p4;
-	p1.x = x + f_x / 2;
-	p1.y = y;
-	p2.x = x + w * f_x / 2 + f_x / 2;
-	p2.y = y + w * f_y / 2;
-	p3.x = x + w * f_x / 2 - h * f_x / 2 + f_x / 2 - 1;
-	p3.y = y + h * f_y / 2 + w * f_y / 2 - 1;
-	p4.x = x - h * f_x / 2 + f_x / 2 - 1;
-	p4.y = y + h * f_y / 2 - 1;
-
-	HDC hDC = hDC_;
-	if (!hDC)
-		while (lpdsBack->GetDC(&hDC) == DDERR_WASSTILLDRAWING);
-
-	HPEN p;
-	int width = 1;
-#ifdef RA2_MODE
-	width = 2;
-#endif
-	if (!dotted)	p = CreatePen(PS_SOLID, width, col);
-	else	p = CreatePen(PS_DOT, 0, col);
-
-	SelectObject(hDC, p);
-
-	if (dotted)
-	{
-		SetBkMode(hDC, TRANSPARENT);
-		MoveToEx(hDC, p1.x, p1.y - 1, NULL);
-		LineTo(hDC, p2.x + 1, p2.y);
-		LineTo(hDC, p3.x, p3.y + 1);
-		LineTo(hDC, p4.x - 1, p4.y);
-		LineTo(hDC, p1.x, p1.y - 1);
-	}
-
-	if (!dotted)
-	{
-		MoveToEx(hDC, p1.x, p1.y, NULL);
-		LineTo(hDC, p2.x, p2.y);
-		LineTo(hDC, p3.x, p3.y);
-		LineTo(hDC, p4.x, p4.y);
-		LineTo(hDC, p1.x, p1.y);
-	}
-
-
-
-
-
-	if (!hDC_)
-		lpdsBack->ReleaseDC(hDC);
-
-	DeleteObject(p);
+	DrawCell(*m_gpuScene, x, y, w, h, m_color_converter->GetColor(col), dotted != FALSE);
 }
 
-void CIsoView::DrawCell(void* dest, int dest_width, int dest_height, int dest_pitch, int drawx, int drawy, int w, int h, int col, bool dotted, bool touchNeighbours, int colNeighbour) const
+void CIsoView::DrawCell(VulkanScene& scene, int drawx, int drawy, int w, int h, int col, bool dotted, bool touchNeighbours, int colNeighbour) const
 {
 	if (colNeighbour == CLR_INVALID)
 		colNeighbour = col;
-
-	// correct the y value:
-	//y -= f_y;
 
 	POINT p1, p2, p3, p4;
 	p1.x = drawx + f_x / 2;
@@ -4289,7 +3302,7 @@ void CIsoView::DrawCell(void* dest, int dest_width, int dest_height, int dest_pi
 	p4.x = drawx - h * f_x / 2 + f_x / 2;
 	p4.y = drawy + h * f_y / 2;
 
-	LineDrawer drawer(dest, bpp, dest_width, dest_height, dest_pitch);
+	LineDrawer drawer(scene);
 
 	const LineStyle style = dotted ? LineStyle::Dotted_4 : LineStyle::Standard;
 
@@ -4342,18 +3355,12 @@ void CIsoView::DrawCell(void* dest, int dest_width, int dest_height, int dest_pi
 	}
 }
 
-void CIsoView::DrawTube(const CTube& tube, const DDSURFACEDESC2* lockedDDSD, const COLORREF* color) const
+void CIsoView::DrawTube(const CTube& tube, const COLORREF* color) const
 {
-	SurfaceLocker locker(lpdsBack);
-
-	if (!lockedDDSD || !lockedDDSD->lpSurface)
-	{
-		lockedDDSD = locker.ensure_locked();
-	}
-	if (!lockedDDSD)
+	if (!m_gpuScene || !m_gpuScene->IsActive())
 		return;
 
-	// TODO: culling if required
+	VulkanScene& scene = *m_gpuScene;
 
 	// find out if we are tube #1 or #2 for bidirectional tubes
 	bool type0 = tube.getStartX() == tube.getEndX() ? (tube.getStartY() < tube.getEndY()) : (tube.getStartX() < tube.getEndX());
@@ -4361,17 +3368,17 @@ void CIsoView::DrawTube(const CTube& tube, const DDSURFACEDESC2* lockedDDSD, con
 	ProjectedVec lineOffset = type0 ? ProjectedVec() : ProjectedVec(1, 1);
 
 	int lowestHeight = min(Map->GetHeightAt(tube.getStartCoords()), Map->GetHeightAt(tube.getEndCoords()));
-	LineDrawer ld(lockedDDSD->lpSurface, bpp, lockedDDSD->dwWidth, lockedDDSD->dwHeight, lockedDDSD->lPitch);
+	LineDrawer ld(scene);
 	auto startDraw = GetRenderTargetCoordinates(tube.getStartCoords(), lowestHeight);
 	ld.MoveTo(startDraw.x + f_x / 2 + lineOffset.x, startDraw.y + f_y / 2 + lineOffset.y);
 	
 
-	tube.walk([this, &tube, lockedDDSD, &ld, lowestHeight, col, lineOffset](const auto& wi) {
+	tube.walk([this, &scene, &tube, &ld, lowestHeight, col, lineOffset](const auto& wi) {
 		auto draw = GetRenderTargetCoordinates(wi.pos, lowestHeight);
 		if (wi.pos == tube.getEndCoords())
 		{
 			// end coordinates are drawn as cross
-			LineDrawer startLD(lockedDDSD->lpSurface, bpp, lockedDDSD->dwWidth, lockedDDSD->dwHeight, lockedDDSD->lPitch);
+			LineDrawer startLD(scene);
 			ProjectedVec off(7, 4);
 			startLD.DrawLine(draw.x + off.x, draw.y + f_y / 2, draw.x + f_x - off.x, draw.y + f_y / 2, col);
 			startLD.DrawLine(draw.x + f_x / 2 - 1, draw.y + off.y, draw.x + f_x / 2 - 1, draw.y + f_y - off.y, col);
@@ -4379,7 +3386,7 @@ void CIsoView::DrawTube(const CTube& tube, const DDSURFACEDESC2* lockedDDSD, con
 		if (wi.pos == tube.getStartCoords())
 		{
 			// Start coordinates are drawn as cell
-			DrawCell(lockedDDSD->lpSurface, lockedDDSD->dwWidth, lockedDDSD->dwHeight, lockedDDSD->lPitch, draw.x, draw.y, 1, 1, col, true);
+			DrawCell(scene, draw.x, draw.y, 1, 1, col, true);
 		}
 		ld.LineTo(draw.x + f_x / 2 + lineOffset.x, draw.y + f_y / 2 + lineOffset.y, col);
 		return true;
@@ -4597,7 +3604,7 @@ void CIsoView::UpdateOverlayPictures(int id)
 {
 	if (id < 0)
 	{
-		memset(ovrlpics, 0, max_ovrl_img * 0xFF * sizeof(LPDIRECTDRAWSURFACE4));
+		memset(ovrlpics, 0, sizeof(ovrlpics));
 
 		int i, e;
 		for (i = 0;i < 0xFF;i++)
@@ -4947,468 +3954,39 @@ void CIsoView::HideTileSet(DWORD dwTileSet)
 	}
 }
 
-void CIsoView::EnsureHighResSurface()
-{
-	if (lpdsBackHighRes != nullptr || lpds == nullptr || dd == nullptr)
-		return;
-	if (!theApp.m_Options.bHighResUI)
-		return;
-
-	DDSURFACEDESC2 ddsd;
-	memset(&ddsd, 0, sizeof(DDSURFACEDESC2));
-	ddsd.dwSize = sizeof(DDSURFACEDESC2);
-	ddsd.dwFlags = DDSD_WIDTH | DDSD_HEIGHT;
-	lpds->GetSurfaceDesc(&ddsd);
-	ddsd.ddsCaps.dwCaps = DDSCAPS_OFFSCREENPLAIN;
-	ddsd.dwFlags = DDSD_CAPS | DDSD_HEIGHT | DDSD_WIDTH;
-
-	if (dd->CreateSurface(&ddsd, &lpdsBackHighRes, NULL) != DD_OK)
-	{
-		// stay without the high-res buffer; callers fall back to the
-		// unscaled backbuffer presentation path
-		lpdsBackHighRes = nullptr;
-		errstream << "Highres backbuffer surface could not be created; using unscaled presentation" << endl;
-		errstream.flush();
-	}
-}
-
-void CIsoView::BlitBackbufferToHighRes()
-{
-	if (m_gpuScene) return;
-	// MW:
-	// the primary buffer and the (optional) high-res buffer cover the whole screen (Windows automatic high DPI scaling does not change this)
-	// the backbuffer also has the size of the whole screen, however we don't render to the whole screen
-	// we only render to the visible window rectangle (which IS affected by Windows' automatic DPI scaling features)
-	// Additionally, we have a user-controlled scale factor.
-	// If the user zooms in, we only render to a smaller part of the backbuffer and stretch it to the window rectangle (which may then again be stretched by Windows DPI if enabled in the Windows settings).
-	// the rectangle we render to has the same left/top border but a lower value for right/bottom.
-	//
-	// This is a simple scaling and also scales any text that has already been rendered to the backbuffer (which is why we're usually rendering text afterwards to the HighRes backbuffer).
-	// Altogether it'd probably be best to move from DirectDraw to Direct3D, support high DPI awareness and do the scaling right when initially drawing the map.
-
-	
-	if (m_viewScale != Vec2<CSProjected, float>(1.0f, 1.0f))
-	{
-		// the surface is only needed once the user zoomed; create it on demand
-		EnsureHighResSurface();
-	}
-
-	if (m_viewScale != Vec2<CSProjected, float>(1.0f, 1.0f) && lpdsBackHighRes)
-	{
-		// copy scene backbuffer to the high-res buffer that will receive text rendering
-		RECT dr;
-		GetWindowRect(&dr);
-		auto cr = GetScaledDisplayRect();
-		lpdsBackHighRes->Blt(&dr, lpdsBack, &cr, DDBLT_WAIT, 0);
-	}
-	else
-	{
-		// do nothing, backbuffer will receive additional text rendering as text doesn't have to be scaled
-	}
-}
-
 void CIsoView::FlipHighResBuffer(const RECT* sourceRectOverride)
 {
 	m_lastPresentSucceeded = false;
-	if (m_gpuScene && VulkanScene::Current() == m_gpuScene.get())
+	if (!m_gpuScene || !m_gpuScene->IsActive())
+		return;
+
+	RECT client{};
+	GetClientRect(&client);
+	const RECT source = sourceRectOverride ? *sourceRectOverride : GetScaledDisplayRect();
+	if (!m_gpuScene->Present(source, client.right, client.bottom, theApp.m_Options.bVSync))
 	{
-		RECT client{}; GetClientRect(&client);
-		const RECT source = sourceRectOverride ? *sourceRectOverride : GetScaledDisplayRect();
-		if (!m_gpuScene->Present(source, client.right, client.bottom, theApp.m_Options.bVSync))
-		{
-			char error[1024]{}; rs_vulkan_last_error(error, sizeof(error));
-			errstream << "GPU scene frame failed: " << error << endl;
-			// A failure after acquire may leave a signaled acquire semaphore.
-			// Retire the entire renderer before retrying, never reuse that frame
-			// or show a stale software backbuffer in the middle of a GPU frame.
-			m_gpuScene.reset();
-			rs_vulkan_destroy(m_vulkanRenderer);
-			m_vulkanRenderer = nullptr;
-			m_lastFrameValid = false;
-			m_bPanFastPath = FALSE;
-			if (++m_vulkanPresentFailures >= 3)
-			{
-				m_vulkanDisabled = true;
-				errstream << "GPU renderer recovery failed; requesting a complete DirectDraw compatibility redraw" << endl;
-			}
+		char error[1024]{};
+		rs_vulkan_last_error(error, sizeof(error));
+		errstream << "GPU scene frame failed: " << error << endl;
+		errstream.flush();
+		// A failure after acquire may leave a signaled acquire semaphore.
+		// Retire the entire renderer before retrying cleanly on the next paint.
+		ReleaseVulkanRenderer();
+		if (++m_vulkanPresentFailures < 5)
 			Invalidate(FALSE);
-			return;
-		}
-		m_vulkanPresentFailures = 0;
-		m_lastPresentSucceeded = true;
-		m_lastPresentSourceRect = source;
 		return;
 	}
-	LPDIRECTDRAWSURFACE4 presentSurface = lpdsBack;
-	RECT sourceRect = GetScaledDisplayRect();
-	if (m_viewScale != Vec2<CSProjected, float>(1.0f, 1.0f))
-	{
-		EnsureHighResSurface();
-	}
-	if (m_viewScale != Vec2<CSProjected, float>(1.0f, 1.0f) && lpdsBackHighRes)
-	{
-		presentSurface = lpdsBackHighRes;
-		GetWindowRect(&sourceRect);
-	}
-	if (sourceRectOverride != nullptr)
-		sourceRect = *sourceRectOverride;
-
-	InitializeVulkanRenderer();
-
-	if (m_vulkanRenderer != nullptr && presentSurface != nullptr)
-	{
-		SurfaceLocker locker(presentSurface);
-		DDSURFACEDESC2* desc = locker.ensure_locked();
-		RECT clientRect = {};
-		GetClientRect(&clientRect);
-		if (desc != nullptr && desc->lpSurface != nullptr)
-		{
-			const int result = rs_vulkan_present(
-				m_vulkanRenderer,
-				static_cast<const unsigned char*>(desc->lpSurface),
-				static_cast<int>(desc->dwWidth),
-				static_cast<int>(desc->dwHeight),
-				static_cast<int>(desc->lPitch),
-				static_cast<unsigned int>(bpp),
-				pf.dwRBitMask,
-				pf.dwGBitMask,
-				pf.dwBBitMask,
-				sourceRect.left,
-				sourceRect.top,
-				sourceRect.right - sourceRect.left,
-				sourceRect.bottom - sourceRect.top,
-				clientRect.right - clientRect.left,
-				clientRect.bottom - clientRect.top,
-				theApp.m_Options.bVSync ? 1 : 0);
-
-			if (result == RS_OK)
-			{
-				m_lastPresentSucceeded = true;
-				m_vulkanPresentFailures = 0;
-				if (sourceRectOverride == nullptr)
-					m_lastPresentSourceRect = sourceRect;
-				return;
-			}
-
-			++m_vulkanPresentFailures;
-			if (m_vulkanPresentFailures >= 3)
-			{
-				char diagnostic[1024] = {};
-				rs_vulkan_last_error(diagnostic, sizeof(diagnostic));
-				errstream << "Vulkan presentation disabled after repeated failures; using DirectDraw fallback: " << diagnostic << endl;
-				errstream.flush();
-				rs_vulkan_destroy(m_vulkanRenderer);
-				m_vulkanRenderer = nullptr;
-				m_vulkanDisabled = true;
-			}
-		}
-	}
-
-	// DirectDraw fallback: copy/stretch the same source rectangle used by Vulkan.
-	if (theApp.m_Options.bVSync && dd != nullptr)
-		dd->WaitForVerticalBlank(DDWAITVB_BLOCKBEGIN, NULL);
-
-	RECT destinationRect;
-	GetWindowRect(&destinationRect);
-	m_lastPresentSucceeded = lpds->Blt(&destinationRect, presentSurface, &sourceRect, DDBLT_WAIT, 0) == DD_OK;
+	m_vulkanPresentFailures = 0;
+	m_lastPresentSucceeded = true;
 	if (sourceRectOverride == nullptr)
-		m_lastPresentSourceRect = sourceRect;
-}
-
-bool CIsoView::PresentPanPreview()
-{
-	if (!m_lastFrameValid || lpdsTemp == nullptr || lpdsBack == nullptr)
-		return false;
-
-	DDSURFACEDESC2 desc{};
-	desc.dwSize = sizeof(desc);
-	desc.dwFlags = DDSD_WIDTH | DDSD_HEIGHT;
-	if (lpdsBack->GetSurfaceDesc(&desc) != DD_OK)
-		return false;
-
-	RECT sourceArea = GetScaledDisplayRect();
-	sourceArea.left = max(0L, sourceArea.left);
-	sourceArea.top = max(0L, sourceArea.top);
-	sourceArea.right = min(static_cast<LONG>(desc.dwWidth), sourceArea.right);
-	sourceArea.bottom = min(static_cast<LONG>(desc.dwHeight), sourceArea.bottom);
-	if (sourceArea.right <= sourceArea.left || sourceArea.bottom <= sourceArea.top)
-		return false;
-
-	DDBLTFX fill{};
-	fill.dwSize = sizeof(fill);
-	fill.dwFillColor = RGB(255, 255, 255);
-	if (lpdsBack->Blt(&sourceArea, nullptr, nullptr, DDBLT_COLORFILL | DDBLT_WAIT, &fill) != DD_OK)
-		return false;
-
-	const ProjectedVec delta = m_viewOffset - m_lastViewOffset;
-	const int shiftX = -delta.x;
-	const int shiftY = -delta.y;
-	const size_t baseTextCount = m_texts_to_render.size();
-	for (size_t i = 0; i < baseTextCount; ++i)
-	{
-		TextToRender& text = m_texts_to_render[i];
-		if (!text.fixedScreenPos)
-		{
-			text.drawx -= delta.x;
-			text.drawy -= delta.y;
-		}
-	}
-	const auto restoreBaseTexts = [&]()
-	{
-		m_texts_to_render.resize(baseTextCount);
-		for (size_t i = 0; i < baseTextCount; ++i)
-		{
-			TextToRender& text = m_texts_to_render[i];
-			if (!text.fixedScreenPos)
-			{
-				text.drawx += delta.x;
-				text.drawy += delta.y;
-			}
-		}
-	};
-
-	// Disjoint bands keep the diagonal corner from blending shadows twice.
-	const auto bands = GetPanExposedBands(sourceArea, shiftX, shiftY);
-
-	// The shifted cache cannot contain pixels that have just entered the
-	// viewport. Rebuild only those narrow bands so preview frames stay complete
-	// without returning to a full map traversal on every timer tick.
-	if (!PatchPanPreviewBands(bands.x, bands.y))
-	{
-		restoreBaseTexts();
-		return false;
-	}
-
-	// Copy retained pixels last: legacy foundation/line drawing in the patch
-	// can extend beyond its band and must not overwrite the cached interior.
-	RECT shiftedArea = sourceArea;
-	OffsetRect(&shiftedArea, shiftX, shiftY);
-	RECT destination{};
-	if (IntersectRect(&destination, &sourceArea, &shiftedArea))
-	{
-		RECT source = destination;
-		OffsetRect(&source, -shiftX, -shiftY);
-		if (lpdsBack->Blt(&destination, lpdsTemp, &source, DDBLT_WAIT, nullptr) != DD_OK)
-		{
-			restoreBaseTexts();
-			return false;
-		}
-	}
-
-	// Commit the complete clean scene before adding cursor/text overlays.
-	// Otherwise every preview patches an increasingly wide band from an old
-	// frame, followed by a periodic expensive traversal to catch the cache up.
-	if (lpdsTemp->Blt(&sourceArea, lpdsBack, &sourceArea, DDBLT_WAIT, nullptr) != DD_OK)
-	{
-		restoreBaseTexts();
-		m_lastFrameValid = false;
-		return false;
-	}
-	m_lastViewOffset = m_viewOffset;
-	m_previewHasSaved = FALSE;
-
-	// Band owner ranges overlap the cached scene and each other. Keep one
-	// copy of each label and discard distant labels so long pans stay bounded.
-	std::set<std::tuple<int, int, int, bool, bool, bool, std::string>> labels;
-	std::erase_if(m_texts_to_render, [&](const TextToRender& text)
-		{
-			if (!text.fixedScreenPos && (text.drawx < sourceArea.left - 512 ||
-				text.drawy < sourceArea.top - 512 || text.drawx > sourceArea.right + 512 ||
-				text.drawy > sourceArea.bottom + 512))
-				return true;
-			return !labels.emplace(text.drawx, text.drawy, text.color, text.fixedScreenPos,
-				text.useFont9, text.centered, text.text).second;
-		});
-
-	auto cursor = pics.find("SCROLLCURSOR");
-	if (cursor != pics.end() && cursor->second.pic != nullptr)
-	{
-		const PICDATA& graphic = cursor->second;
-		const int cursorX = rclick_x * m_viewScale.x + sourceArea.left - graphic.wWidth / 2;
-		const int cursorY = rclick_y * m_viewScale.y + sourceArea.top - graphic.wHeight / 2;
-		const std::array<ProjectedCoords, 1> positions = { ProjectedCoords(cursorX + 1, cursorY + 1) };
-		if (!CompositeColorKeySurface(lpdsBack, (LPDIRECTDRAWSURFACE4)graphic.pic, positions, 0,
-			[](const ProjectedCoords& position) { return position; }))
-		{
-			Blit((LPDIRECTDRAWSURFACE4)graphic.pic, cursorX, cursorY);
-		}
-	}
-
-	// The clean scene cache intentionally excludes text. Rebuild the lightweight
-	// UI layer after shifting its cached coordinates, so waypoints do not lose
-	// their number labels and appear as pale standalone diamonds while panning.
-	BlitBackbufferToHighRes();
-	RenderUIOverlay();
-	FlipHighResBuffer();
-	last_succeeded_operation = 10101;
-	return true;
-}
-
-bool CIsoView::PatchPanPreviewBands(const RECT& stripX, const RECT& stripY)
-{
-	const bool hasStripX = stripX.right > stripX.left && stripX.bottom > stripX.top;
-	const bool hasStripY = stripY.right > stripY.left && stripY.bottom > stripY.top;
-	if (!hasStripX && !hasStripY)
-		return true;
-
-	SurfaceLocker locker(lpdsBack);
-	DDSURFACEDESC2* desc = locker.ensure_locked();
-	if (desc == nullptr || desc->lpSurface == nullptr)
-		return false;
-
-	struct CellRange
-	{
-		int left = 0;
-		int right = 0;
-		int top = 0;
-		int bottom = 0;
-		bool valid = false;
-	};
-
-	RECT windowRect{};
-	GetWindowRect(&windowRect);
-	const auto mapAtScreen = [&](LONG screenX, LONG screenY)
-	{
-		const CPoint client(
-			static_cast<int>((screenX - windowRect.left) / max(0.1f, m_viewScale.x)),
-			static_cast<int>((screenY - windowRect.top) / max(0.1f, m_viewScale.y)));
-		return GetMapCoordinatesFromClientCoordinates(client, false, true);
-	};
-
-	const auto makeCellRange = [&](const RECT& band)
-	{
-		CellRange range;
-		if (band.right <= band.left || band.bottom <= band.top)
-			return range;
-
-		// A cell outside the band can own a wide bridge or tall cliff whose art
-		// reaches into it. Expand before reverse projection to include those owners.
-		RECT expanded = band;
-		InflateRect(&expanded, 8 * f_x, 8 * f_y);
-		const MapCoords corners[4] = {
-			mapAtScreen(expanded.left, expanded.top),
-			mapAtScreen(expanded.right, expanded.top),
-			mapAtScreen(expanded.left, expanded.bottom),
-			mapAtScreen(expanded.right, expanded.bottom)
-		};
-
-		range.left = corners[0].x;
-		range.right = corners[0].x;
-		range.top = corners[0].y;
-		range.bottom = corners[0].y;
-		for (int i = 1; i < 4; ++i)
-		{
-			range.left = min(range.left, static_cast<int>(corners[i].x));
-			range.right = max(range.right, static_cast<int>(corners[i].x));
-			range.top = min(range.top, static_cast<int>(corners[i].y));
-			range.bottom = max(range.bottom, static_cast<int>(corners[i].y));
-		}
-
-		const int isoSize = static_cast<int>(Map->GetIsoSize());
-		range.left = max(0, range.left - 2);
-		range.top = max(0, range.top - 2);
-		range.right = min(isoSize, range.right + 3);
-		range.bottom = min(isoSize, range.bottom + 3);
-		range.valid = range.right > range.left && range.bottom > range.top;
-		return range;
-	};
-
-	const CellRange rangeX = makeCellRange(stripX);
-	const CellRange rangeY = makeCellRange(stripY);
-	const int mapWidth = Map->GetWidth();
-	const int mapHeight = Map->GetHeight();
-	const auto cellInBounds = [&](int u, int v)
-	{
-		return !(u < 1 || v < 1 || u + v < mapWidth + 1 || u + v > mapWidth + mapHeight * 2 ||
-			(v + 1 > mapWidth && u - 1 < v - mapWidth) ||
-			(u + 1 > mapWidth && v + mapWidth - 1 < u));
-	};
-
-	const DWORD heightStart = tilesets_start[atoi((*tiles).sections["General"].values["HeightBase"])];
-	const DrawMapCellContext ctxX = { *desc, stripX, heightStart, TRUE, true };
-	const DrawMapCellContext ctxY = { *desc, stripY, heightStart, TRUE, true };
-
-	const auto forEachCell = [&](const CellRange& range, const auto& callback)
-	{
-		if (!range.valid)
-			return;
-		for (int u = range.left; u < range.right; ++u)
-		{
-			for (int v = range.top; v < range.bottom; ++v)
-			{
-				if (cellInBounds(u, v))
-					callback(MapCoords(u, v));
-			}
-		}
-	};
-
-	const auto drawBaseTerrain = [&](const CellRange& range, const DrawMapCellContext& ctx)
-	{
-		forEachCell(range, [&](const MapCoords& pos)
-			{
-				const FIELDDATA& field = *Map->GetFielddataAt(pos);
-				if (!field.bRedrawTerrain)
-					DrawMapTerrainCell(field, GetRenderTargetCoordinates(pos), ctx);
-			});
-	};
-
-	const size_t oldWaypointCount = m_waypoints_to_render.size();
-	const size_t oldCelltagCount = m_celltags_to_render.size();
-
-	// Preserve the normal two-pass ordering across both strips: all base terrain
-	// first, followed by redraw terrain, animations and objects.
-	drawBaseTerrain(rangeX, ctxX);
-	drawBaseTerrain(rangeY, ctxY);
-
-	const auto drawObjects = [&](const CellRange& range, const DrawMapCellContext& ctx)
-	{
-		forEachCell(range, [&](const MapCoords& pos)
-			{
-				const FIELDDATA& field = *Map->GetFielddataAt(pos);
-				const auto draw = GetRenderTargetCoordinates(pos);
-				const DWORD originalGround = field.wGround == 0xFFFF ? 0 : field.wGround;
-				if (field.bRedrawTerrain)
-					DrawMapTerrainCell(field, draw, ctx);
-				DrawMapTerrainAnim(field, draw, ctx, originalGround);
-				DrawMapObjectsCell(pos, field, draw, ctx);
-			});
-	};
-
-	drawObjects(rangeX, ctxX);
-	drawObjects(rangeY, ctxY);
-
-	// Tube lines are inexpensive and may enter a band from endpoints far beyond
-	// the sprite margin. Drawing their current positions also refreshes the bands.
-	for (const auto& tube : Map->GetTubes())
-		DrawTube(*tube, desc);
-
-	locker.ensure_unlocked();
-	const bool celltagsComposited = CompositeColorKeySurface(
-		lpdsBack,
-		(LPDIRECTDRAWSURFACE4)pics["CELLTAG"].pic,
-		m_celltags_to_render,
-		oldCelltagCount,
-		[](const ProjectedCoords& position) { return position; });
-	const bool waypointsComposited = CompositeColorKeySurface(
-		lpdsBack,
-		(LPDIRECTDRAWSURFACE4)pics["FLAG"].pic,
-		m_waypoints_to_render,
-		oldWaypointCount,
-		[](const WaypointToRender& waypoint)
-		{
-			return ProjectedCoords(waypoint.drawx + 1, waypoint.drawy + 1);
-		});
-
-	m_waypoints_to_render.resize(oldWaypointCount);
-	m_celltags_to_render.resize(oldCelltagCount);
-	return celltagsComposited && waypointsComposited;
+		m_lastPresentSourceRect = source;
 }
 
 bool CIsoView::InitializeVulkanRenderer()
 {
-	if (m_vulkanRenderer != nullptr)
+	if (m_vulkanRenderer != nullptr && m_gpuScene != nullptr)
 		return true;
-	if (m_vulkanDisabled || m_hWnd == nullptr)
+	if (m_hWnd == nullptr)
 		return false;
 
 	if (rs_vulkan_create(m_hWnd, &m_vulkanRenderer) == RS_OK)
@@ -5420,8 +3998,9 @@ bool CIsoView::InitializeVulkanRenderer()
 		if (width <= 0 || height <= 0 ||
 			rs_vulkan_prepare(m_vulkanRenderer, width, height, theApp.m_Options.bVSync ? 1 : 0) == RS_OK)
 		{
-			m_gpuScene = std::make_unique<VulkanScene>(m_vulkanRenderer, lpdsBack);
-			char info[1024]{}; rs_vulkan_info(m_vulkanRenderer, info, sizeof(info));
+			m_gpuScene = std::make_unique<VulkanScene>(m_vulkanRenderer);
+			char info[1024]{};
+			rs_vulkan_info(m_vulkanRenderer, info, sizeof(info));
 			errstream << "Vulkan GPU scene initialized: " << info << endl;
 			errstream.flush();
 			return true;
@@ -5430,12 +4009,22 @@ bool CIsoView::InitializeVulkanRenderer()
 
 	char diagnostic[1024] = {};
 	rs_vulkan_last_error(diagnostic, sizeof(diagnostic));
-	errstream << "Vulkan renderer unavailable; using DirectDraw presentation fallback: " << diagnostic << endl;
+	errstream << "Vulkan renderer unavailable: " << diagnostic << endl;
 	errstream.flush();
-	rs_vulkan_destroy(m_vulkanRenderer);
-	m_vulkanRenderer = nullptr;
-	m_vulkanDisabled = true;
+	ReleaseVulkanRenderer();
 	return false;
+}
+
+void CIsoView::ReleaseVulkanRenderer()
+{
+	m_gpuScene.reset();
+	if (m_vulkanRenderer != nullptr)
+	{
+		rs_vulkan_destroy(m_vulkanRenderer);
+		m_vulkanRenderer = nullptr;
+	}
+	m_lastPresentSucceeded = false;
+	m_previewHasSaved = FALSE;
 }
 
 void CIsoView::ShowAllTileSets()
@@ -5903,22 +4492,15 @@ void CIsoView::DrawObjectPreviewAt(int x, int y)
 	// removes the currently shown preview ghost (if any) and updates the screen
 	const auto eraseGhost = [&]()
 	{
-		if (m_previewHasSaved)
+		if (m_previewHasSaved && m_gpuScene && m_gpuScene->IsActive())
 		{
 			RestorePreviewRegion();
-			// keep m_previewHasSaved - the saved clean pixels are still valid, restoring them
-			// again is a cheap no-op. This avoids full redraws when hovering over occupied cells.
-			BlitBackbufferToHighRes();
 			RenderUIOverlay();
 			FlipHighResBuffer();
 		}
 		else
 		{
-			// no saved clean pixels (e.g. the last preview used a full redraw) - do a clean
-			// full redraw to remove the ghost
-			m_bSkipTempSave = TRUE;
 			DrawMap();
-			m_bSkipTempSave = FALSE;
 		}
 	};
 
@@ -6290,107 +4872,65 @@ void CIsoView::DrawObjectPreviewAt(int x, int y)
 		bInjected = TRUE;
 	};
 
-	// 4) draw the preview
-	if (dirtyCells <= 0 || dirtyCells > 7000 || lpdsBack == NULL || m_viewScale.x <= 0.0f || m_viewScale.y <= 0.0f)
+	// 4) draw the preview directly on top of the cached GPU scene base
+	if (!m_previewHasSaved || !m_gpuScene || !m_gpuScene->IsActive())
 	{
-		// The affected area is too large (e.g. zoomed out very far) or the incremental path is
-		// not available: use the full redraw path. Suppress the lpdsTemp update so that lpdsTemp
-		// never contains the preview ghost.
-		injectGhost();
-		if (bInjected)
-		{
-			m_bSkipTempSave = TRUE;
-			DrawMap();
-			m_bSkipTempSave = FALSE;
-		}
+		DrawMap();
 	}
-	else
-	{
-		// if we don't have saved clean pixels for the previous ghost (e.g. the scene changed in
-		// the meantime), establish a clean base frame first - the ghost is not injected yet
-		if (!m_previewHasSaved)
-		{
-			m_bSkipTempSave = TRUE;
-			DrawMap();
-			m_bSkipTempSave = FALSE;
-		}
 
+	if (m_gpuScene && m_gpuScene->IsActive() && m_viewScale.x > 0.0f && m_viewScale.y > 0.0f)
+	{
 		injectGhost();
 
 		if (bInjected)
 		{
-			// Erase the previous preview and save every pixel that the clipped local redraw may
-			// touch, including neighbouring connected structures.
 			RestorePreviewRegion();
 			SavePreviewRegion(previewRedrawRect);
 
-			// incremental redraw of only the affected area
-			SurfaceLocker locker(lpdsBack);
-			auto desc = locker.ensure_locked();
-			if (!desc)
+			const RECT r = IsRectEmpty(&previewRedrawRect) ? GetScaledDisplayRect() : previewRedrawRect;
+			const DrawMapCellContext ctx = { *m_gpuScene, r, 0, TRUE };
+			FIELDDATA previewField;
+			MapCoords previewCell(x, y);
+			switch (pt)
 			{
-				// cannot lock the surface - use the full redraw path as a safe fallback
-				locker.ensure_unlocked();
-				m_previewHasSaved = FALSE;
-				m_bSkipTempSave = TRUE;
-				DrawMap();
-				m_bSkipTempSave = FALSE;
-			}
-			else
+			case PT_UNIT:
+				previewField.unit = previewObjectIndex;
+				break;
+			case PT_STRUCTURE:
 			{
-				DDSURFACEDESC2& ddsd = *desc;
-				const RECT r = previewRedrawRect;
-				const DrawMapCellContext ctx = { ddsd, r, 0, TRUE, false };
-				FIELDDATA previewField;
-				MapCoords previewCell(x, y);
-				switch (pt)
+				previewField.structure = previewObjectIndex;
+				previewField.structuretype = Map->GetUnitTypeID(AD.data_s);
+				const auto& foundation = GetBuildingFoundation(previewField.structuretype);
+				if (!foundation.empty())
 				{
-				case PT_UNIT:
-					previewField.unit = previewObjectIndex;
-					break;
-				case PT_STRUCTURE:
-				{
-					previewField.structure = previewObjectIndex;
-					previewField.structuretype = Map->GetUnitTypeID(AD.data_s);
-					const auto& foundation = GetBuildingFoundation(previewField.structuretype);
-					if (!foundation.empty())
-					{
-						previewCell.x += foundation.front().x;
-						previewCell.y += foundation.front().y;
-					}
-					break;
+					previewCell.x += foundation.front().x;
+					previewCell.y += foundation.front().y;
 				}
-				case PT_AIRCRAFT:
-					previewField.aircraft = previewObjectIndex;
-					break;
-				case PT_INFANTRY:
-					if (previewInfantrySubPos >= 0 && previewInfantrySubPos < SUBPOS_COUNT)
-						previewField.infantry[previewInfantrySubPos] = previewObjectIndex;
-					break;
-				case PT_TERRAIN:
-					previewField.terrain = previewObjectIndex;
-					previewField.terraintype = Map->GetUnitTypeID(terrainType);
-					break;
-				default:
-					break;
-				}
-
-				// The clean backbuffer already contains every real map object in the correct order.
-				// Repainting the surrounding cells would draw their translucent shadows and remap
-				// pixels a second time, making the area under a moving unit preview visibly change.
-				// Composite only the injected ghost; placement previews intentionally stay on top.
-				if (previewObjectIndex >= 0)
-					DrawMapObjectsCell(previewCell, previewField,
-						GetRenderTargetCoordinates(previewCell), ctx);
-
-				locker.ensure_unlocked();
-
-				BlitBackbufferToHighRes();
-				RenderUIOverlay();
-				FlipHighResBuffer();
-
-				m_previewHasSaved = TRUE;
+				break;
 			}
+			case PT_AIRCRAFT:
+				previewField.aircraft = previewObjectIndex;
+				break;
+			case PT_INFANTRY:
+				if (previewInfantrySubPos >= 0 && previewInfantrySubPos < SUBPOS_COUNT)
+					previewField.infantry[previewInfantrySubPos] = previewObjectIndex;
+				break;
+			case PT_TERRAIN:
+				previewField.terrain = previewObjectIndex;
+				previewField.terraintype = Map->GetUnitTypeID(terrainType);
+				break;
+			default:
+				break;
+			}
+
+			if (previewObjectIndex >= 0)
+				DrawMapObjectsCell(previewCell, previewField,
+					GetRenderTargetCoordinates(previewCell), ctx);
+
+			RenderUIOverlay();
+			FlipHighResBuffer();
+
+			m_previewHasSaved = TRUE;
 		}
 	}
 
@@ -6411,376 +4951,24 @@ void CIsoView::DrawObjectPreviewAt(int x, int y)
 		Map->SetFielddataAt(cell.first, &cell.second);
 }
 
-// Commits object-only changes without running DrawMap(). Placement can be layered onto the
-// cached scene directly; moving first rebuilds the old object's small screen region, then draws
-// the object at its new position. lpdsTemp is patched as well, so later previews and panning see
-// the committed scene rather than forcing a delayed full redraw.
-bool CIsoView::RefreshObjectScene(const MapCoords& oldPos, const MapCoords& newPos, bool eraseOldObject)
+// snapshots the GPU command buffer watermark so the placement preview ghost can be
+// erased in O(1) without a full map redraw
+void CIsoView::SavePreviewRegion(const RECT& /*rect*/)
 {
-	if (m_gpuScene) return false;
-	if (lpdsBack == NULL || lpdsTemp == NULL || Map->GetIsoSize() == 0 ||
-		m_viewScale.x <= 0.0f || m_viewScale.y <= 0.0f)
-		return false;
-
-	DDSURFACEDESC2 surfaceDesc = {};
-	surfaceDesc.dwSize = sizeof(surfaceDesc);
-	if (lpdsBack->GetSurfaceDesc(&surfaceDesc) != DD_OK)
-		return false;
-
-	RECT display = GetScaledDisplayRect();
-	display.left = max<LONG>(0, display.left);
-	display.top = max<LONG>(0, display.top);
-	display.right = min<LONG>(surfaceDesc.dwWidth, display.right);
-	display.bottom = min<LONG>(surfaceDesc.dwHeight, display.bottom);
-
-	// Conservative lower bound for sprites whose picture could not be looked
-	// up (missing art) and margins for art-defined draw offsets. Both dirty
-	// rects below are grown to hold any sprite that may be (re)drawn inside
-	// them; a too-small estimate leaves visible ghosts of large mod sprites.
-	constexpr int MinSpriteWidth = 192;
-	constexpr int MinSpriteHeight = 256;
-	constexpr int SpriteMarginX = 96;
-	constexpr int SpriteMarginTop = 96;
-	constexpr int SpriteMarginBottom = 128;
-
-	int spriteWidth = MinSpriteWidth;
-	int spriteHeight = MinSpriteHeight;
-	const auto includePictureSize = [&](const PICDATA& picture)
+	if (m_gpuScene && m_gpuScene->IsActive())
 	{
-		if (picture.pic == NULL) return;
-		spriteWidth = max(spriteWidth, max(static_cast<int>(picture.wWidth), static_cast<int>(picture.wMaxWidth)));
-		spriteHeight = max(spriteHeight, max(static_cast<int>(picture.wHeight), static_cast<int>(picture.wMaxHeight)));
-	};
-	const auto includeFieldPictures = [&](const MapCoords& pos)
-	{
-		if (!Map->isInside(pos))
-			return;
-		const FIELDDATA& field = *Map->GetFielddataAt(pos);
-		if (field.unit >= 0)
-		{
-			UNIT unit;
-			Map->GetUnitData(field.unit, &unit);
-			includePictureSize(pics[GetCachedUnitPictureFilename(unit.type, atoi(unit.direction) / 32)]);
-		}
-		if (field.aircraft >= 0)
-		{
-			AIRCRAFT aircraft;
-			Map->GetAircraftData(field.aircraft, &aircraft);
-			includePictureSize(pics[GetCachedUnitPictureFilename(aircraft.type, atoi(aircraft.direction) / 32)]);
-		}
-		for (int i = 0; i < SUBPOS_COUNT; ++i)
-		{
-			if (field.infantry[i] < 0) continue;
-			INFANTRY infantry;
-			Map->GetInfantryData(field.infantry[i], &infantry);
-			const int direction = (7 - atoi(infantry.direction) / 32) % 8;
-			includePictureSize(pics[GetCachedUnitPictureFilename(infantry.type, direction)]);
-		}
-		if (field.terrain >= 0 && field.terraintype >= 0 && field.terraintype < TypeTableCapacity)
-			includePictureSize(treeinfo[field.terraintype].pic);
-	};
-	// the old cell matters too: erasing the moved-out object redraws the
-	// sprites around it, which can be larger than the moved object itself
-	includeFieldPictures(oldPos);
-	includeFieldPictures(newPos);
-
-	const auto makeDirtyRect = [&](const MapCoords& pos)
-	{
-		const auto draw = GetRenderTargetCoordinates(pos);
-		const int halfWidth = spriteWidth / 2 + SpriteMarginX;
-		// BMP/voxel units are bottom-anchored while SHPs are centred. Cover both layouts
-		// plus a safety margin for art-defined offsets without approaching a full screen.
-		RECT rect = {
-			draw.x + f_x / 2 - halfWidth,
-			draw.y - spriteHeight - SpriteMarginTop,
-			draw.x + f_x / 2 + halfWidth,
-			draw.y + f_y + SpriteMarginBottom
-		};
-		rect.left = max(rect.left, display.left);
-		rect.top = max(rect.top, display.top);
-		rect.right = min(rect.right, display.right);
-		rect.bottom = min(rect.bottom, display.bottom);
-		return rect;
-	};
-
-	RECT oldRect = makeDirtyRect(oldPos);
-	RECT newRect = makeDirtyRect(newPos);
-	if (newRect.right <= newRect.left || newRect.bottom <= newRect.top)
-		return false;
-
-	// Remove the cursor/drag line/preview from the working buffer. lpdsTemp only contains
-	// the committed map scene and is therefore the correct base for a partial update.
-	if (lpdsBack->BltFast(0, 0, lpdsTemp, NULL, DDBLTFAST_WAIT) != DD_OK)
-		return false;
-
+		m_gpuScene->SavePreview();
+		m_previewHasSaved = TRUE;
+		return;
+	}
 	m_previewHasSaved = FALSE;
-	// Committing an object patches the cached scene, which invalidates the
-	// placement-preview base just like a full redraw does.
-	std::vector<BYTE>().swap(m_previewSavedPixels);
-	const size_t picsCountAtStart = pics.size();
-
-	const auto renderRegion = [&](RECT dirty, bool rebuildTerrain) -> bool
-	{
-		if (dirty.right <= dirty.left || dirty.bottom <= dirty.top)
-			return true;
-
-		if (rebuildTerrain)
-		{
-			DDBLTFX fill = {};
-			fill.dwSize = sizeof(fill);
-			fill.dwFillColor = RGB(255, 255, 255);
-			if (lpdsBack->Blt(&dirty, NULL, NULL, DDBLT_COLORFILL | DDBLT_WAIT, &fill) != DD_OK)
-				return false;
-		}
-
-		SurfaceLocker locker(lpdsBack);
-		DDSURFACEDESC2* desc = locker.ensure_locked();
-		if (desc == nullptr)
-			return false;
-
-		RECT windowRect = {};
-		GetWindowRect(&windowRect);
-		const auto mapAtScreen = [&](LONG sx, LONG sy)
-		{
-			const CPoint client(
-				static_cast<int>((sx - windowRect.left) / m_viewScale.x),
-				static_cast<int>((sy - windowRect.top) / m_viewScale.y));
-			return GetMapCoordinatesFromClientCoordinates(client, false, true);
-		};
-
-		const MapCoords corners[4] = {
-			mapAtScreen(dirty.left, dirty.top),
-			mapAtScreen(dirty.right, dirty.top),
-			mapAtScreen(dirty.left, dirty.bottom),
-			mapAtScreen(dirty.right, dirty.bottom)
-		};
-		int left = corners[0].x;
-		int right = corners[0].x;
-		int top = corners[0].y;
-		int bottom = corners[0].y;
-		for (int i = 1; i < 4; ++i)
-		{
-			left = min(left, static_cast<int>(corners[i].x));
-			right = max(right, static_cast<int>(corners[i].x));
-			top = min(top, static_cast<int>(corners[i].y));
-			bottom = max(bottom, static_cast<int>(corners[i].y));
-		}
-
-		// Include cells whose tall/wide sprites can reach into the dirty rectangle.
-		left = max(0, left - 8);
-		top = max(0, top - 8);
-		right = min(static_cast<int>(Map->GetIsoSize()), right + 9);
-		bottom = min(static_cast<int>(Map->GetIsoSize()), bottom + 9);
-
-		const int mapwidth = Map->GetWidth();
-		const int mapheight = Map->GetHeight();
-		const auto cellIsVisible = [&](int u, int v)
-		{
-			return !(u < 1 || v < 1 || u + v < mapwidth + 1 || u + v > mapwidth + mapheight * 2 ||
-				(v + 1 > mapwidth && u - 1 < v - mapwidth) ||
-				(u + 1 > mapwidth && v + mapwidth - 1 < u));
-		};
-
-		const DWORD heightStart = tilesets_start[atoi((*tiles).sections["General"].values["HeightBase"])];
-		const DrawMapCellContext ctx = { *desc, dirty, heightStart, TRUE, false };
-		const size_t oldTextCount = m_texts_to_render.size();
-		const size_t oldWaypointCount = m_waypoints_to_render.size();
-		const size_t oldCelltagCount = m_celltags_to_render.size();
-
-		if (rebuildTerrain)
-		{
-			for (int u = left; u < right; ++u)
-			{
-				for (int v = top; v < bottom; ++v)
-				{
-					if (!cellIsVisible(u, v)) continue;
-					const FIELDDATA& field = *Map->GetFielddataAt(MapCoords(u, v));
-					if (!field.bRedrawTerrain)
-						DrawMapTerrainCell(field, GetRenderTargetCoordinates(MapCoords(u, v)), ctx);
-				}
-			}
-		}
-
-		for (int u = left; u < right; ++u)
-		{
-			for (int v = top; v < bottom; ++v)
-			{
-				if (!cellIsVisible(u, v)) continue;
-				const MapCoords pos(u, v);
-				const FIELDDATA& field = *Map->GetFielddataAt(pos);
-				const DWORD originalGround = field.wGround == 0xFFFF ? 0 : field.wGround;
-				const auto draw = GetRenderTargetCoordinates(pos);
-				if (rebuildTerrain)
-				{
-					if (field.bRedrawTerrain) DrawMapTerrainCell(field, draw, ctx);
-					DrawMapTerrainAnim(field, draw, ctx, originalGround);
-				}
-				DrawMapObjectsCell(pos, field, draw, ctx);
-			}
-		}
-
-		if (rebuildTerrain)
-		{
-			for (const auto& tube : Map->GetTubes())
-				DrawTube(*tube, desc);
-		}
-
-		locker.ensure_unlocked();
-		const bool celltagsComposited = CompositeColorKeySurface(
-			lpdsBack,
-			(LPDIRECTDRAWSURFACE4)pics["CELLTAG"].pic,
-			m_celltags_to_render,
-			oldCelltagCount,
-			[](const ProjectedCoords& position) { return position; });
-		const bool waypointsComposited = CompositeColorKeySurface(
-			lpdsBack,
-			(LPDIRECTDRAWSURFACE4)pics["FLAG"].pic,
-			m_waypoints_to_render,
-			oldWaypointCount,
-			[](const WaypointToRender& waypoint)
-			{
-				return ProjectedCoords(waypoint.drawx + 1, waypoint.drawy + 1);
-			});
-
-		// Keep DirectDraw only as a recovery path if a surface cannot be locked.
-		if (!celltagsComposited)
-		{
-			for (size_t i = oldCelltagCount; i < m_celltags_to_render.size(); ++i)
-			{
-				const auto& position = m_celltags_to_render[i];
-				Blit((LPDIRECTDRAWSURFACE4)pics["CELLTAG"].pic, position.x - 1, position.y - 1);
-			}
-		}
-		if (!waypointsComposited)
-		{
-			for (size_t i = oldWaypointCount; i < m_waypoints_to_render.size(); ++i)
-			{
-				const auto& waypoint = m_waypoints_to_render[i];
-				Blit((LPDIRECTDRAWSURFACE4)pics["FLAG"].pic, waypoint.drawx, waypoint.drawy);
-			}
-		}
-
-		m_texts_to_render.resize(oldTextCount);
-		m_waypoints_to_render.resize(oldWaypointCount);
-		m_celltags_to_render.resize(oldCelltagCount);
-
-		return lpdsTemp->Blt(&dirty, lpdsBack, &dirty, DDBLT_WAIT, NULL) == DD_OK;
-	};
-
-	bool refreshed = true;
-	if (eraseOldObject)
-	{
-		RECT expandedOld = oldRect;
-		InflateRect(&expandedOld, 32, 32);
-		RECT overlap = {};
-		if (IntersectRect(&overlap, &expandedOld, &newRect))
-		{
-			RECT combined = {
-				min(oldRect.left, newRect.left), min(oldRect.top, newRect.top),
-				max(oldRect.right, newRect.right), max(oldRect.bottom, newRect.bottom)
-			};
-			refreshed = renderRegion(combined, true);
-		}
-		else
-		{
-			refreshed = renderRegion(oldRect, true) && renderRegion(newRect, false);
-		}
-	}
-	else
-	{
-		refreshed = renderRegion(newRect, false);
-	}
-
-	if (!refreshed)
-		return false;
-
-	if (m_cellCursor != MapCoords(-1, -1))
-	{
-		SurfaceLocker locker(lpdsBack);
-		DDSURFACEDESC2* desc = locker.ensure_locked();
-		if (desc != nullptr)
-			DrawCellCursor(m_cellCursor, *desc);
-	}
-
-	BlitBackbufferToHighRes();
-	RenderUIOverlay();
-	FlipHighResBuffer();
-
-	if (pics.size() != picsCountAtStart)
-		m_picFileCache.clear();
-	return true;
 }
 
-// saves the pixels of the given backbuffer rect (window-relative coordinates) so that they can
-// be restored later to erase the placement preview ghost without a full map redraw
-void CIsoView::SavePreviewRegion(const RECT& rect)
-{
-	if (m_gpuScene) { m_gpuScene->SavePreview(); m_previewHasSaved = TRUE; return; }
-	m_previewHasSaved = FALSE;
-
-	if (lpdsBack == NULL || bpp <= 0) return;
-
-	SurfaceLocker locker(lpdsBack);
-	auto desc = locker.ensure_locked();
-	if (!desc) return;
-
-	const DDSURFACEDESC2& ddsd = *desc;
-
-	RECT rr = rect;
-	if (rr.left < 0) rr.left = 0;
-	if (rr.top < 0) rr.top = 0;
-	if (rr.right > (LONG)ddsd.dwWidth) rr.right = (LONG)ddsd.dwWidth;
-	if (rr.bottom > (LONG)ddsd.dwHeight) rr.bottom = (LONG)ddsd.dwHeight;
-	if (rr.right <= rr.left || rr.bottom <= rr.top) return;
-
-	const int bytesPerPixel = bpp; // bpp is bytes per pixel
-	const int w = rr.right - rr.left;
-	const int h = rr.bottom - rr.top;
-	const size_t rowBytes = (size_t)w * bytesPerPixel;
-
-	m_previewSavedPixels.resize((size_t)h * rowBytes);
-
-	const BYTE* srcBase = (const BYTE*)ddsd.lpSurface + (size_t)rr.top * ddsd.lPitch + (size_t)rr.left * bytesPerPixel;
-	BYTE* dst = m_previewSavedPixels.data();
-	for (int i = 0; i < h; i++)
-		memcpy(dst + (size_t)i * rowBytes, srcBase + (size_t)i * ddsd.lPitch, rowBytes);
-
-	m_previewSavedRect = rr;
-	m_previewHasSaved = TRUE;
-}
-
-// restores the previously saved preview region (see SavePreviewRegion) to erase the placement
-// preview ghost without a full map redraw
+// truncates the GPU command buffer back to the preview watermark to erase the ghost
 void CIsoView::RestorePreviewRegion()
 {
-	if (m_gpuScene) { if (m_previewHasSaved) m_gpuScene->RestorePreview(); return; }
-	if (!m_previewHasSaved || m_previewSavedPixels.empty() || lpdsBack == NULL || bpp <= 0) return;
-
-	SurfaceLocker locker(lpdsBack);
-	auto desc = locker.ensure_locked();
-	if (!desc) return;
-
-	const DDSURFACEDESC2& ddsd = *desc;
-
-	RECT rr = m_previewSavedRect;
-	if (rr.left < 0) rr.left = 0;
-	if (rr.top < 0) rr.top = 0;
-	if (rr.right > (LONG)ddsd.dwWidth) rr.right = (LONG)ddsd.dwWidth;
-	if (rr.bottom > (LONG)ddsd.dwHeight) rr.bottom = (LONG)ddsd.dwHeight;
-	if (rr.right <= rr.left || rr.bottom <= rr.top) return;
-
-	const int bytesPerPixel = bpp; // bpp is bytes per pixel
-	const int w = rr.right - rr.left;
-	const int h = rr.bottom - rr.top;
-	const size_t rowBytes = (size_t)w * bytesPerPixel;
-
-	// defensive: only restore if the saved pixel data fits the region
-	if (m_previewSavedPixels.size() < (size_t)h * rowBytes) return;
-
-	const BYTE* src = m_previewSavedPixels.data();
-	BYTE* dstBase = (BYTE*)ddsd.lpSurface + (size_t)rr.top * ddsd.lPitch + (size_t)rr.left * bytesPerPixel;
-	for (int i = 0; i < h; i++)
-		memcpy(dstBase + (size_t)i * ddsd.lPitch, src + (size_t)i * rowBytes, rowBytes);
+	if (m_gpuScene && m_gpuScene->IsActive() && m_previewHasSaved)
+		m_gpuScene->RestorePreview();
 }
 
 void CIsoView::OnTimer(UINT_PTR nIDEvent)
@@ -6795,29 +4983,20 @@ void CIsoView::OnTimer(UINT_PTR nIDEvent)
 	{
 		KillTimer(VULKAN_RESIZE_TIMER_ID);
 		m_resizePreview = false;
-		if (lpdsBack == NULL)
-			return;
 
 		if (b_IsLoading)
 		{
 			// Keep the cached frame stretched to the final client size while the
 			// loader intentionally suppresses DrawMap().
-			if (m_lastFrameValid &&
+			if (m_lastPresentSucceeded && m_gpuScene && m_gpuScene->IsActive() &&
 				m_lastPresentSourceRect.right > m_lastPresentSourceRect.left &&
 				m_lastPresentSourceRect.bottom > m_lastPresentSourceRect.top)
 			{
 				FlipHighResBuffer(&m_lastPresentSourceRect);
 			}
-			else
-			{
-				BlitBackbufferToHighRes();
-				RenderUIOverlay();
-				FlipHighResBuffer();
-			}
 		}
 		else
 		{
-			m_bPanFastPath = FALSE;
 			RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW);
 		}
 
@@ -6854,7 +5033,6 @@ void CIsoView::OnTimer(UINT_PTR nIDEvent)
 		if (m_viewOffset == oldOffset)
 			return;
 
-		m_bPanFastPath = TRUE;
 		RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_NOERASE);
 	}
 	else
@@ -7190,13 +5368,9 @@ void CIsoView::DrawMap()
 {
 	const CMapData* const Map = ::Map;
 
-	// a full map redraw replaces the whole scene, so the saved clean region of the fast
-	// placement preview is not valid anymore
+	// a full map redraw replaces the whole scene, so the saved preview watermark
+	// is not valid anymore
 	m_previewHasSaved = FALSE;
-	// A full redraw replaces the entire preview base. The saved pixels cannot
-	// be reused, so return a potentially large placement-preview buffer instead
-	// of retaining the peak sprite size for the rest of the editing session.
-	std::vector<BYTE>().swap(m_previewSavedPixels);
 
 	if (bNoDraw) return;
 
@@ -7208,27 +5382,12 @@ void CIsoView::DrawMap()
 
 	last_succeeded_operation = 100;
 
-	if (lpds == NULL || b_IsLoading || tiledata == NULL || (*tiledata) == NULL || (*tiledata_count == 0)) return; // just to make sure...
-
-	if (HasLostDirectDrawSurface())
-	{
-		// we lost our surfaces, we need to reinitialize directdraw and all associated objects
-		ReInitializeDDraw();
-		return;
-	}
-
-
+	if (b_IsLoading || tiledata == NULL || (*tiledata) == NULL || (*tiledata_count == 0)) return; // just to make sure...
 
 	if (Map->GetIsoSize() == 0) return;
 
-#ifdef NOSURFACES
-	if (m_bPanFastPath && bIncrementalPan && rscroll &&
-		(GetAsyncKeyState(VK_RBUTTON) & 0x8000) == 0)
-	{
-		m_bPanFastPath = FALSE;
+	if (!InitializeVulkanRenderer() || !m_gpuScene)
 		return;
-	}
-#endif
 
 	m_colorCache.clear();
 
@@ -7237,26 +5396,10 @@ void CIsoView::DrawMap()
 
 	auto startTime = std::chrono::steady_clock::now();
 
-	// draw a white background
-	DDBLTFX fx;
-	memset(&fx, 0, sizeof(DDBLTFX));
-	fx.dwSize = sizeof(DDBLTFX);
-	fx.dwFillColor = RGB(255, 255, 255);
-	InitializeVulkanRenderer();
-	if (m_gpuScene) m_gpuScene->Begin(GetScaledDisplayRect());
-	else lpdsBack->Blt(NULL, NULL, NULL, DDBLT_COLORFILL, &fx);
-
-
-	// get the window rect
-	
 	RECT r = GetScaledDisplayRect();
+	m_gpuScene->Begin(r);
 
-	// the code here draws the coordinate system
-	int i;
-
-	
 	// now, we draw all the objects
-	
 
 	int left, right, top, bottom;
 
@@ -7289,62 +5432,23 @@ void CIsoView::DrawMap()
 
 
 	BOOL bMarbleHeight = TRUE;
-	//if(Map->GetTheater()==THEATER4 || Map->GetTheater()==THEATER3) bMarbleHeight=FALSE;
 
 	// Now left, right, top & bottom contain the needed values
 
 	DWORD MM_heightstart = tilesets_start[atoi((*tiles).sections["General"].values["HeightBase"])];
 
 	// now draw everything
-	int u, v, z;
+	int u, v;
 	int mapwidth, mapheight;
 	mapwidth = Map->GetWidth();
 	mapheight = Map->GetHeight();
 
-	DDSURFACEDESC2 ddsd;
-	ZeroMemory(&ddsd, sizeof(ddsd));
-	ddsd.dwSize = sizeof(DDSURFACEDESC2);
-	ddsd.dwFlags = DDSD_WIDTH | DDSD_HEIGHT;
-
-	lpdsBack->GetSurfaceDesc(&ddsd);
-
-
-
-#ifdef NOSURFACES
-	if (!m_gpuScene && m_bPanFastPath && bIncrementalPan && rscroll)
-	{
-		m_bPanFastPath = FALSE;
-		if (DrawMapPan(left, right, top, bottom, MM_heightstart, bMarbleHeight))
-			return;
-	}
-#endif
-#ifdef NOSURFACES				
-	{
-		HRESULT lockRes = m_gpuScene && m_gpuScene->Describe(lpdsBack, ddsd) ? DD_OK :
-			lpdsBack->Lock(NULL, &ddsd, DDLOCK_SURFACEMEMORYPTR | DDLOCK_WAIT | DDLOCK_NOSYSLOCK, NULL);
-		if (lockRes != DD_OK || ddsd.lpSurface == NULL)
-		{
-			// Surface lock failed (lost surface / busy). Try to restore once.
-			if (lockRes == DDERR_SURFACELOST)
-			{
-				lpdsBack->Restore();
-				lockRes = lpdsBack->Lock(NULL, &ddsd, DDLOCK_SURFACEMEMORYPTR | DDLOCK_WAIT | DDLOCK_NOSYSLOCK, NULL);
-			}
-			if (lockRes != DD_OK || ddsd.lpSurface == NULL)
-			{
-				// Cannot lock the back buffer - skip this frame rather than crash.
-				return;
-			}
-		}
-	}
-#endif
-
-	// we render texts and waypoints last as they should be always visible anyway and because text rendering is currently done using GDI -> getting a DC for every text is too slow nowadays
+	// we render texts and waypoints last as they should be always visible anyway
 	m_texts_to_render.clear();
 	m_waypoints_to_render.clear();
 	m_celltags_to_render.clear();
 
-	const DrawMapCellContext ctx = { ddsd, r, MM_heightstart, bMarbleHeight, false };
+	const DrawMapCellContext ctx = { *m_gpuScene, r, MM_heightstart, bMarbleHeight };
 
 	for (u = left;u < right;u++)
 	{
@@ -7403,38 +5507,24 @@ void CIsoView::DrawMap()
 
 	for (const auto& tube : Map->GetTubes())
 	{
-		DrawTube(*tube, &ddsd);
+		DrawTube(*tube);
 	}
 
-#ifdef NOSURFACES
-	if (!m_gpuScene) lpdsBack->Unlock(NULL);
-#endif
-
-	const bool celltagsComposited = CompositeColorKeySurface(
-		lpdsBack,
-		(LPDIRECTDRAWSURFACE4)pics["CELLTAG"].pic,
-		m_celltags_to_render,
-		0,
-		[](const ProjectedCoords& position) { return position; });
-	const bool waypointsComposited = CompositeColorKeySurface(
-		lpdsBack,
-		(LPDIRECTDRAWSURFACE4)pics["FLAG"].pic,
-		m_waypoints_to_render,
-		0,
-		[](const WaypointToRender& waypoint)
+	if (!m_celltags_to_render.empty())
+	{
+		if (const auto it = pics.find("CELLTAG"); it != pics.end() && it->second.bitmap)
 		{
-			return ProjectedCoords(waypoint.drawx + 1, waypoint.drawy + 1);
-		});
-
-	if (!celltagsComposited)
-	{
-		for (const auto& position : m_celltags_to_render)
-			Blit((LPDIRECTDRAWSURFACE4)pics["CELLTAG"].pic, position.x - 1, position.y - 1);
+			for (const auto& position : m_celltags_to_render)
+				m_gpuScene->Bitmap(*it->second.bitmap, position.x, position.y);
+		}
 	}
-	if (!waypointsComposited)
+	if (!m_waypoints_to_render.empty())
 	{
-		for (const auto& waypoint : m_waypoints_to_render)
-			Blit((LPDIRECTDRAWSURFACE4)pics["FLAG"].pic, waypoint.drawx, waypoint.drawy);
+		if (const auto it = pics.find("FLAG"); it != pics.end() && it->second.bitmap)
+		{
+			for (const auto& waypoint : m_waypoints_to_render)
+				m_gpuScene->Bitmap(*it->second.bitmap, waypoint.drawx + 1, waypoint.drawy + 1);
+		}
 	}
 	m_celltags_to_render.clear();
 	m_waypoints_to_render.clear();
@@ -7446,20 +5536,14 @@ void CIsoView::DrawMap()
 			AD.tool->render();
 	}
 
-	if (m_gpuScene && !m_bSkipTempSave)
-		m_gpuScene->SaveBase();
-	else if (!m_bSkipTempSave)
-		lpdsTemp->Blt(NULL, lpdsBack, NULL, 0, 0); // lpdsTemp always holds the scene drawn above, unscaled to the window (except when suppressed by the fast placement preview, as lpdsTemp must never contain a preview ghost)
+	m_gpuScene->SaveBase();
 
 	if (m_cellCursor != MapCoords(-1, -1))
 	{
-		SurfaceLocker locker(lpdsBack);
-		auto desc = locker.ensure_locked();
-		if (desc)
-			DrawCellCursor(m_cellCursor, *desc);
+		DrawCellCursor(m_cellCursor);
 	}
 
-	auto renderDuration = std::chrono::duration_cast<std::chrono::duration<float>>(std::chrono::steady_clock::now() - startTime); // not including text output, ReleaseDC, waitForVerticalBlank etc below
+	auto renderDuration = std::chrono::duration_cast<std::chrono::duration<float>>(std::chrono::steady_clock::now() - startTime);
 
 	if (bDrawStats)
 	{
@@ -7477,25 +5561,18 @@ void CIsoView::DrawMap()
 
 	if (rscroll && (GetAsyncKeyState(VK_RBUTTON) & 0x8000) != 0)
 	{
-		const auto& sc = pics["SCROLLCURSOR"];
-		const int cursorX = rclick_x * m_viewScale.x + r.left - sc.wWidth / 2;
-		const int cursorY = rclick_y * m_viewScale.y + r.top - sc.wHeight / 2;
-		const std::array<ProjectedCoords, 1> cursorPositions = { ProjectedCoords(cursorX + 1, cursorY + 1) };
-		if (!CompositeColorKeySurface(lpdsBack, (LPDIRECTDRAWSURFACE4)sc.pic, cursorPositions, 0,
-			[](const ProjectedCoords& position) { return position; }))
+		if (const auto it = pics.find("SCROLLCURSOR"); it != pics.end() && it->second.bitmap)
 		{
-			Blit((LPDIRECTDRAWSURFACE4)sc.pic, cursorX, cursorY);
+			const auto& sc = it->second;
+			const int cursorX = rclick_x * m_viewScale.x + r.left - sc.wWidth / 2;
+			const int cursorY = rclick_y * m_viewScale.y + r.top - sc.wHeight / 2;
+			m_gpuScene->Bitmap(*sc.bitmap, cursorX + 1, cursorY + 1);
 		}
 	}
 
-	BlitBackbufferToHighRes(); // lpdsBackHighRes contains the same graphic, but scaled to the whole window
-		
 	RenderUIOverlay();
 	FlipHighResBuffer();
 	last_succeeded_operation = 10100;
-
-	m_lastViewOffset = m_viewOffset;
-	m_lastFrameValid = m_lastPresentSucceeded;
 
 	if (pics.size() != picsCountAtFrameStart)
 		m_picFileCache.clear();
@@ -7504,7 +5581,6 @@ void CIsoView::DrawMap()
 
 void CIsoView::DrawMapTerrainCell(const FIELDDATA& m, const ProjectedCoords& drawCoords, const DrawMapCellContext& ctx)
 {
-	const DDSURFACEDESC2& ddsd = ctx.ddsd;
 	const RECT& r = ctx.r;
 
 	const DWORD dwOrigGround = m.wGround == 0xFFFF ? 0 : m.wGround;
@@ -7542,19 +5618,11 @@ void CIsoView::DrawMapTerrainCell(const FIELDDATA& m, const ProjectedCoords& dra
 
 			if (!m.bHide && (*tiledata)[dwOrigGround].bHide == FALSE)
 			{
-#ifndef NOSURFACES
-				Blit(st.pic, stDrawCoords.x, stDrawCoords.y, st.wWidth, st.wHeight);
-#else
-				BlitTerrain(ddsd.lpSurface, stDrawCoords.x, stDrawCoords.y, r.left, r.top, ddsd.lPitch, r.right, r.bottom, st);
-#endif
+				BlitTerrain(ctx.scene, stDrawCoords.x, stDrawCoords.y, r, st);
 			}
-			else // draw soemthing representing the tile
+			else // draw something representing the hidden tile
 			{
-#ifndef NOSURFACES
-				DrawCell(stDrawCoords.x, stDrawCoords.y, 1, 1, RGB(0, 140, 0), FALSE, FALSE);
-#else
-				BlitTerrainHalfTransp(ddsd.lpSurface, stDrawCoords.x, stDrawCoords.y, r.left, r.top, ddsd.lPitch, r.right, r.bottom, st);
-#endif
+				BlitTerrainHalfTransp(ctx.scene, stDrawCoords.x, stDrawCoords.y, r, st);
 			}
 		}
 	}
@@ -7563,7 +5631,6 @@ void CIsoView::DrawMapTerrainCell(const FIELDDATA& m, const ProjectedCoords& dra
 
 void CIsoView::DrawMapTerrainAnim(const FIELDDATA& m, const ProjectedCoords& drawCoords, const DrawMapCellContext& ctx, DWORD dwOrigGround)
 {
-	const DDSURFACEDESC2& ddsd = ctx.ddsd;
 	const RECT& r = ctx.r;
 
 	const DWORD ground = m.wGround == 0xFFFF ? 0 : m.wGround;
@@ -7577,11 +5644,8 @@ void CIsoView::DrawMapTerrainAnim(const FIELDDATA& m, const ProjectedCoords& dra
 
 			if (!m.bHide && (*tiledata)[dwOrigGround].bHide == FALSE && st.anim)
 			{
-#ifndef NOSURFACES
-#else
 				const auto animDrawCoords = drawCoords + ProjectedVec(f_x / 2 - st.anim->wMaxWidth / 2, f_y / 2 - st.anim->wMaxHeight / 2) + st.anim->drawOffset();
-				BlitPic(ddsd.lpSurface, animDrawCoords.x, animDrawCoords.y, r.left, r.top, ddsd.lPitch, r.right, r.bottom, *st.anim);
-#endif
+				BlitPic(ctx.scene, animDrawCoords.x, animDrawCoords.y, r, *st.anim);
 			}
 		}
 	}
@@ -7590,7 +5654,6 @@ void CIsoView::DrawMapTerrainAnim(const FIELDDATA& m, const ProjectedCoords& dra
 
 void CIsoView::DrawMapObjectsCell(const MapCoords& mapCoords, const FIELDDATA& m, const ProjectedCoords& drawCoords, const DrawMapCellContext& ctx)
 {
-	DDSURFACEDESC2& ddsd = ctx.ddsd;
 	const RECT& r = ctx.r;
 
 	// draw overlay
@@ -7626,7 +5689,6 @@ void CIsoView::DrawMapObjectsCell(const MapCoords& mapCoords, const FIELDDATA& m
 					itoa(m.overlay, cd + 2, 16);
 
 					m_texts_to_render.push_back({ cd, drawCoords.x + f_x / 2, drawCoords.y + f_y / 2, RGB(0,0,0), false, true, true});
-					// TextOut(drawx,drawy, cd, RGB(0,0,0));
 				}
 			}
 		}
@@ -7659,28 +5721,22 @@ void CIsoView::DrawMapObjectsCell(const MapCoords& mapCoords, const FIELDDATA& m
 
 			const auto drawCoordsOvrl = drawCoords + offset;
 
-#ifndef NOSURFACES
-			Blit(pic.pic, drawCoordsOvrl.x, drawCoordsOvrl.y);
-#else
-
 #ifdef RA2_MODE
-			BlitPic(ddsd.lpSurface, drawCoordsOvrl.x, drawCoordsOvrl.y, r.left, r.top, ddsd.lPitch, r.right, r.bottom, pic);
+			BlitPic(ctx.scene, drawCoordsOvrl.x, drawCoordsOvrl.y, r, pic);
 #endif
 #ifdef TS_MODE 
 			if (!isGreenTiberium(m.overlay) && !(m.overlay == 0x7f)) // no tib
-				BlitPic(ddsd.lpSurface, drawCoordsOvrl.x, drawCoordsOvrl.y, r.left, r.top, ddsd.lPitch, r.right, r.bottom, pic);
+				BlitPic(ctx.scene, drawCoordsOvrl.x, drawCoordsOvrl.y, r, pic);
 			else if (m.overlay == 0x7f) // blue tib
 			{
-				int n = RGB(200, 0, 0);
-				BlitPic(ddsd.lpSurface, drawCoordsOvrl.x, drawCoordsOvrl.y, r.left, r.top, ddsd.lPitch, r.right, r.bottom, pic, &n);
+				int n = m_color_converter->GetColor(0, 0, 200);
+				BlitPic(ctx.scene, drawCoordsOvrl.x, drawCoordsOvrl.y, r, pic, &n);
 			}
 			else
 			{
-				int n = RGB(0, 200, 0);
-				BlitPic(ddsd.lpSurface, drawCoordsOvrl.x, drawCoordsOvrl.y, r.left, r.top, ddsd.lPitch, r.right, r.bottom, pic, &n);
+				int n = m_color_converter->GetColor(0, 200, 0);
+				BlitPic(ctx.scene, drawCoordsOvrl.x, drawCoordsOvrl.y, r, pic, &n);
 			}
-#endif
-
 #endif
 
 		}
@@ -7717,14 +5773,6 @@ void CIsoView::DrawMapObjectsCell(const MapCoords& mapCoords, const FIELDDATA& m
 
 			}
 
-#ifndef NOSURFACES
-			for (const auto& cell : foundation)
-			{
-				const auto foundationDraw = GetRenderTargetCoordinates(
-					MapCoords(objp.x + cell.x, objp.y + cell.y));
-				DrawCell(foundationDraw.x, foundationDraw.y, 1, 1, colorref_conv[objp.col]);
-			}
-#else
 			// MW 07/19/01: Paint cell if user chose so...
 			if (theApp.m_Options.bShowCells)
 			{
@@ -7732,11 +5780,9 @@ void CIsoView::DrawMapObjectsCell(const MapCoords& mapCoords, const FIELDDATA& m
 				{
 					const auto foundationDraw = GetRenderTargetCoordinates(
 						MapCoords(objp.x + cell.x, objp.y + cell.y));
-					DrawCell(ddsd.lpSurface, ddsd.dwWidth, ddsd.dwHeight, ddsd.lPitch,
-						foundationDraw.x, foundationDraw.y, 1, 1, colorref_conv[objp.col]);
+					DrawCell(ctx.scene, foundationDraw.x, foundationDraw.y, 1, 1, colorref_conv[objp.col]);
 				}
 			}
-#endif
 
 
 			if (pic.pic == NULL)
@@ -7752,9 +5798,6 @@ void CIsoView::DrawMapObjectsCell(const MapCoords& mapCoords, const FIELDDATA& m
 				}
 				if (pic.pic == NULL)
 				{
-#ifndef NOSURFACES
-					Blit(pics["HOUSE"].pic, drawCoordsBld.x, drawCoordsBld.y - 19); // draw a ugly house
-#endif
 					missingimages[objp.type] = TRUE;
 				}
 			}
@@ -7765,12 +5808,7 @@ void CIsoView::DrawMapObjectsCell(const MapCoords& mapCoords, const FIELDDATA& m
 				// it was that easy! just center on top end!!!
 				const auto drawCoordsBldShp = drawCoordsBld + ProjectedVec(f_x / 2 - pic.wMaxWidth / 2, -pic.wMaxHeight / 2);
 
-#ifndef NOSURFACES
-				Blit(pic.pic, drawCoordsBldShp.x, drawCoordsBldShp.y, pic.wMaxWidth, pic.wMaxHeight);
-#else
-
-				BlitPic(ddsd.lpSurface, drawCoordsBldShp.x, drawCoordsBldShp.y, r.left, r.top, ddsd.lPitch, r.right, r.bottom, pic, &colorref_conv[objp.col]);
-#endif
+				BlitPic(ctx.scene, drawCoordsBldShp.x, drawCoordsBldShp.y, r, pic, &colorref_conv[objp.col]);
 
 				for (int upgrade = 0; upgrade < objp.upradecount; ++upgrade)
 				{
@@ -7797,12 +5835,7 @@ void CIsoView::DrawMapObjectsCell(const MapCoords& mapCoords, const FIELDDATA& m
 							atoi(art.sections[objp.type].values[LocLookup[upgrade][0]]),
 							atoi(art.sections[objp.type].values[LocLookup[upgrade][1]])
 						);
-						// py-=atoi(art.sections[obj.type].values["PowerUp1LocZZ"]); 
-#ifndef NOSURFACES
-						Blit(pic.pic, drawCoordsPowerUp.x, drawCoordsPowerUp.y);
-#else
-						BlitPic(ddsd.lpSurface, drawCoordsPowerUp.x, drawCoordsPowerUp.y, r.left, r.top, ddsd.lPitch, r.right, r.bottom, pic, &colorref_conv[objp.col]);
-#endif
+						BlitPic(ctx.scene, drawCoordsPowerUp.x, drawCoordsPowerUp.y, r, pic, &colorref_conv[objp.col]);
 
 					}
 
@@ -7861,24 +5894,16 @@ void CIsoView::DrawMapObjectsCell(const MapCoords& mapCoords, const FIELDDATA& m
 			}
 
 
-			//#ifndef NOSURFACES							
-#ifdef NOSURFACES 
 			if (m.structure >= 0) // only paint cell if we have a structure preplaced, as we have a half transparent image
 			{
-#endif
 				// place it 2 pixels lower so that user can see the dotted lines even if the building itself has the cells drawn
 				for (const auto& cell : foundation)
 				{
 					const auto foundationDraw = GetRenderTargetCoordinates(
 						MapCoords(nodeOrigin.x + cell.x, nodeOrigin.y + cell.y));
-					DrawCell(ddsd.lpSurface, ddsd.dwWidth, ddsd.dwHeight, ddsd.lPitch,
-						foundationDraw.x, foundationDraw.y + 3, 1, 1, colorref_conv[c], true);
+					DrawCell(ctx.scene, foundationDraw.x, foundationDraw.y + 3, 1, 1, colorref_conv[c], true);
 				}
-
-#ifdef NOSURFACES				
 			}
-#endif
-			//#endif
 
 			if (pic.pic == NULL)
 			{
@@ -7889,11 +5914,8 @@ void CIsoView::DrawMapObjectsCell(const MapCoords& mapCoords, const FIELDDATA& m
 					::Map->UpdateBuildingInfo(*rules.sections["BuildingTypes"].GetValue(m.node.type));
 					pic = buildinginfo[id].pic[0];
 				}
-				if (pic.pic == NULL);
+				if (pic.pic == NULL)
 				{
-#ifndef NOSURFACES
-					Blit(pics["HOUSE"].pic, drawCoordsBld.x, drawCoordsBld.y - 19);
-#endif
 					missingimages[*rules.sections["BuildingTypes"].GetValue(m.node.type)] = TRUE;
 				}
 			}
@@ -7902,12 +5924,7 @@ void CIsoView::DrawMapObjectsCell(const MapCoords& mapCoords, const FIELDDATA& m
 			if (pic.pic) // picture
 			{
 				const auto drawCoordsBldShp = drawCoordsBld + ProjectedVec(f_x / 2 - pic.wMaxWidth / 2, -pic.wMaxHeight / 2);
-
-#ifndef NOSURFACES					
-				Blit(pic.pic, drawCoordsBldShp.x, drawCoordsBldShp.y);
-#else
-				BlitPicHalfTransp(ddsd.lpSurface, drawCoordsBldShp.x, drawCoordsBldShp.y, r.left, r.top, ddsd.lPitch, r.right, r.bottom, pic, &colorref_conv[c]);
-#endif
+				BlitPicHalfTransp(ctx.scene, drawCoordsBldShp.x, drawCoordsBldShp.y, r, pic, &colorref_conv[c]);
 			}
 		}
 
@@ -7923,10 +5940,6 @@ void CIsoView::DrawMapObjectsCell(const MapCoords& mapCoords, const FIELDDATA& m
 
 		CString lpPicFile = GetCachedUnitPictureFilename(obj.type, atoi(obj.direction) / 32);
 
-#ifndef NOSURFACES
-		DrawCell(drawCoords.x, drawCoords.y, 1, 1, c);
-#endif
-
 		PICDATA p = pics[lpPicFile];
 
 		if (p.pic == NULL || lpPicFile.GetLength() == 0)
@@ -7941,11 +5954,6 @@ void CIsoView::DrawMapObjectsCell(const MapCoords& mapCoords, const FIELDDATA& m
 
 			if (p.pic == NULL)
 			{
-#ifndef NOSURFACES
-				Blit(pics["TANK"].pic, drawCoords.x, drawCoords.y);
-				// TextOut(drawx+f_x/4,drawy+f_y/4, obj.type,c);
-				m_texts_to_render.push_back({ obj.type, drawCoords.x + f_x / 4, drawCoords.y + f_y / 4, m_color_converter->GetColor(c)});
-#endif
 				missingimages[obj.type] = TRUE;
 			}
 		}
@@ -7956,11 +5964,7 @@ void CIsoView::DrawMapObjectsCell(const MapCoords& mapCoords, const FIELDDATA& m
 				(p.bType == PICDATA_TYPE_SHP) ? ProjectedVec(f_x / 2 - (p.wMaxWidth / 2), f_y / 2 - (p.wMaxHeight / 2)) : ProjectedVec(f_x / 2, f_y / 2) + p.drawOffset();
 			auto drawCoordsUnit = drawCoords + drawCoordsOffset;
 
-#ifndef NOSURFACES
-			Blit(p.pic, drawCoordsUnit.x, drawCoordsUnit.y);
-#else
-			BlitPic(ddsd.lpSurface, drawCoordsUnit.x, drawCoordsUnit.y, r.left, r.top, ddsd.lPitch, r.right, r.bottom, p, &colorref_conv[c]);
-#endif
+			BlitPic(ctx.scene, drawCoordsUnit.x, drawCoordsUnit.y, r, p, &colorref_conv[c]);
 		}
 	}
 	if (m.aircraft != -1)
@@ -7974,10 +5978,6 @@ void CIsoView::DrawMapObjectsCell(const MapCoords& mapCoords, const FIELDDATA& m
 
 
 		CString lpPicFile = GetCachedUnitPictureFilename(obj.type, atoi(obj.direction) / 32);
-
-#ifndef NOSURFACES
-		DrawCell(drawCoords.x, drawCoords.y, 1, 1, c);
-#endif
 
 		PICDATA p = pics[lpPicFile];
 
@@ -7993,11 +5993,6 @@ void CIsoView::DrawMapObjectsCell(const MapCoords& mapCoords, const FIELDDATA& m
 
 			if (p.pic == NULL)
 			{
-#ifndef NOSURFACES
-				Blit(pics["TANK"].pic, drawCoords.x, drawCoords.y);
-				//TextOut(drawx+f_x/4,drawy+f_y/4, obj.type,c);
-				m_texts_to_render.push_back({ obj.type, drawCoords.x + f_x / 4, drawCoords.y + f_y / 4, m_color_converter->GetColor(c) });
-#endif
 				missingimages[obj.type] = TRUE;
 			}
 		}
@@ -8008,11 +6003,7 @@ void CIsoView::DrawMapObjectsCell(const MapCoords& mapCoords, const FIELDDATA& m
 				(p.bType == PICDATA_TYPE_SHP) ? ProjectedVec(f_x / 2 - (p.wMaxWidth / 2), f_y / 2 - (p.wMaxHeight / 2)) : ProjectedVec(f_x / 2, f_y / 2) + p.drawOffset();
 			auto drawCoordsAir = drawCoords + drawCoordsOffset;
 
-#ifndef NOSURFACES
-			Blit(p.pic, drawCoordsAir.x, drawCoordsAir.y);
-#else
-			BlitPic(ddsd.lpSurface, drawCoordsAir.x, drawCoordsAir.y, r.left, r.top, ddsd.lPitch, r.right, r.bottom, p, &colorref_conv[c]);
-#endif
+			BlitPic(ctx.scene, drawCoordsAir.x, drawCoordsAir.y, r, p, &colorref_conv[c]);
 		}
 	}
 	int ic;
@@ -8021,25 +6012,14 @@ void CIsoView::DrawMapObjectsCell(const MapCoords& mapCoords, const FIELDDATA& m
 		{
 			last_succeeded_operation = 10103;
 
-			//errstream << "GetInfantryData()" << endl;
-			//errstream.flush();
-
 			INFANTRY obj;
 			Map->GetInfantryData(m.infantry[ic], &obj);
-
-			//errstream << "Done " << (LPCSTR)obj.type << endl;
-			//errstream.flush();
-
 
 			COLORREF c = GetColor(obj.house);
 
 					
 			int dir = (7 - atoi(obj.direction) / 32) % 8;
 			CString lpPicFile = GetCachedUnitPictureFilename(obj.type, dir);
-
-#ifndef NOSURFACES
-			DrawCell(drawCoords.x, drawCoords.y, 1, 1, c);
-#endif
 
 			static const ProjectedVec subPosLookup[5] = { ProjectedVec(0, -f_y / 4), ProjectedVec(f_x / 4 , 0), ProjectedVec(-f_x / 4, 0), ProjectedVec(0, f_y / 4), ProjectedVec()};
 			auto drawCoordsInf = drawCoords + subPosLookup[ic > 4 ? 4 : ic];
@@ -8058,11 +6038,6 @@ void CIsoView::DrawMapObjectsCell(const MapCoords& mapCoords, const FIELDDATA& m
 
 				if (p.pic == NULL)
 				{
-#ifndef NOSURFACES
-					Blit(pics["MAN"].pic, drawCoordsInf.x, drawCoordsInf.y);
-					// TextOut(drawx+f_x/4,drawy+f_y/4, obj.type,c);
-					m_texts_to_render.push_back({ obj.type, drawCoordsInf.x + f_x / 4, drawCoordsInf.y + f_y / 4, RGB(0,0,0) });
-#endif
 					missingimages[obj.type] = TRUE;
 				}
 			}
@@ -8073,11 +6048,7 @@ void CIsoView::DrawMapObjectsCell(const MapCoords& mapCoords, const FIELDDATA& m
 			{
 				auto drawCoordsInfShp = drawCoordsInf + ProjectedVec(f_x / 2 - (p.wMaxWidth / 2), f_y / 2 - (p.wMaxHeight / 2));
 
-#ifndef NOSURFACES
-				Blit(p.pic, drawCoordsInfShp.x, drawCoordsInfShp.y, p.wWidth, p.wHeight);
-#else
-				BlitPic(ddsd.lpSurface, drawCoordsInfShp.x, drawCoordsInfShp.y, r.left, r.top, ddsd.lPitch, r.right, r.bottom, p, &colorref_conv[c]);
-#endif
+				BlitPic(ctx.scene, drawCoordsInfShp.x, drawCoordsInfShp.y, r, p, &colorref_conv[c]);
 
 			}
 
@@ -8097,8 +6068,6 @@ void CIsoView::DrawMapObjectsCell(const MapCoords& mapCoords, const FIELDDATA& m
 			pic = treeinfo[id].pic;
 		}
 
-		//CString lpPicFile=GetUnitPictureFilename(type, 0);				
-
 		if (pic.pic == NULL)
 		{
 			CString type;
@@ -8113,25 +6082,16 @@ void CIsoView::DrawMapObjectsCell(const MapCoords& mapCoords, const FIELDDATA& m
 			}
 			if (pic.pic == NULL)
 			{
-#ifndef NOSURFACES
-				Blit(pics["TREE"].pic, drawCoords.x, drawCoords.y - 19);
-#endif
 				missingimages[type] = TRUE;
 			}
 		}
 
-		if (pic.pic);
+		if (pic.pic)
 		{
 
 			auto drawCoordsTerrain = drawCoords + ProjectedVec(f_x / 2 - (pic.wMaxWidth / 2), f_y / 2 - 3 - (pic.wMaxHeight / 2));
 
-#ifndef NOSURFACES
-			Blit(pic.pic, drawCoordsTerrain.x, drawCoordsTerrain.y);
-#else
-			BlitPic(ddsd.lpSurface, drawCoordsTerrain.x, drawCoordsTerrain.y, r.left, r.top, ddsd.lPitch, r.right, r.bottom, pic);
-
-#endif
-
+			BlitPic(ctx.scene, drawCoordsTerrain.x, drawCoordsTerrain.y, r, pic);
 
 		}
 
@@ -8167,9 +6127,6 @@ void CIsoView::DrawMapObjectsCell(const MapCoords& mapCoords, const FIELDDATA& m
 			}
 			if (pic.pic == NULL)
 			{
-#ifndef NOSURFACES
-				// Blit(pics["TREE"].pic,drawCoords.x,drawCoords.y-19);
-#endif
 				missingimages[type] = TRUE;
 			}
 		}
@@ -8178,13 +6135,7 @@ void CIsoView::DrawMapObjectsCell(const MapCoords& mapCoords, const FIELDDATA& m
 		{
 			auto drawCoordsSmudge = drawCoords + ProjectedVec(f_x / 2 - (pic.wMaxWidth / 2), /*f_y / 2 - 3*/ - (pic.wMaxHeight / 2));
 
-#ifndef NOSURFACES
-			Blit(pic.pic, drawCoordsSmudge.x, drawCoordsSmudge.y);
-#else
-			BlitPic(ddsd.lpSurface, drawCoordsSmudge.x, drawCoordsSmudge.y, r.left, r.top, ddsd.lPitch, r.right, r.bottom, pic);
-
-#endif
-
+			BlitPic(ctx.scene, drawCoordsSmudge.x, drawCoordsSmudge.y, r, pic);
 
 		}
 
@@ -8231,423 +6182,20 @@ void CIsoView::DrawMapObjectsCell(const MapCoords& mapCoords, const FIELDDATA& m
 }
 
 
-bool CIsoView::DrawMapPan(int left, int right, int top, int bottom, DWORD MM_heightstart, BOOL bMarbleHeight)
-{
-	if (!m_lastFrameValid || lpdsTemp == nullptr || bCancelDraw)
-		return false;
-
-	const size_t picsCountAtFrameStart = pics.size();
-
-	const ProjectedVec delta = m_viewOffset - m_lastViewOffset;
-	if (delta.x == 0 && delta.y == 0)
-		return true;  // nothing moved, caller considers the frame done
-
-	RECT r = GetScaledDisplayRect();
-	const int windowWidth = r.right - r.left;
-	const int windowHeight = r.bottom - r.top;
-
-	// the already drawn content shifts by the negative delta; for large jumps a full redraw is cheaper/cleaner
-	const int sx = -delta.x;
-	const int sy = -delta.y;
-	if (abs(sx) > windowWidth / 2 || abs(sy) > windowHeight / 2)
-		return false;
-
-	SurfaceLocker locker(lpdsTemp);
-	DDSURFACEDESC2* desc = locker.ensure_locked();
-	if (!desc || desc->lpSurface == nullptr)
-		return false;
-
-	BYTE* const surface = static_cast<BYTE*>(desc->lpSurface);
-	const int pitch = desc->lPitch;
-	const int surfWidth = static_cast<int>(desc->dwWidth);
-	const int surfHeight = static_cast<int>(desc->dwHeight);
-	if (pitch <= 0 || surfWidth <= 0 || surfHeight <= 0)
-		return false;
-
-	// Clamp the window rect to the surface. The window can stick out of the
-	// screen (maximized windows report negative coordinates for their
-	// invisible borders, and a window dragged to a screen edge can extend
-	// past the screen) - every direct surface access below must stay inside
-	// the locked surface, otherwise the pan writes past the buffer and
-	// corrupts memory.
-	RECT rc;
-	rc.left = max(0L, r.left);
-	rc.top = max(0L, r.top);
-	rc.right = min(static_cast<LONG>(surfWidth), r.right);
-	rc.bottom = min(static_cast<LONG>(surfHeight), r.bottom);
-	if (rc.right <= rc.left || rc.bottom <= rc.top)
-		return false;
-	const int copyWidth = rc.right - rc.left;
-
-	// shift the existing scene (all accesses clamped to the surface bounds)
-	if (sy >= 0)
-	{
-		for (int y = rc.bottom - 1; y >= rc.top; --y)
-		{
-			const int dy = y + sy;
-			if (dy < 0 || dy >= surfHeight) continue;
-
-			int dx = rc.left + sx;
-			int sx0 = rc.left;
-			int len = copyWidth;
-			if (dx < 0) { sx0 -= dx; len += dx; dx = 0; }
-			if (dx + len > surfWidth) len = surfWidth - dx;
-			if (len <= 0) continue;
-
-			BYTE* dst = surface + dy * pitch + dx * bpp;
-			BYTE* src = surface + y * pitch + sx0 * bpp;
-			memmove(dst, src, static_cast<size_t>(len) * bpp);
-		}
-	}
-	else
-	{
-		for (int y = rc.top; y < rc.bottom; ++y)
-		{
-			const int dy = y + sy;
-			if (dy < 0 || dy >= surfHeight) continue;
-
-			int dx = rc.left + sx;
-			int sx0 = rc.left;
-			int len = copyWidth;
-			if (dx < 0) { sx0 -= dx; len += dx; dx = 0; }
-			if (dx + len > surfWidth) len = surfWidth - dx;
-			if (len <= 0) continue;
-
-			BYTE* dst = surface + dy * pitch + dx * bpp;
-			BYTE* src = surface + y * pitch + sx0 * bpp;
-			memmove(dst, src, static_cast<size_t>(len) * bpp);
-		}
-	}
-
-	// clear the newly exposed L-shaped region with the background color
-	// (clamped to the surface)
-	auto fillRectWhite = [&](int x0, int y0, int x1, int y1)
-	{
-		x0 = max(0, x0);
-		y0 = max(0, y0);
-		x1 = min(surfWidth, x1);
-		y1 = min(surfHeight, y1);		if (x1 <= x0 || y1 <= y0) return;
-		if (bpp == 4)
-		{
-			for (int y = y0; y < y1; ++y)
-				memset(surface + y * pitch + x0 * bpp, 0xFF, (x1 - x0) * bpp);
-		}
-		else
-		{
-			const int white = m_color_converter->GetColor(RGB(255, 255, 255));
-			for (int y = y0; y < y1; ++y)
-				for (int x = x0; x < x1; ++x)
-					memcpy(surface + y * pitch + x * bpp, &white, bpp);
-		}
-	};
-
-	if (sx > 0) fillRectWhite(rc.left, rc.top, rc.left + sx, rc.bottom);
-	else if (sx < 0) fillRectWhite(rc.right + sx, rc.top, rc.right, rc.bottom);
-	if (sy > 0) fillRectWhite(rc.left, rc.top, rc.right, rc.top + sy);
-	else if (sy < 0) fillRectWhite(rc.left, rc.bottom + sy, rc.right, rc.bottom);
-
-	// exposed strip bands (in surface coordinates, clamped to the surface)
-	RECT stripX = { rc.left, rc.top, rc.left, rc.bottom };
-	if (sx > 0) { stripX.left = rc.left; stripX.right = min(rc.right, static_cast<LONG>(rc.left + sx)); }
-	else if (sx < 0) { stripX.left = max(rc.left, static_cast<LONG>(rc.right + sx)); stripX.right = rc.right; }
-
-	RECT stripY = { rc.left, rc.top, rc.right, rc.top };
-	if (sy > 0) { stripY.top = rc.top; stripY.bottom = min(rc.bottom, static_cast<LONG>(rc.top + sy)); }
-	else if (sy < 0) { stripY.top = max(rc.top, static_cast<LONG>(rc.bottom + sy)); stripY.bottom = rc.bottom; }
-
-	// margin around the exposed region so that tall sprites crossing the border get redrawn too
-	const int marginX = 8 * f_x;
-	const int marginY = 8 * f_y;
-	RECT stripXExp = stripX;
-	if (stripXExp.left < stripXExp.right)
-	{
-		stripXExp.left = max(rc.left, stripXExp.left - marginX);
-		stripXExp.right = min(rc.right, stripXExp.right + marginX);
-	}
-	RECT stripYExp = stripY;
-	if (stripYExp.top < stripYExp.bottom)
-	{
-		stripYExp.top = max(rc.top, stripYExp.top - marginY);
-		stripYExp.bottom = min(rc.bottom, stripYExp.bottom + marginY);
-	}
-
-	const DrawMapCellContext ctx = { *desc, rc, MM_heightstart, bMarbleHeight, true };
-	const DrawMapCellContext terrainStripXCtx = { *desc, stripX, MM_heightstart, bMarbleHeight, true };
-	const DrawMapCellContext terrainStripYCtx = { *desc, stripY, MM_heightstart, bMarbleHeight, true };
-
-	const int mapwidth = Map->GetWidth();
-	const int mapheight = Map->GetHeight();
-
-	auto cellInBounds = [&](int u, int v)
-	{
-		return !(u < 1 || v < 1 || u + v < mapwidth + 1 || u + v > mapwidth + mapheight * 2 || (v + 1 > mapwidth && u - 1 < v - mapwidth) || (u + 1 > mapwidth && v + mapwidth - 1 < u));
-	};
-
-	auto overlapsBand = [](const RECT& band, int x0, int y0, int x1, int y1)
-	{
-		if (band.left >= band.right || band.top >= band.bottom) return false;
-		return x0 < band.right && x1 > band.left && y0 < band.bottom && y1 > band.top;
-	};
-
-	auto overlapsStrip = [&](int x0, int y0, int x1, int y1, const RECT& bandA, const RECT& bandB)
-	{
-		return overlapsBand(bandA, x0, y0, x1, y1) || overlapsBand(bandB, x0, y0, x1, y1);
-	};
-
-	// Terrain artwork is often much taller and wider than its logical cell.
-	// Use the real subtile bitmap bounds, otherwise the owner cell can be outside
-	// the exposed band while its cliff/shore pixels still need to be filled.
-	auto getTerrainBounds = [&](const FIELDDATA& field, const ProjectedCoords& drawCoords)
-	{
-		RECT bounds = { drawCoords.x, drawCoords.y, drawCoords.x, drawCoords.y };
-		DWORD ground = field.wGround == 0xFFFF ? 0 : field.wGround;
-		if (ground >= *tiledata_count)
-			return bounds;
-		BYTE subTile = field.bSubTile;
-
-		if (theApp.m_Options.bMarbleMadness)
-		{
-			if ((*tiledata)[ground].wMarbleGround != 0xFFFF)
-				ground = (*tiledata)[ground].wMarbleGround;
-			else if (bMarbleHeight)
-			{
-				ground = MM_heightstart + field.bHeight;
-				subTile = 0;
-			}
-		}
-
-		if (ground >= *tiledata_count)
-			return bounds;
-
-		TILEDATA* tile = &(*tiledata)[ground];
-		if (tile->bReplacementCount && field.bRNDImage > 0)
-		{
-			const int replacement = min<int>(field.bRNDImage, tile->bReplacementCount) - 1;
-			tile = &tile->lpReplacements[replacement];
-		}
-		if (subTile >= tile->wTileCount || tile->tiles[subTile].pic == nullptr)
-			return bounds;
-
-		const SUBTILE& subtile = tile->tiles[subTile];
-		const auto imagePosition = drawCoords + subtile.drawOffset();
-		bounds.left = imagePosition.x;
-		bounds.top = imagePosition.y;
-		bounds.right = imagePosition.x + subtile.wWidth;
-		bounds.bottom = imagePosition.y + subtile.wHeight;
-		return bounds;
-	};
-
-	// move the already collected texts/waypoints/celltags along with the map content
-	for (auto& t : m_texts_to_render)
-	{
-		if (!t.fixedScreenPos)
-		{
-			t.drawx -= delta.x;
-			t.drawy -= delta.y;
-		}
-	}
-	m_texts_to_render.erase(
-		std::remove_if(m_texts_to_render.begin(), m_texts_to_render.end(), [&](const TextToRender& t)
-			{
-				return !t.fixedScreenPos && (t.drawx < r.left - 512 || t.drawy < r.top - 512 || t.drawx > r.right + 512 || t.drawy > r.bottom + 512);
-			}),
-		m_texts_to_render.end());
-
-	for (auto& w : m_waypoints_to_render)
-	{
-		w.drawx -= delta.x;
-		w.drawy -= delta.y;
-	}
-	m_waypoints_to_render.erase(
-		std::remove_if(m_waypoints_to_render.begin(), m_waypoints_to_render.end(), [&](const WaypointToRender& w)
-			{
-				return w.drawx < r.left - 512 || w.drawy < r.top - 512 || w.drawx > r.right + 512 || w.drawy > r.bottom + 512;
-			}),
-		m_waypoints_to_render.end());
-
-	for (auto& c : m_celltags_to_render)
-	{
-		c.x -= delta.x;
-		c.y -= delta.y;
-	}
-	m_celltags_to_render.erase(
-		std::remove_if(m_celltags_to_render.begin(), m_celltags_to_render.end(), [&](const ProjectedCoords& c)
-			{
-				return c.x < r.left - 512 || c.y < r.top - 512 || c.x > r.right + 512 || c.y > r.bottom + 512;
-			}),
-		m_celltags_to_render.end());
-
-	// pass 1: terrain of the newly exposed cells
-	for (int u = left; u < right; ++u)
-	{
-		for (int v = top; v < bottom; ++v)
-		{
-			if (!cellInBounds(u, v)) continue;
-
-			const MapCoords mapCoords(u, v);
-			const FIELDDATA& m = *Map->GetFielddataAt(mapCoords);
-			const auto drawCoords = GetRenderTargetCoordinates(mapCoords);
-
-			if (!m.bRedrawTerrain)
-			{
-				const RECT terrainBounds = getTerrainBounds(m, drawCoords);
-				if (overlapsBand(stripX, terrainBounds.left, terrainBounds.top, terrainBounds.right, terrainBounds.bottom))
-				{
-					DrawMapTerrainCell(m, drawCoords, terrainStripXCtx);
-				}
-				if (overlapsBand(stripY, terrainBounds.left, terrainBounds.top, terrainBounds.right, terrainBounds.bottom))
-				{
-					DrawMapTerrainCell(m, drawCoords, terrainStripYCtx);
-				}
-			}
-		}
-	}
-
-	// pass 2: cliffs, overlays and objects of the exposed cells plus a margin around them
-	for (int u = left; u < right; ++u)
-	{
-		for (int v = top; v < bottom; ++v)
-		{
-			if (!cellInBounds(u, v)) continue;
-
-			const MapCoords mapCoords(u, v);
-			const FIELDDATA& m = *Map->GetFielddataAt(mapCoords);
-			const auto drawCoords = GetRenderTargetCoordinates(mapCoords);
-			const int x0 = drawCoords.x;
-			const int y0 = drawCoords.y;
-
-			const DWORD dwOrigGround = m.wGround == 0xFFFF ? 0 : m.wGround;
-			const bool objectsNeedRedraw = overlapsStrip(x0, y0, x0 + f_x, y0 + f_y, stripXExp, stripYExp);
-			const RECT terrainBounds = getTerrainBounds(m, drawCoords);
-			const bool terrainNeedsStripX = m.bRedrawTerrain &&
-				overlapsBand(stripX, terrainBounds.left, terrainBounds.top, terrainBounds.right, terrainBounds.bottom);
-			const bool terrainNeedsStripY = m.bRedrawTerrain &&
-				overlapsBand(stripY, terrainBounds.left, terrainBounds.top, terrainBounds.right, terrainBounds.bottom);
-
-			if (!objectsNeedRedraw && !terrainNeedsStripX && !terrainNeedsStripY)
-				continue;
-
-			if (terrainNeedsStripX)
-			{
-				DrawMapTerrainCell(m, drawCoords, terrainStripXCtx);
-			}
-			if (terrainNeedsStripY)
-			{
-				DrawMapTerrainCell(m, drawCoords, terrainStripYCtx);
-			}
-
-			if (objectsNeedRedraw)
-			{
-				DrawMapTerrainAnim(m, drawCoords, ctx, dwOrigGround);
-				DrawMapObjectsCell(mapCoords, m, drawCoords, ctx);
-			}
-		}
-	}
-
-	// tubes may cross the exposed region
-	for (const auto& tube : Map->GetTubes())
-	{
-		DrawTube(*tube, desc);
-	}
-
-	locker.ensure_unlocked();
-
-	// Full redraw, local redraw and incremental pan all use the same explicit
-	// color-key compositor, so a label cannot switch rendering implementations.
-	const bool celltagsCached = CompositeColorKeySurface(
-		lpdsTemp,
-		(LPDIRECTDRAWSURFACE4)pics["CELLTAG"].pic,
-		m_celltags_to_render,
-		0,
-		[](const ProjectedCoords& position) { return position; });
-	const bool waypointsCached = CompositeColorKeySurface(
-		lpdsTemp,
-		(LPDIRECTDRAWSURFACE4)pics["FLAG"].pic,
-		m_waypoints_to_render,
-		0,
-		[](const WaypointToRender& waypoint)
-		{
-			return ProjectedCoords(waypoint.drawx + 1, waypoint.drawy + 1);
-		});
-
-	if (!celltagsCached || !waypointsCached)
-		return false;
-
-	m_celltags_to_render.clear();
-	m_waypoints_to_render.clear();
-
-	// copy the shifted + patched scene to the back buffer
-	if (lpdsBack->Blt(NULL, lpdsTemp, NULL, DDBLT_WAIT, NULL) != DD_OK)
-		return false;
-
-	if (m_cellCursor != MapCoords(-1, -1))
-	{
-		SurfaceLocker lockerBack(lpdsBack);
-		auto backDesc = lockerBack.ensure_locked();
-		if (backDesc)
-			DrawCellCursor(m_cellCursor, *backDesc);
-	}
-
-	if (rscroll && (GetAsyncKeyState(VK_RBUTTON) & 0x8000) != 0)
-	{
-		const auto& sc = pics["SCROLLCURSOR"];
-		const int cursorX = rclick_x * m_viewScale.x + r.left - sc.wWidth / 2;
-		const int cursorY = rclick_y * m_viewScale.y + r.top - sc.wHeight / 2;
-		const std::array<ProjectedCoords, 1> cursorPositions = { ProjectedCoords(cursorX + 1, cursorY + 1) };
-		if (!CompositeColorKeySurface(lpdsBack, (LPDIRECTDRAWSURFACE4)sc.pic, cursorPositions, 0,
-			[](const ProjectedCoords& position) { return position; }))
-		{
-			Blit((LPDIRECTDRAWSURFACE4)sc.pic, cursorX, cursorY);
-		}
-	}
-
-	BlitBackbufferToHighRes();
-	RenderUIOverlay();
-	FlipHighResBuffer();
-	last_succeeded_operation = 10100;
-
-	m_lastViewOffset = m_viewOffset;
-	m_lastFrameValid = m_lastPresentSucceeded;
-
-	if (pics.size() != picsCountAtFrameStart)
-		m_picFileCache.clear();
-
-	return true;
-}
-
-
 void CIsoView::RenderUIOverlay()
 {
+	if (!m_gpuScene || !m_gpuScene->IsActive())
+		return;
+
 	if (!m_textDefault)
 		updateFontScaled();
 
-	LPDIRECTDRAWSURFACE4 dds = lpdsBack;
-	bool useHighRes = false;
-	if (m_gpuScene)
-	{
-		useHighRes = theApp.m_Options.bHighResUI && m_viewScale != Vec2<CSProjected, float>(1.0f, 1.0f);
-		RECT screen{}; GetWindowRect(&screen);
-		m_gpuScene->BeginOverlay(screen, useHighRes);
-	}
-	if (!m_gpuScene && m_viewScale != Vec2<CSProjected, float>(1.0f, 1.0f) && lpdsBackHighRes)
-	{
-		dds = lpdsBackHighRes;
-		useHighRes = true;
-	}
+	const bool useHighRes = theApp.m_Options.bHighResUI && m_viewScale != Vec2<CSProjected, float>(1.0f, 1.0f);
+	RECT screen{};
+	GetWindowRect(&screen);
+	m_gpuScene->BeginOverlay(screen, useHighRes);
 
-	SurfaceLocker locker(dds);
-	DDSURFACEDESC2* ddsd = locker.ensure_locked();
-	if (ddsd == nullptr || ddsd->lpSurface == nullptr)
-	{
-		// A screen saver or display-mode transition can invalidate DirectDraw
-		// surfaces between the mouse handler's readiness check and this lock.
-		// Never hand a null pixel pointer to LineDrawer; the invalidation makes
-		// DrawMap run the established full lost-surface recovery path.
-		InvalidateRect(NULL, FALSE);
-		return;
-	}
-
-	LineDrawer d(ddsd->lpSurface, bpp, ddsd->dwWidth, ddsd->dwHeight, ddsd->lPitch);
+	LineDrawer d(*m_gpuScene);
 
 	int lr, lt, ll, lb;
 
@@ -8692,26 +6240,21 @@ void CIsoView::RenderUIOverlay()
 	d.Rectangle(ls_lt.x, ls_lt.y, ls_br.x, ls_br.y, blue);
 	d.Rectangle(ls_lt.x+1, ls_lt.y+1, ls_br.x-1, ls_br.y-1, blue);
 
-	locker.ensure_unlocked();
-	
-	RECT r;
-	GetWindowRect(&r);
-
 	for (const auto& s : m_texts_to_render)
 	{
 		const bool blue = s.color == RGB(0, 0, 255);  // TODO: TextRenderer should support setting the color at render time
 		if (s.fixedScreenPos || !useHighRes)
 		{
 			auto& textRenderer = s.useFont9 ? (blue ? *m_textBlue9 : *m_text9) : (blue ? *m_textBlue : *m_textDefault);
-			textRenderer.RenderText(dds, s.drawx, s.drawy, s.text, s.centered);
+			textRenderer.RenderText(*m_gpuScene, s.drawx, s.drawy, s.text, s.centered);
 		}
 		else
 		{
 			auto& textRenderer = s.useFont9 ? (blue ? *m_textBlue9Scaled : *m_text9Scaled) : (blue ? *m_textBlueScaled : *m_textScaled);
-			textRenderer.RenderText(dds, r.left + (s.drawx - r.left) / m_viewScale.x, r.top + (s.drawy - r.top) / m_viewScale.y, s.text, s.centered);
+			textRenderer.RenderText(*m_gpuScene, screen.left + (s.drawx - screen.left) / m_viewScale.x, screen.top + (s.drawy - screen.top) / m_viewScale.y, s.text, s.centered);
 		}
 	}
-	if (m_gpuScene) m_gpuScene->EndOverlay();
+	m_gpuScene->EndOverlay();
 }
 
 
@@ -8766,7 +6309,6 @@ void CIsoView::OnKillFocus(CWnd* pNewWnd)
 
 		ReleaseCapture();
 		KillTimer(11);
-		m_bPanFastPath = FALSE;
 		ShowCursor(TRUE);
 		rscroll = FALSE;
 		bDoNotAllowScroll = TRUE;

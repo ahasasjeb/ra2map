@@ -290,10 +290,8 @@ void CRTPDlg::OnPaint()
 	memset(colors, 255, pitch*(curheight));
 
 	RGBTRIPLE* pal=palIso;
-#ifdef NOSURFACES
 	if(p->pal==iPalTheater) pal=palTheater;
 	if(p->pal==iPalUnit) pal=palUnit;
-#endif
 
 	int k,l;
 	for(k=0;k<curheight;k++)

@@ -153,18 +153,6 @@ BOOL CFinalSunApp::InitInstance()
 {
 	m_hAccel = LoadAccelerators(this->m_hInstance, MAKEINTRESOURCE(IDR_MAIN));
 
-#ifndef NOSURFACES
-	{
-		HDC hDesktopDC = ::GetDC(::GetDesktopWindow());
-		const int bitsPerPixel = GetDeviceCaps(hDesktopDC, BITSPIXEL);
-		::ReleaseDC(::GetDesktopWindow(), hDesktopDC);
-		if (bitsPerPixel <= 8)
-		{
-			MessageBox(0, "You currently only have 8 bit color mode enabled. This is not recommended. You can continue, but this will cause a significant slowdown while loading graphics, and result in poor graphics quality", "Error", 0);
-			//exit(0);
-		}
-	}
-#else
 	{
 		HDC hDesktopDC = ::GetDC(::GetDesktopWindow());
 		const int bitsPerPixel = GetDeviceCaps(hDesktopDC, BITSPIXEL);
@@ -175,7 +163,6 @@ BOOL CFinalSunApp::InitInstance()
 			exit(0);
 		}
 	}
-#endif
 
 	// Load application data
 	std::string datafile = AppPath;

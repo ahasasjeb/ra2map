@@ -21,24 +21,16 @@
 #include "StdAfx.h"
 #include "LineDrawer.h"
 #include "VulkanScene.h"
-#include <cassert>
-#include <memory>
 
-static int ModLookup[] = {
-	1,
-	2,
-	3,
-	4
-};
+namespace
+{
+	constexpr int ModLookup[] = { 1, 2, 3, 4 };
+}
 
-LineDrawer::LineDrawer(void* dest, int bytes_per_pixel, int width, int height, int pitch):
-	m_dest(dest),
-	m_bytes_per_pixel(bytes_per_pixel),
-	m_width(width),
-	m_height(height),
-	m_pitch(pitch),
-	m_last_x(0),
-	m_last_y(0)
+LineDrawer::LineDrawer(VulkanScene& scene)
+	: m_scene(scene)
+	, m_last_x(0)
+	, m_last_y(0)
 {
 }
 
@@ -48,28 +40,16 @@ void LineDrawer::MoveTo(int to_x, int to_y)
 	m_last_y = to_y;
 }
 
-void LineDrawer::LineTo(int to_x, int to_y, int color, LineStyle style)
+void LineDrawer::LineTo(int to_x, int to_y, int color, LineStyle style, bool invert)
 {
-	DrawLine(m_last_x, m_last_y, to_x, to_y, color, style);
+	DrawLine(m_last_x, m_last_y, to_x, to_y, color, style, invert);
 }
 
-void LineDrawer::DrawLine(int from_x, int from_y, int to_x, int to_y, int color, LineStyle style)
+void LineDrawer::DrawLine(int from_x, int from_y, int to_x, int to_y, int color, LineStyle style, bool invert)
 {
-	const int w = to_x - from_x;
-	const int h = to_y - from_y;
 	m_last_x = to_x;
 	m_last_y = to_y;
-	if (auto scene = VulkanScene::ForPixels(m_dest))
-	{
-		scene->Line(from_x, from_y, to_x, to_y, color, ModLookup[static_cast<int>(style)], m_width, m_height);
-		return;
-	}
-	if (abs(w) >= abs(h)) {
-		return w >= 0 ? DrawLineImplX(from_x, from_y, to_x, to_y, color, style) : DrawLineImplX(to_x, to_y, from_x, from_y, color, style);
-	}
-	else {
-		return h >= 0 ? DrawLineImplY(from_x, from_y, to_x, to_y, color, style) : DrawLineImplY(to_x, to_y, from_x, from_y, color, style);
-	}
+	m_scene.Line(from_x, from_y, to_x, to_y, static_cast<unsigned int>(color), ModLookup[static_cast<int>(style)], invert);
 }
 
 void LineDrawer::Rectangle(int from_x, int from_y, int to_x, int to_y, int color, LineStyle style)
@@ -79,77 +59,4 @@ void LineDrawer::Rectangle(int from_x, int from_y, int to_x, int to_y, int color
 	LineTo(to_x, to_y, color, style);
 	LineTo(from_x, to_y, color, style);
 	LineTo(from_x, from_y, color, style);
-}
-
-void LineDrawer::SetPixel(char* const dest, const int cur_x, const int cur_y, const int color)
-{
-	if (dest != nullptr && m_bytes_per_pixel > 0 && m_pitch != 0 &&
-		cur_x >= 0 && cur_y >= 0 && cur_x < m_width && cur_y < m_height)
-		memcpy(&dest[cur_x * m_bytes_per_pixel + cur_y * m_pitch], &color, m_bytes_per_pixel);
-}
-
-void LineDrawer::DrawLineImplX(const int from_x, const int from_y, const int to_x, const int to_y, const int color, const LineStyle style)
-{
-    // X major line drawing
-
-	assert (from_x <= to_x);
-	const int w = to_x - from_x;
-	const int h = abs(to_y - from_y);
-	assert (w >= h);
-	const int increment_e = 2 * h;
-	const int increment_ne = 2 * (h - w);
-	const int y_inc = (to_y - from_y) < 0 ? -1 : 1;
-	int d = 2 * h - w;
-	int cur_x = from_x;
-	int cur_y = from_y;
-	const int mod = ModLookup[static_cast<int>(style)];
-
-	char* dest = reinterpret_cast<char*>(m_dest);
-	SetPixel(dest, cur_x, cur_y, color);
-
-	for(; cur_x < to_x; ++cur_x)
-	{
-		if (d < 0) {
-			d += increment_e;
-		}
-		else {
-			d += increment_ne;
-			cur_y += y_inc;
-		}
-		if (mod == 1 || (cur_x - from_x) % mod == 0)
-			SetPixel(dest, cur_x, cur_y, color);
-	}
-}
-
-void LineDrawer::DrawLineImplY(const int from_x, const int from_y, const int to_x, const int to_y, const int color, LineStyle style)
-{
-	// Y major line drawing
-
-	assert(from_y <= to_y);
-	const int w = abs(to_x - from_x);
-	const int h = to_y - from_y;
-	assert(h >= w);
-	const int increment_e = 2 * w;
-	const int increment_ne = 2 * (w - h);
-	const int x_inc = (to_x - from_x) < 0 ? -1 : 1;
-	int d = 2 * w - h;
-	int cur_x = from_x;
-	int cur_y = from_y;
-	const int mod = ModLookup[static_cast<int>(style)];
-
-	char* dest = reinterpret_cast<char*>(m_dest);
-	SetPixel(dest, cur_x, cur_y, color);
-
-	for (; cur_y < to_y; ++cur_y)
-	{
-		if (d < 0) {
-			d += increment_e;
-		}
-		else {
-			d += increment_ne;
-			cur_x += x_inc;
-		}
-		if (mod == 1 || (cur_y - from_y) % mod == 0)
-			SetPixel(dest, cur_x, cur_y, color);
-	}
 }

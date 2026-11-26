@@ -1,35 +1,99 @@
 #include "StdAfx.h"
 #include "VulkanScene.h"
 #include <algorithm>
+#include <atomic>
+#include <climits>
+#include <cmath>
 
-namespace { thread_local VulkanScene* currentScene = nullptr; uint64_t assetGeneration = 1; }
-
-VulkanScene::VulkanScene(rs_vulkan_renderer* renderer, IDirectDrawSurface4* back) : m_renderer(renderer), m_back(back) {}
-VulkanScene::~VulkanScene() { if (currentScene == this) currentScene = nullptr; }
-VulkanScene* VulkanScene::Current() { return currentScene; }
-void VulkanScene::InvalidateAssets() { ++assetGeneration; }
-VulkanScene* VulkanScene::ForPixels(const void* pixels) { return currentScene == pixels ? currentScene : nullptr; }
-bool VulkanScene::IsTarget(IDirectDrawSurface4* surface) const { return m_active && surface == m_back; }
-
-bool VulkanScene::Describe(IDirectDrawSurface4* surface, DDSURFACEDESC2& desc)
+namespace
 {
-	if (!IsTarget(surface)) return false;
-	desc.dwSize = sizeof(desc);
-	surface->GetSurfaceDesc(&desc);
-	desc.lpSurface = this; // token, never dereferenced by software pixel writers
-	return true;
+	std::atomic<uint64_t> assetGeneration{ 1 };
+	std::atomic<uint64_t> nextBitmapId{ 1 };
+
+	bool ClipLineToRect(int& x0, int& y0, int& x1, int& y1, const RECT& clip)
+	{
+		const double minX = static_cast<double>(clip.left);
+		const double minY = static_cast<double>(clip.top);
+		const double maxX = static_cast<double>(clip.right - 1);
+		const double maxY = static_cast<double>(clip.bottom - 1);
+		if (maxX < minX || maxY < minY)
+			return false;
+
+		const double dx = static_cast<double>(x1) - x0;
+		const double dy = static_cast<double>(y1) - y0;
+		double t0 = 0.0;
+		double t1 = 1.0;
+
+		auto clipEdge = [&](double p, double q) -> bool
+		{
+			if (p == 0.0)
+				return q >= 0.0;
+			const double r = q / p;
+			if (p < 0.0)
+			{
+				if (r > t1) return false;
+				if (r > t0) t0 = r;
+			}
+			else
+			{
+				if (r < t0) return false;
+				if (r < t1) t1 = r;
+			}
+			return true;
+		};
+
+		if (!clipEdge(-dx, static_cast<double>(x0) - minX) ||
+			!clipEdge(dx, maxX - static_cast<double>(x0)) ||
+			!clipEdge(-dy, static_cast<double>(y0) - minY) ||
+			!clipEdge(dy, maxY - static_cast<double>(y0)))
+			return false;
+
+		const int nx0 = static_cast<int>(std::lround(x0 + t0 * dx));
+		const int ny0 = static_cast<int>(std::lround(y0 + t0 * dy));
+		const int nx1 = static_cast<int>(std::lround(x0 + t1 * dx));
+		const int ny1 = static_cast<int>(std::lround(y0 + t1 * dy));
+		x0 = nx0;
+		y0 = ny0;
+		x1 = nx1;
+		y1 = ny1;
+		return true;
+	}
+}
+
+uint64_t NextRgbaBitmapId()
+{
+	return nextBitmapId.fetch_add(1, std::memory_order_relaxed);
+}
+
+VulkanScene::VulkanScene(rs_vulkan_renderer* renderer)
+	: m_renderer(renderer)
+{
+}
+
+void VulkanScene::InvalidateAssets()
+{
+	assetGeneration.fetch_add(1, std::memory_order_relaxed);
 }
 
 void VulkanScene::Begin(const RECT& source)
 {
-	if (m_assetGeneration != assetGeneration)
+	const uint64_t currentGen = assetGeneration.load(std::memory_order_relaxed);
+	if (m_assetGeneration != currentGen)
 	{
 		m_failed = rs_vulkan_scene_reset(m_renderer) != RS_OK;
-		m_images.clear(); m_palettes.clear(); m_bitmaps.clear(); m_base.clear(); m_preview.clear();
-		m_nextKey = 0; m_assetGeneration = assetGeneration;
+		m_images.clear();
+		m_palettes.clear();
+		m_bitmaps.clear();
+		m_base.clear();
+		m_preview.clear();
+		m_nextKey = 0;
+		m_assetGeneration = currentGen;
 	}
-	currentScene = this; m_active = true; m_source = source;
-	m_commands.clear(); m_overlayStart = m_overlayEnd = 0;
+	m_active = true;
+	m_source = source;
+	m_screenSpace = false;
+	m_commands.clear();
+	m_overlayStart = m_overlayEnd = 0;
 }
 
 void VulkanScene::DropOverlay()
@@ -39,12 +103,44 @@ void VulkanScene::DropOverlay()
 	m_overlayStart = m_overlayEnd = 0;
 }
 
-void VulkanScene::SaveBase() { DropOverlay(); m_base = m_commands; }
-void VulkanScene::RestoreBase() { m_commands = m_base; m_overlayStart = m_overlayEnd = 0; }
-void VulkanScene::SavePreview() { DropOverlay(); m_preview = m_commands; }
-void VulkanScene::RestorePreview() { if (!m_preview.empty()) m_commands = m_preview; m_overlayStart = m_overlayEnd = 0; }
-void VulkanScene::BeginOverlay(const RECT& screen, bool highRes) { DropOverlay(); m_overlayStart = m_commands.size(); m_screen = screen; m_screenSpace = highRes; }
-void VulkanScene::EndOverlay() { m_overlayEnd = m_commands.size(); m_screenSpace = false; }
+void VulkanScene::SaveBase()
+{
+	DropOverlay();
+	m_base = m_commands;
+}
+
+void VulkanScene::RestoreBase()
+{
+	m_commands = m_base;
+	m_overlayStart = m_overlayEnd = 0;
+}
+
+void VulkanScene::SavePreview()
+{
+	DropOverlay();
+	m_preview = m_commands;
+}
+
+void VulkanScene::RestorePreview()
+{
+	if (!m_preview.empty())
+		m_commands = m_preview;
+	m_overlayStart = m_overlayEnd = 0;
+}
+
+void VulkanScene::BeginOverlay(const RECT& screen, bool highRes)
+{
+	DropOverlay();
+	m_overlayStart = m_commands.size();
+	m_screen = screen;
+	m_screenSpace = highRes;
+}
+
+void VulkanScene::EndOverlay()
+{
+	m_overlayEnd = m_commands.size();
+	m_screenSpace = false;
+}
 
 unsigned int VulkanScene::Upload(const unsigned int* words, size_t count)
 {
@@ -57,7 +153,10 @@ unsigned int VulkanScene::Upload(const unsigned int* words, size_t count)
 void VulkanScene::Indexed(const BYTE* pixels, int width, int height, const short* borders,
 	const BYTE* lighting, const int* palette, const int* remap, bool half, int x, int y, const RECT& clip)
 {
-	if (!pixels || !palette || width <= 0 || height <= 0 || x >= clip.right || y >= clip.bottom || x + width <= clip.left || y + height <= clip.top) return;
+	if (!pixels || !palette || width <= 0 || height <= 0 ||
+		x >= clip.right || y >= clip.bottom || x + width <= clip.left || y + height <= clip.top)
+		return;
+
 	const auto key = std::make_tuple(pixels, width, height, lighting);
 	auto image = m_images.find(key);
 	if (image == m_images.end())
@@ -70,81 +169,152 @@ void VulkanScene::Indexed(const BYTE* pixels, int width, int height, const short
 			for (int col = left; col <= right; ++col)
 			{
 				const size_t i = static_cast<size_t>(row) * width + col;
-				words[i] = pixels[i] | (lighting ? static_cast<unsigned int>(lighting[i]) << 8 : 0)
+				words[i] = pixels[i]
+					| (lighting ? static_cast<unsigned int>(lighting[i]) << 8 : 0)
 					| (((col - left - (row + 1) % 2) & 1) == 0 ? 65536u : 0u);
 			}
 		}
 		image = m_images.emplace(key, Upload(words.data(), words.size())).first;
 	}
+
 	std::array<unsigned int, 256> colors;
-	for (size_t i = 0; i < colors.size(); ++i) colors[i] = palette[i];
+	for (size_t i = 0; i < colors.size(); ++i)
+		colors[i] = palette[i];
 	auto pal = m_palettes.find(colors);
-	if (pal == m_palettes.end()) pal = m_palettes.emplace(colors, Upload(colors.data(), colors.size())).first;
+	if (pal == m_palettes.end())
+		pal = m_palettes.emplace(colors, Upload(colors.data(), colors.size())).first;
+
+	constexpr LONG kMaxCoord = 65536;
 	rs_scene_command cmd{};
-	cmd.rect[0] = x; cmd.rect[1] = y; cmd.rect[2] = width; cmd.rect[3] = height;
-	cmd.clip[0] = clip.left; cmd.clip[1] = clip.top; cmd.clip[2] = clip.right; cmd.clip[3] = clip.bottom;
-	cmd.data[1] = image->second; cmd.data[2] = width; cmd.data[3] = height;
-	cmd.tint[0] = pal->second; cmd.tint[1] = remap ? *remap : 0;
+	cmd.rect[0] = std::clamp(x, -static_cast<int>(kMaxCoord), static_cast<int>(kMaxCoord));
+	cmd.rect[1] = std::clamp(y, -static_cast<int>(kMaxCoord), static_cast<int>(kMaxCoord));
+	cmd.rect[2] = width;
+	cmd.rect[3] = height;
+	cmd.clip[0] = std::clamp(clip.left, -kMaxCoord, kMaxCoord);
+	cmd.clip[1] = std::clamp(clip.top, -kMaxCoord, kMaxCoord);
+	cmd.clip[2] = std::clamp(clip.right, -kMaxCoord, kMaxCoord);
+	cmd.clip[3] = std::clamp(clip.bottom, -kMaxCoord, kMaxCoord);
+	cmd.data[1] = image->second;
+	cmd.data[2] = width;
+	cmd.data[3] = height;
+	cmd.tint[0] = pal->second;
+	cmd.tint[1] = remap ? *remap : 0;
 	cmd.tint[2] = (half ? 1 : 0) | (remap ? 2 : 0) | (lighting ? 4 : 0);
 	m_commands.push_back(cmd);
 }
 
-bool VulkanScene::Bitmap(IDirectDrawSurface4* source, int x, int y, const RECT* sourceRect)
+bool VulkanScene::Bitmap(const RgbaBitmap& source, int x, int y, const RECT* sourceRect)
 {
-	if (!source) return false;
-	auto it = m_bitmaps.find(source);
+	if (source.empty() || source.id == 0)
+		return false;
+
+	auto it = m_bitmaps.find(source.id);
 	if (it == m_bitmaps.end())
 	{
-		DDSURFACEDESC2 desc{}; desc.dwSize = sizeof(desc);
-		if (source->Lock(nullptr, &desc, DDLOCK_WAIT | DDLOCK_READONLY, nullptr) != DD_OK) return false;
-		DDCOLORKEY key{};
-		if (source->GetColorKey(DDCKEY_SRCBLT, &key) != DD_OK && desc.lpSurface)
-            memcpy(&key.dwColorSpaceLowValue, desc.lpSurface, min<DWORD>(4, (desc.ddpfPixelFormat.dwRGBBitCount + 7) / 8));
-		std::vector<unsigned int> words(static_cast<size_t>(desc.dwWidth) * desc.dwHeight);
-		const int bytes = (desc.ddpfPixelFormat.dwRGBBitCount + 7) / 8;
-		const unsigned int mask = desc.ddpfPixelFormat.dwRBitMask | desc.ddpfPixelFormat.dwGBitMask | desc.ddpfPixelFormat.dwBBitMask;
-		for (unsigned int row = 0; row < desc.dwHeight; ++row)
-			for (unsigned int col = 0; col < desc.dwWidth; ++col)
-			{
-				unsigned int color = 0;
-				memcpy(&color, static_cast<const BYTE*>(desc.lpSurface) + row * desc.lPitch + col * bytes, bytes);
-				words[static_cast<size_t>(row) * desc.dwWidth + col] = (color & mask) == (key.dwColorSpaceLowValue & mask) ? 0 : color | 0xff000000u;
-			}
-		source->Unlock(nullptr);
-		it = m_bitmaps.emplace(source, BitmapAsset{ source, Upload(words.data(), words.size()), static_cast<int>(desc.dwWidth), static_cast<int>(desc.dwHeight) }).first;
+		const size_t count = static_cast<size_t>(source.width) * source.height;
+		it = m_bitmaps.emplace(source.id, BitmapAsset{
+			Upload(source.pixels.data(), count),
+			source.width,
+			source.height
+		}).first;
 	}
+
 	const auto& asset = it->second;
-	RECT rect = sourceRect ? *sourceRect : RECT{ 0, 0, asset.width, asset.height };
-	if (rect.left < 0 || rect.top < 0 || rect.right > asset.width || rect.bottom > asset.height) return false;
-	rs_scene_command cmd{};
-	cmd.rect[0] = x; cmd.rect[1] = y; cmd.rect[2] = rect.right - rect.left; cmd.rect[3] = rect.bottom - rect.top;
+	const RECT rect = sourceRect ? *sourceRect : RECT{ 0, 0, asset.width, asset.height };
+	if (rect.left < 0 || rect.top < 0 || rect.right > asset.width || rect.bottom > asset.height ||
+		rect.right <= rect.left || rect.bottom <= rect.top)
+		return false;
+
 	const RECT clip = m_screenSpace ? m_screen : m_source;
-	cmd.clip[0] = clip.left; cmd.clip[1] = clip.top; cmd.clip[2] = clip.right; cmd.clip[3] = clip.bottom;
-	cmd.data[0] = 1; cmd.data[1] = asset.offset; cmd.data[2] = asset.width; cmd.data[3] = asset.height;
-	cmd.extra[0] = rect.left; cmd.extra[1] = rect.top;
-	cmd.extra[2] = m_screenSpace ? 1 : 0;
-	m_commands.push_back(cmd); return true;
+	const int w = rect.right - rect.left;
+	const int h = rect.bottom - rect.top;
+	if (x >= clip.right || y >= clip.bottom || x + w <= clip.left || y + h <= clip.top)
+		return true;
+
+	constexpr LONG kMaxCoord = 65536;
+	rs_scene_command cmd{};
+	cmd.rect[0] = std::clamp(x, -static_cast<int>(kMaxCoord), static_cast<int>(kMaxCoord));
+	cmd.rect[1] = std::clamp(y, -static_cast<int>(kMaxCoord), static_cast<int>(kMaxCoord));
+	cmd.rect[2] = w;
+	cmd.rect[3] = h;
+	cmd.clip[0] = std::clamp(clip.left, -kMaxCoord, kMaxCoord);
+	cmd.clip[1] = std::clamp(clip.top, -kMaxCoord, kMaxCoord);
+	cmd.clip[2] = std::clamp(clip.right, -kMaxCoord, kMaxCoord);
+	cmd.clip[3] = std::clamp(clip.bottom, -kMaxCoord, kMaxCoord);
+	cmd.data[0] = 1;
+	cmd.data[1] = asset.offset;
+	cmd.data[2] = asset.width;
+	cmd.data[3] = asset.height;
+	cmd.extra[0] = rect.left;
+	cmd.extra[1] = rect.top;
+	cmd.extra[2] = m_screenSpace ? 1u : 0u;
+	m_commands.push_back(cmd);
+	return true;
 }
 
-void VulkanScene::Line(int x0, int y0, int x1, int y1, unsigned int color, int period, int width, int height)
+void VulkanScene::Line(int x0, int y0, int x1, int y1, unsigned int color, int period, bool invert)
 {
-	rs_scene_command cmd{};
-	cmd.rect[0] = min(x0, x1); cmd.rect[1] = min(y0, y1);
-	cmd.rect[2] = abs(x1 - x0) + 1; cmd.rect[3] = abs(y1 - y0) + 1;
 	const RECT clip = m_screenSpace ? m_screen : m_source;
-	cmd.clip[0] = max(0L, clip.left); cmd.clip[1] = max(0L, clip.top);
-	cmd.clip[2] = min(static_cast<LONG>(width), clip.right); cmd.clip[3] = min(static_cast<LONG>(height), clip.bottom);
-	cmd.data[0] = 2; cmd.tint[1] = color;
-	cmd.line[0] = x0; cmd.line[1] = y0; cmd.line[2] = x1; cmd.line[3] = y1;
-	cmd.extra[0] = period; cmd.extra[2] = m_screenSpace ? 1 : 0; m_commands.push_back(cmd);
+	if (clip.right <= clip.left || clip.bottom <= clip.top)
+		return;
+
+	constexpr int kSafeCoord = 32768;
+	const auto exceedsShaderRange = [&](int ax, int ay, int bx, int by)
+	{
+		if (std::abs(ax) > kSafeCoord || std::abs(ay) > kSafeCoord ||
+			std::abs(bx) > kSafeCoord || std::abs(by) > kSafeCoord)
+			return true;
+		const long long dx = std::abs(static_cast<long long>(bx) - ax);
+		const long long dy = std::abs(static_cast<long long>(by) - ay);
+		return 2 * dx * dy + max(dx, dy) > INT_MAX;
+	};
+
+	if (max(x0, x1) < clip.left || min(x0, x1) >= clip.right ||
+		max(y0, y1) < clip.top || min(y0, y1) >= clip.bottom)
+		return;
+
+	if (exceedsShaderRange(x0, y0, x1, y1))
+	{
+		if (!ClipLineToRect(x0, y0, x1, y1, clip) || exceedsShaderRange(x0, y0, x1, y1))
+			return;
+	}
+
+	constexpr LONG kMaxCoord = 65536;
+	rs_scene_command cmd{};
+	cmd.rect[0] = min(x0, x1);
+	cmd.rect[1] = min(y0, y1);
+	cmd.rect[2] = abs(x1 - x0) + 1;
+	cmd.rect[3] = abs(y1 - y0) + 1;
+	cmd.clip[0] = std::clamp(clip.left, -kMaxCoord, kMaxCoord);
+	cmd.clip[1] = std::clamp(clip.top, -kMaxCoord, kMaxCoord);
+	cmd.clip[2] = std::clamp(clip.right, -kMaxCoord, kMaxCoord);
+	cmd.clip[3] = std::clamp(clip.bottom, -kMaxCoord, kMaxCoord);
+	cmd.data[0] = 2;
+	cmd.tint[1] = color;
+	cmd.line[0] = x0;
+	cmd.line[1] = y0;
+	cmd.line[2] = x1;
+	cmd.line[3] = y1;
+	cmd.extra[0] = max(1, period);
+	cmd.extra[1] = invert ? 1u : 0u;
+	cmd.extra[2] = m_screenSpace ? 1u : 0u;
+	m_commands.push_back(cmd);
 }
 
 bool VulkanScene::Present(const RECT& source, int width, int height, bool vsync)
 {
-	if (m_failed || width <= 0 || height <= 0) return false;
+	if (m_failed || width <= 0 || height <= 0 || source.right <= source.left || source.bottom <= source.top)
+		return false;
 	const rs_scene_command empty{};
-	return rs_vulkan_scene_present(m_renderer, m_commands.empty() ? &empty : m_commands.data(), m_commands.size(),
-		static_cast<float>(source.left), static_cast<float>(source.top),
-		static_cast<float>(source.right - source.left) / width, static_cast<float>(source.bottom - source.top) / height,
-		width, height, vsync ? 1 : 0) == RS_OK;
+	return rs_vulkan_scene_present(
+		m_renderer,
+		m_commands.empty() ? &empty : m_commands.data(),
+		m_commands.size(),
+		static_cast<float>(source.left),
+		static_cast<float>(source.top),
+		static_cast<float>(source.right - source.left) / width,
+		static_cast<float>(source.bottom - source.top) / height,
+		width,
+		height,
+		vsync ? 1 : 0) == RS_OK;
 }

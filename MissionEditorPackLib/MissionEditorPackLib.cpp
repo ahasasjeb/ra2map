@@ -38,7 +38,6 @@ struct IUnknown;
 #include "tmp_ts_file.h"
 #include <shp_decode.h>
 #include <mix_file.h>
-#include <ddpf_conversion.h>
 #include <vxl_file.h>
 #include <math.h>
 #include <hva_file.h>
@@ -47,7 +46,6 @@ struct IUnknown;
 
 #include <windows.h>
 #include <windowsx.h>
-#include <ddraw.h>
 #include <commctrl.h>
 #include <regex>
 
@@ -65,92 +63,8 @@ DWORD dwMixFileCount = 0;
 
 t_palet ts_palettes[256];
 DWORD dwPalCount = 0;
-DWORD conv_color[256][256];
-DWORD transp_conv_color[256];
-DDPIXELFORMAT cur_pf[256];
-BOOL bFirstConv[256];
-
-HBRUSH hTranspBrush = (HBRUSH)INVALID_HANDLE_VALUE;
-HPEN hTranspPen = (HPEN)INVALID_HANDLE_VALUE;
-
 
 #define MYASSERT(a,b) if(!a){ FSunPackLib::FSPL_EXCEPTION e; e.err_code=b; throw(e); }
-
-
-
-
-
-__forceinline void CreateConvLookUpTable(DDPIXELFORMAT& pf, HTSPALETTE hPalette)
-{
-
-	/*fstream f;
-	f.open("c:\\convtable.log", ios_base::out | ios_base::trunc );
-
-	f << "CreateConvLookUpTable() called" << endl;
-	f.flush();*/
-	if (memcmp(&pf, &cur_pf[hPalette - 1], sizeof(DDPIXELFORMAT)) || bFirstConv[hPalette - 1])
-	{
-		bFirstConv[hPalette - 1] = FALSE;
-		cur_pf[hPalette - 1] = pf;
-
-		/*f << "Setting Conversion" << endl;
-		f.flush();*/
-		Cddpf_conversion conv;
-		conv.set_pf(pf);
-
-		/*f << "Calculating colors" << endl;
-		f.flush();*/
-		int i;
-		for (i = 0;i < 256;i++)
-		{
-			conv_color[hPalette - 1][i] = conv.get_color(ts_palettes[hPalette - 1][i].r, ts_palettes[hPalette - 1][i].g, ts_palettes[hPalette - 1][i].b);
-		}
-		transp_conv_color[hPalette - 1] = conv.get_color(245, 245, 245);
-	}
-
-}
-
-// The GDI fallback is used only when a DirectDraw surface cannot be locked.
-// Render it through one 32-bit DIB transfer instead of making one GDI call per
-// source pixel. DIB pixels are BGR in memory, unlike COLORREF values.
-static void DrawPaletteImageToDC(HDC hDC, const BYTE* image, int width, int height,
-	int imageX, int imageY, int imageWidth, int imageHeight, HTSPALETTE hPalette,
-	bool forceTransparentTopLeft = false)
-{
-	if (hDC == NULL || image == NULL || width <= 0 || height <= 0 ||
-		imageWidth <= 0 || imageHeight <= 0 || hPalette == NULL || hPalette > dwPalCount)
-		return;
-
-	std::vector<DWORD> pixels(static_cast<size_t>(width) * height, 0x00F5F5F5);
-	for (int y = 0; y < height; ++y)
-	{
-		for (int x = 0; x < width; ++x)
-		{
-			if (x < imageX || y < imageY || x >= imageX + imageWidth || y >= imageY + imageHeight)
-				continue;
-
-			const BYTE colorIndex = image[(x - imageX) + (y - imageY) * imageWidth];
-			if (colorIndex == 0)
-				continue;
-
-			const t_palet_entry& color = ts_palettes[hPalette - 1][colorIndex];
-			pixels[x + y * width] = (static_cast<DWORD>(color.r) << 16) |
-				(static_cast<DWORD>(color.g) << 8) | color.b;
-		}
-	}
-	if (forceTransparentTopLeft)
-		pixels.front() = 0x00F5F5F5;
-
-	BITMAPINFO bitmapInfo = {};
-	bitmapInfo.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-	bitmapInfo.bmiHeader.biWidth = width;
-	bitmapInfo.bmiHeader.biHeight = -height; // top-down, matching `pixels`
-	bitmapInfo.bmiHeader.biPlanes = 1;
-	bitmapInfo.bmiHeader.biBitCount = 32;
-	bitmapInfo.bmiHeader.biCompression = BI_RGB;
-	SetDIBitsToDevice(hDC, 0, 0, width, height, 0, 0, 0, height,
-		pixels.data(), &bitmapInfo, DIB_RGB_COLORS);
-}
 
 
 namespace FSunPackLib
@@ -342,43 +256,6 @@ namespace FSunPackLib
 		}
 		return rs_pack5_decode(sp, SourceLength, dp, dp_cap, RS_MAX_PACK_DECODE_SIZE, &out_len) == RS_OK
 			? static_cast<UINT>(out_len) : 0;
-	}
-
-	std::int32_t GetFirstPixelColor(IDirectDrawSurface4* pDDS)
-	{
-		std::int32_t color = 0;
-
-		DDSURFACEDESC2 desc = { 0 };
-		desc.dwSize = sizeof(DDSURFACEDESC2);
-
-		if (pDDS->Lock(nullptr, &desc, DDLOCK_SURFACEMEMORYPTR | DDLOCK_WAIT | DDLOCK_NOSYSLOCK, nullptr) != DD_OK)
-			return color;
-		if (desc.lpSurface == nullptr)
-		{
-			pDDS->Unlock(nullptr);
-			return color;
-		}
-		else
-		{
-			auto bytes_per_pixel = (desc.ddpfPixelFormat.dwRGBBitCount + 7) / 8;
-			memcpy(&color, desc.lpSurface, bytes_per_pixel > 4 ? 4 : bytes_per_pixel);
-			pDDS->Unlock(nullptr);
-
-			return color;
-		}
-
-	}
-
-	HRESULT SetColorKey(IDirectDrawSurface4* pDDS, COLORREF rgb)
-	{
-		DDPIXELFORMAT pf = { 0 };
-		pf.dwSize = sizeof(DDPIXELFORMAT);
-		pDDS->GetPixelFormat(&pf);
-
-		ColorConverter c(pf);
-		auto col = rgb == CLR_INVALID ? GetFirstPixelColor(pDDS) : c.GetColor(rgb);
-		DDCOLORKEY color_key = { static_cast<DWORD>(col), static_cast<DWORD>(col) };
-		return pDDS->SetColorKey(DDCKEY_SRCBLT, &color_key);
 	}
 
 	BOOL XCC_Initialize(BOOL bLoadFromRegistry)
@@ -741,148 +618,6 @@ namespace FSunPackLib
 		return TRUE;
 	}
 
-
-	BOOL LoadSHPImageInSurface(IDirectDraw4* pdd, HTSPALETTE hPalette, int iImageIndex, int iCount, LPDIRECTDRAWSURFACE4* pdds)
-	{
-		RGBTRIPLE rgb_transp;
-		t_shp_ts_image_header imghead;
-		DDSURFACEDESC2          ddsd;
-		BYTE* image;
-
-
-		if (hPalette == NULL || hPalette > dwPalCount) return NULL;
-
-
-		auto& head = cur_shp.header();
-
-		if (head.cx == 0 || head.cy == 0)
-		{
-			return FALSE;
-		}
-
-
-		rgb_transp.rgbtRed = 245;
-		rgb_transp.rgbtGreen = 245;
-		rgb_transp.rgbtBlue = 245;
-
-
-
-		int pic;
-		std::vector<byte> decode_image_buffer;
-		for (pic = 0;pic < iCount;pic++)
-		{
-			if (cur_shp.get_image_header(iImageIndex + pic))
-			{
-				imghead = *(cur_shp.get_image_header(iImageIndex + pic));
-				// if(imghead.offset!=0)
-				{
-
-					ZeroMemory(&ddsd, sizeof(ddsd));
-					ddsd.dwSize = sizeof(DDSURFACEDESC2);
-					ddsd.dwWidth = head.cx;
-					ddsd.dwHeight = head.cy;
-					ddsd.dwFlags = DDSD_CAPS | DDSD_HEIGHT | DDSD_WIDTH /*| DDSD_PIXELFORMAT*/;
-					ddsd.ddsCaps.dwCaps = DDSCAPS_OFFSCREENPLAIN;
-
-					if (pdd->CreateSurface(&ddsd, &pdds[pic], NULL) != DD_OK)
-						return NULL;
-
-					ddsd.dwFlags = DDSD_PITCH;
-					pdds[pic]->GetSurfaceDesc(&ddsd);
-					long pitch = ddsd.lPitch;
-
-					DDPIXELFORMAT pf;
-					memset(&pf, 0, sizeof(DDPIXELFORMAT));
-					pf.dwSize = sizeof(DDPIXELFORMAT);
-
-					pdds[pic]->GetPixelFormat(&pf);
-
-
-					if (cur_shp.is_compressed(iImageIndex + pic))
-					{
-						decode_image_buffer.resize(imghead.cx * imghead.cy);
-						image = decode_image_buffer.data();
-						decode3(cur_shp.get_image(iImageIndex + pic), image, imghead.cx, imghead.cy);
-					}
-					else
-						image = (unsigned char*)cur_shp.get_image(iImageIndex + pic);
-
-
-					if ((pf.dwFlags & DDPF_RGB) && pf.dwRBitMask && pf.dwGBitMask && pf.dwBBitMask)
-					{
-
-						CreateConvLookUpTable(pf, hPalette);
-
-						if (pdds[pic]->Lock(NULL, &ddsd, DDLOCK_SURFACEMEMORYPTR | DDLOCK_WAIT | DDLOCK_NOSYSLOCK, NULL) == DD_OK)
-						{
-
-							BYTE* dest = (BYTE*)ddsd.lpSurface;
-							pitch = ddsd.lPitch;
-
-							int bytesize = (pf.dwRGBBitCount + 1) / 8;
-							if (bytesize < 1) bytesize = 1;
-
-							if (pf.dwRGBBitCount <= 8) bytesize = 1;
-							else if (pf.dwRGBBitCount <= 16) bytesize = 2;
-							else if (pf.dwRGBBitCount <= 24) bytesize = 3;
-							else if (pf.dwRGBBitCount <= 32) bytesize = 4;
-
-							if (dest)
-							{
-								int i, e;
-								for (e = 0; e < head.cy; e++)
-								{
-									BYTE* const destRow = dest + e * pitch;
-									for (i = 0; i < head.cx; i++)
-									{
-										DWORD dwRead = 0xFFFFFFFF;
-
-										if (i >= imghead.x && e >= imghead.y && i < imghead.x + imghead.cx && e < imghead.y + imghead.cy)
-											dwRead = (i - imghead.x) + (e - imghead.y) * imghead.cx;
-
-										if (dwRead != 0xFFFFFFFF && image[dwRead] != 0)
-										{
-											DWORD col = conv_color[hPalette - 1][image[dwRead]];
-											memcpy(destRow + i * bytesize, &col, bytesize);
-										}
-										else
-										{
-											DWORD col = transp_conv_color[hPalette - 1];
-											memcpy(destRow + i * bytesize, &col, bytesize);
-										}
-
-									}
-								}
-							}
-							pdds[pic]->Unlock(NULL);
-						}
-
-					}
-					else
-					{
-						HDC hDC = NULL;
-						HRESULT getDCResult;
-						while ((getDCResult = pdds[pic]->GetDC(&hDC)) == DDERR_WASSTILLDRAWING);
-						if (getDCResult == DD_OK)
-						{
-							DrawPaletteImageToDC(hDC, image, head.cx, head.cy,
-								imghead.x, imghead.y, imghead.cx, imghead.cy, hPalette);
-
-						pdds[pic]->ReleaseDC(hDC);
-						}
-
-					}
-
-					SetColorKey(pdds[pic], -1);
-
-				}
-			}
-		}
-
-		return TRUE;
-
-	}
-
 	BOOL LoadSHPImage(int iImageIndex, std::vector<BYTE>& pic)
 	{
 		t_shp_ts_image_header imghead;
@@ -1056,232 +791,6 @@ namespace FSunPackLib
 			OutputDebugStringA(buf);
 		}
 	}
-
-
-	BOOL LoadTMPImageInSurface(IDirectDraw4* pdd, int iStart, int iCount, LPDIRECTDRAWSURFACE4* pdds, HTSPALETTE hPalette)
-	{
-		last_succeeded_operation = 2100;
-
-
-
-		DDSURFACEDESC2          ddsd;
-		RGBTRIPLE rgb_transp;
-
-		if (hPalette == NULL || hPalette > dwPalCount) return NULL;
-
-		rgb_transp.rgbtRed = 245;
-		rgb_transp.rgbtGreen = 245;
-		rgb_transp.rgbtBlue = 245;
-
-
-		int pic;
-		for (pic = 0;pic < iCount;pic++)
-		{
-			pdds[pic] = NULL;
-			int cx, cy;
-			int z = pic + iStart;
-
-
-			if (!cur_tmp.get_index()[z])
-			{
-
-				pdds[pic] = NULL;
-			}
-			else
-			{
-
-
-
-				XCC_GetTMPTileInfo(z, NULL, &cx, &cy, NULL, NULL, NULL, NULL, NULL);
-
-
-				if (cx > 0 && cy > 0)
-				{
-					//const byte* r = cur_tmp.get_image(iStart+pic); //new byte[cx * cy];
-					// byte transp=r[0];
-					ZeroMemory(&ddsd, sizeof(ddsd));
-					ddsd.dwSize = sizeof(DDSURFACEDESC2);
-					ddsd.dwWidth = cx;
-					ddsd.dwHeight = cy;
-					ddsd.dwFlags = DDSD_CAPS | DDSD_HEIGHT | DDSD_WIDTH /*| DDSD_PIXELFORMAT*/;
-					ddsd.ddsCaps.dwCaps = DDSCAPS_OFFSCREENPLAIN | DDSCAPS_SYSTEMMEMORY;
-
-					byte* image = NULL;
-					if (pdd->CreateSurface(&ddsd, &pdds[pic], NULL) == DD_OK)
-					{
-
-
-						last_succeeded_operation = 2101;
-
-						DDPIXELFORMAT pf;
-						memset(&pf, 0, sizeof(DDPIXELFORMAT));
-						pf.dwSize = sizeof(DDPIXELFORMAT);
-						pdds[pic]->GetPixelFormat(&pf);
-
-						BOOL bFastLoaded = FALSE;
-
-						if ((pf.dwFlags & DDPF_RGB) && pf.dwRBitMask && pf.dwGBitMask && pf.dwBBitMask)
-						{
-
-							last_succeeded_operation = 21011;
-
-							CreateConvLookUpTable(pf, hPalette);
-							int i, e;
-
-
-
-
-							image = new byte[cx * cy];
-							tmp_ts_draw(cur_tmp, image, iStart + pic);
-							int bytesize = 1;//(pf.dwRGBBitCount+1)/8;
-							if (pf.dwRGBBitCount <= 8) bytesize = 1;
-							else if (pf.dwRGBBitCount <= 16) bytesize = 2;
-							else if (pf.dwRGBBitCount <= 24) bytesize = 3;
-							else if (pf.dwRGBBitCount <= 32) bytesize = 4;
-							if (bytesize < 1) bytesize = 1;
-
-							last_succeeded_operation = 21012;
-
-							memset(&ddsd, 0, sizeof(DDSURFACEDESC2));
-							ddsd.dwSize = sizeof(DDSURFACEDESC2);
-							ddsd.dwFlags = DDSD_PITCH | DDSD_LPSURFACE;
-
-							RECT lockr;
-							lockr.left = 0;
-							lockr.top = 0;
-							lockr.right = cx;
-							lockr.bottom = cy;
-
-							if (pdds[pic]->Lock(&lockr, &ddsd, DDLOCK_SURFACEMEMORYPTR | DDLOCK_WAIT | DDLOCK_NOSYSLOCK, NULL) == DD_OK)
-							{
-								last_succeeded_operation = 21013;
-
-
-								BYTE* dest = (BYTE*)ddsd.lpSurface;
-								int pitch = ddsd.lPitch;
-
-
-								if (ddsd.dwFlags & DDSD_PIXELFORMAT)
-								{
-
-
-									// pixel format overwritten
-									CreateConvLookUpTable(ddsd.ddpfPixelFormat, hPalette);
-
-									bytesize = 1;//(pf.dwRGBBitCount+1)/8;
-									if (ddsd.ddpfPixelFormat.dwRGBBitCount <= 8) bytesize = 1;
-									else if (ddsd.ddpfPixelFormat.dwRGBBitCount <= 16) bytesize = 2;
-									else if (ddsd.ddpfPixelFormat.dwRGBBitCount <= 24) bytesize = 3;
-									else if (ddsd.ddpfPixelFormat.dwRGBBitCount <= 32) bytesize = 4;
-									if (bytesize < 1) bytesize = 1;
-
-
-								}
-
-								if (ddsd.dwFlags & DDSD_LINEARSIZE)
-								{
-									pitch = ddsd.dwLinearSize / cy;
-								}
-
-
-
-								memset(&ddsd, 0, sizeof(DDSURFACEDESC2));
-								ddsd.dwSize = sizeof(DDSURFACEDESC2);
-								ddsd.dwFlags = DDSD_WIDTH | DDSD_HEIGHT;
-
-								pdds[pic]->GetSurfaceDesc(&ddsd);
-
-
-
-								last_succeeded_operation = 21016;
-
-								const size_t rowBytes = static_cast<size_t>(cx) * bytesize;
-								if (dest && pitch >= 0 && static_cast<size_t>(pitch) >= rowBytes)
-								{
-
-									bFastLoaded = TRUE;
-
-									for (e = 0; e < cy; e++)
-									{
-										BYTE* const destRow = dest + e * pitch;
-										for (i = 0; i < cx; i++)
-										{
-											DWORD dwRead = i + e * cx;
-
-											if (image[dwRead] != 0)
-											{
-												DWORD col = conv_color[hPalette - 1][image[dwRead]];
-												memcpy(destRow + i * bytesize, &col, bytesize);
-											}
-											else
-											{
-												DWORD col = transp_conv_color[hPalette - 1];
-												memcpy(destRow + i * bytesize, &col, bytesize);
-											}
-
-										}
-									}
-
-								}
-
-
-
-
-								pdds[pic]->Unlock(&lockr);
-
-
-
-								last_succeeded_operation = 21014;
-
-
-
-							}
-
-							last_succeeded_operation = 21015;
-
-							DDCOLORKEY              ddck;
-							ddck.dwColorSpaceLowValue = transp_conv_color[hPalette - 1];
-							ddck.dwColorSpaceHighValue = ddck.dwColorSpaceLowValue;
-							pdds[pic]->SetColorKey(DDCKEY_SRCBLT, &ddck);
-						}
-
-					if (!bFastLoaded) // use GDI
-					{
-						// Reuse the buffer the fast path already allocated and
-						// drew into. Only allocate when the fast path never ran
-						// (image == NULL). The previous unconditional new[]
-						// overwrote `image` and leaked the fast-path allocation
-						// whenever the fallback was taken.
-						if (!image)
-						{
-							image = new byte[cx * cy];
-							tmp_ts_draw(cur_tmp, image, iStart + pic);
-						}
-						HDC hDC = NULL;
-						HRESULT getDCResult;
-						while ((getDCResult = pdds[pic]->GetDC(&hDC)) == DDERR_WASSTILLDRAWING) {};
-						if (getDCResult == DD_OK)
-						{
-							DrawPaletteImageToDC(hDC, image, cx, cy, 0, 0, cx, cy, hPalette);
-
-							pdds[pic]->ReleaseDC(hDC);
-							SetColorKey(pdds[pic], RGB(245, 245, 245));
-						}
-
-						}
-					}
-
-					if (image) delete[] image;
-					image = NULL;
-
-
-				}
-			}
-		}
-
-		return TRUE;
-	}
-
 
 	BOOL LoadTMPImage(int iStart, int iCount, BYTE** lpTileArray)
 	{
@@ -1561,236 +1070,6 @@ namespace FSunPackLib
 
 	VoxelNormalTable emptyNormalTable;
 
-	BOOL LoadVXLImageInSurface(const VoxelNormalTables& normalTables, Vec3f lightDirection, IDirectDraw4* pdd, int iStart, int iCount, const Vec3f rotation, const Vec3f postHVAOffset, LPDIRECTDRAWSURFACE4* pdds, HTSPALETTE hPalette, int* lpXCenter, int* lpYCenter, int ZAdjust, int* lpXCenterZMax, int* lpYCenterZMax, int i3dCenterX, int i3dCenterY)
-	{
-		if (hPalette == NULL || hPalette > dwPalCount) return NULL;
-
-		last_succeeded_operation = 1;
-
-		int i;
-		int cx_max = 0, cy_max = 0, cz_max = 0;
-
-		Vec3f minCoords(10000, 10000, 10000);
-		Vec3f maxCoords(-10000, -10000, -10000);
-
-	// Calculate projected bounding box for the virtual render target
-	int iBodySection = -1;
-	int iLargestSection = 0;
-	int iLargestVolume = 0;
-	for (i = 0; i < cur_vxl.get_c_section_tailers(); i++)
-	{
-		const auto& header = cur_vxl.get_section_header(i);
-		const auto& tailer = cur_vxl.get_section_tailer(i);
-		Vec3f secMinVec, secMaxVec;
-		GetVXLSectionBounds(i, rotation, postHVAOffset, secMinVec, secMaxVec);
-		auto extent = secMaxVec - secMinVec;
-		auto volume = extent.x() * extent.y() * extent.z();
-		if (volume >= iLargestVolume)
-		{
-			iLargestVolume = volume;
-			iLargestSection = i;
-		}
-		// id is char[16] and may not be NUL-terminated - check the prefix
-		// safely instead of relying on strstr.
-		if (strncmp(header->id, "BODY", 4) == 0)
-			iBodySection = i;
-		minCoords.minimum(secMinVec);
-		maxCoords.maximum(secMaxVec);
-	}
-
-	const int iMainSection = iBodySection >= 0 ? iBodySection : iLargestSection;
-
-	const Vec3f renderOffset = negate(minCoords);
-
-	last_succeeded_operation = 2;
-
-
-	const auto extents = (maxCoords - minCoords);
-	int rtWidth = ceil(extents.x());
-	int rtHeight = ceil(extents.y());
-	// guard the allocation against corrupt bounds data (the Rust core
-	// also rejects render targets beyond this size)
-	if (rtWidth < 1 || rtHeight < 1 || rtWidth > RS_MAX_RENDER_TARGET_DIM || rtHeight > RS_MAX_RENDER_TARGET_DIM)
-	{
-		OutputDebugStringA("LoadVXLImageInSurface: corrupt section bounds, skipping\n");
-		return NULL;
-	}
-	const int c_pixels = rtWidth * rtHeight;
-
-		// MYASSERT(c_pixels,1);
-
-		byte* image = new byte[c_pixels];
-		byte* image_s = new byte[c_pixels];
-		char* image_z = new char[c_pixels];
-
-		memset(image, 0, c_pixels);
-		memset(image_s, 0, c_pixels);
-		memset(image_z, CHAR_MIN, c_pixels);
-
-		int x_center = 0, y_center = 0;
-		int x_center_zmax = 0, y_center_zmax = 0;
-
-		for (i = 0; i < cur_vxl.get_c_section_headers(); i++)
-		{
-			auto iNormalTable = cur_vxl.get_section_tailer(i)->unknown;
-			const auto& normalTable = normalTables.isValidTable(iNormalTable) ? normalTables.getTable(iNormalTable) : emptyNormalTable;
-			if (i != iMainSection)
-				RenderVXLSection(normalTable, lightDirection, i, rtWidth, rtHeight, renderOffset, rotation, postHVAOffset, image, image_s, image_z, NULL, NULL, 0, NULL, NULL, -1, -1);
-			else
-				RenderVXLSection(normalTable, lightDirection, i, rtWidth, rtHeight, renderOffset, rotation, postHVAOffset, image, image_s, image_z, &x_center, &y_center, ZAdjust, &x_center_zmax, &y_center_zmax, i3dCenterX, i3dCenterY);
-		}
-
-		last_succeeded_operation = 3;
-
-		if (lpXCenter) *lpXCenter = x_center;
-		if (lpYCenter) *lpYCenter = y_center;
-		if (lpXCenterZMax) *lpXCenterZMax = x_center_zmax;
-		if (lpYCenterZMax) *lpYCenterZMax = y_center_zmax;
-
-		// calculate x/y values
-		int left = 0, right = rtWidth, top = 0, bottom = rtHeight;
-
-
-
-		// draw pic
-		DDSURFACEDESC2 ddsd;
-		ZeroMemory(&ddsd, sizeof(ddsd));
-		ddsd.dwSize = sizeof(DDSURFACEDESC2);
-		ddsd.dwWidth = right - left;
-		ddsd.dwHeight = bottom - top;
-		ddsd.dwFlags = DDSD_CAPS | DDSD_HEIGHT | DDSD_WIDTH /*| DDSD_PIXELFORMAT*/;
-		ddsd.ddsCaps.dwCaps = DDSCAPS_OFFSCREENPLAIN;
-
-
-
-		if (pdd->CreateSurface(&ddsd, &pdds[0], NULL) != DD_OK)
-		{
-			// The three rendering buffers were allocated above; surface
-			// creation failed, so free them instead of leaking all three.
-			delete[] image;
-			delete[] image_s;
-			delete[] image_z;
-			return NULL;
-		}
-
-		ddsd.dwFlags = DDSD_PITCH;
-		pdds[0]->GetSurfaceDesc(&ddsd);
-		long pitch = ddsd.lPitch;
-
-		DDPIXELFORMAT pf;
-		memset(&pf, 0, sizeof(DDPIXELFORMAT));
-		pf.dwSize = sizeof(DDPIXELFORMAT);
-
-		pdds[0]->GetPixelFormat(&pf);
-
-		last_succeeded_operation = 5;
-
-		BOOL bUseGDI = FALSE;
-
-		if (pf.dwFlags & DDPF_RGB && pf.dwRBitMask && pf.dwGBitMask && pf.dwBBitMask)
-		{
-
-			CreateConvLookUpTable(pf, hPalette);
-
-
-			/*DDBLTFX fx;
-			memset(&fx, 0, sizeof(DDBLTFX));
-			fx.dwSize=sizeof(DDBLTFX);
-			pdds[0]->Blt(NULL, NULL, NULL, DDBLT_COLORFILL | DDBLT_WAIT, &fx);
-			*/
-
-			last_succeeded_operation = 6;
-
-			memset(&ddsd, 0, sizeof(DDSURFACEDESC2));
-			ddsd.dwSize = sizeof(DDSURFACEDESC2);
-			if (pdds[0]->Lock(NULL, &ddsd, DDLOCK_SURFACEMEMORYPTR | DDLOCK_WAIT | DDLOCK_NOSYSLOCK, NULL) == DD_OK)
-			{
-				pitch = ddsd.lPitch;
-
-				BYTE* dest = (BYTE*)ddsd.lpSurface;
-
-				if (dest)
-				{
-					int bytesize = (pf.dwRGBBitCount + 1) / 8;
-					if (bytesize < 1) bytesize = 1;
-
-					if (pf.dwRGBBitCount <= 8) bytesize = 1;
-					else if (pf.dwRGBBitCount <= 16) bytesize = 2;
-					else if (pf.dwRGBBitCount <= 24) bytesize = 3;
-					else if (pf.dwRGBBitCount <= 32) bytesize = 4;
-
-					last_succeeded_operation = 7;
-					int k, e;
-					//HDC dc;
-					//pdds[0]->GetDC(&dc);
-					for (e = 0;e < rtHeight;e++)
-					{
-						BYTE* const destRow = dest + e * ddsd.lPitch;
-						for (k = 0;k < rtWidth;k++)
-						{
-							//t_palet_entry p=ts_palettes[hPalette-1][image[k+e*cl_max]];								
-
-							if (k >= left && e >= top && k < right && e < bottom)
-							{
-								//SetPixel(dc, k-left, e-top, RGB(p.r, p.g, p.b) );
-								int pos = k + e * rtWidth;
-								if (pos < c_pixels && image[pos] != 0)
-								{
-									DWORD col = conv_color[hPalette - 1][image[k + e * rtWidth]];
-									memcpy(destRow + k * bytesize, &col, bytesize);
-								}
-								else
-								{
-									DWORD col = transp_conv_color[hPalette - 1];
-									memcpy(destRow + k * bytesize, &col, bytesize);
-								}
-
-
-							}
-						}
-
-					}
-					memcpy(&dest[0], &transp_conv_color[hPalette - 1], bytesize);
-					//pdds[0]->ReleaseDC(dc);
-
-				}
-				pdds[0]->Unlock(NULL);
-			}
-			else bUseGDI = TRUE;
-		}
-		else bUseGDI = TRUE;
-
-		if (bUseGDI)
-		{
-			HDC hDC = NULL;
-			HRESULT getDCResult;
-			while ((getDCResult = pdds[0]->GetDC(&hDC)) == DDERR_WASSTILLDRAWING);
-			if (getDCResult == DD_OK)
-			{
-
-
-			last_succeeded_operation = 7;
-			DrawPaletteImageToDC(hDC, image, rtWidth, rtHeight, 0, 0, rtWidth, rtHeight,
-				hPalette, true);
-			pdds[0]->ReleaseDC(hDC);
-			}
-
-		}
-
-		last_succeeded_operation = 70001;
-
-		SetColorKey(pdds[0], -1);
-
-		last_succeeded_operation = 70002;
-
-		if (image) delete[]  image;
-		if (image_s) delete[] image_s;
-		if (image_z) delete[] image_z;
-
-		//pal.close();
-		return TRUE;
-	}
-
 	BOOL LoadVXLImage(const VoxelNormalTables& normalTables, Vec3f lightDirection, const Vec3f rotation, const Vec3f modelOffset, std::vector<BYTE>& image, std::vector<BYTE>& lighting, int* lpXCenter, int* lpYCenter, int ZAdjust, int* lpXCenterZMax, int* lpYCenterZMax, int i3dCenterX, int i3dCenterY, RECT* vxlrect)
 	{
 		last_succeeded_operation = 1;
@@ -1956,9 +1235,7 @@ namespace FSunPackLib
 
 
 		paldata = (RGBTRIPLE*)pal.get_data();
-		//t_palet t_p;
 		memcpy(ts_palettes[dwPalCount - 1], paldata, 768);
-		bFirstConv[dwPalCount - 1] = TRUE;
 		convert_palet_18_to_24(ts_palettes[dwPalCount - 1]);
 
 		pal.close();
@@ -1986,9 +1263,6 @@ namespace FSunPackLib
 			ts_palettes[hPalette - 1][bIndex].r = rgb->rgbtRed;
 			ts_palettes[hPalette - 1][bIndex].g = rgb->rgbtGreen;
 			ts_palettes[hPalette - 1][bIndex].b = rgb->rgbtBlue;
-
-			bFirstConv[hPalette - 1] = TRUE;
-			CreateConvLookUpTable(cur_pf[hPalette - 1], hPalette);
 		}
 
 		return TRUE;
@@ -2040,46 +1314,19 @@ namespace FSunPackLib
 		return binary.save(lpMixFile) == 0;
 	}
 
-	class ColorConverterImpl
-	{
-	public:
-		ColorConverterImpl(const DDPIXELFORMAT& pf)
-		{
-			m_conf.set_pf(pf);
-		}
-
-		int GetColor(int r, int g, int b) const
-		{
-			return m_conf.get_color(r, g, b);
-		}
-
-		int GetColor(int a, int r, int g, int b) const
-		{
-			return m_conf.get_color(a, r, g, b);
-		}
-
-	private:
-		mutable Cddpf_conversion m_conf;
-	};
-
-	ColorConverter::ColorConverter(const DDPIXELFORMAT& pf) :
-		m_impl(new ColorConverterImpl(pf))
-	{
-	}
-
 	int ColorConverter::GetColor(int r, int g, int b) const
 	{
-		return m_impl->GetColor(r, g, b);
+		return GetColor(0, r, g, b);
 	}
 
 	int ColorConverter::GetColor(int a, int r, int g, int b) const
 	{
-		return m_impl->GetColor(a, r, g, b);
+		return ((a & 0xFF) << 24) | ((r & 0xFF) << 16) | ((g & 0xFF) << 8) | (b & 0xFF);
 	}
 
 	int ColorConverter::GetColor(COLORREF col) const
 	{
-		return GetColor((LOBYTE((col) >> 24)), GetRValue(col), GetGValue(col), GetBValue(col));
+		return GetColor(LOBYTE(col >> 24), GetRValue(col), GetGValue(col), GetBValue(col));
 	}
 
 };

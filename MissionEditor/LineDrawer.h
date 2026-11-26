@@ -20,8 +20,6 @@
 
 #pragma once
 
-#include <cinttypes>
-
 enum class LineStyle: int
 {
 	Standard,
@@ -30,27 +28,20 @@ enum class LineStyle: int
 	Dotted_4,
 };
 
+class VulkanScene;
+
 class LineDrawer
 {
 public:
-	LineDrawer(void* dest, int bytes_per_pixel, int width, int height, int pitch);
+	explicit LineDrawer(VulkanScene& scene);
 
 	void MoveTo(int to_x, int to_y);
-	void LineTo(int to_x, int to_y, int color, LineStyle style = LineStyle::Standard);
-	void DrawLine(int from_x, int from_y, int to_x, int to_y, int color, LineStyle style = LineStyle::Standard);
+	void LineTo(int to_x, int to_y, int color, LineStyle style = LineStyle::Standard, bool invert = false);
+	void DrawLine(int from_x, int from_y, int to_x, int to_y, int color, LineStyle style = LineStyle::Standard, bool invert = false);
 	void Rectangle(int from_x, int from_y, int to_x, int to_y, int color, LineStyle style = LineStyle::Standard);
 
 private:
-	void SetPixel(char* dest, int cur_x, int cur_y, int color);
-	void DrawLineImplX(int from_x, int from_y, int to_x, int to_y, int color, LineStyle style);
-	void DrawLineImplY(int from_x, int from_y, int to_x, int to_y, int color, LineStyle style);
-
-private:
-	void* m_dest;
-	int m_bytes_per_pixel;
-	int m_width;
-	int m_height;
-	int m_pitch;
+	VulkanScene& m_scene;
 	int m_last_x;
 	int m_last_y;
 };

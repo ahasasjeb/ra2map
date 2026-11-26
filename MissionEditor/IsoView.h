@@ -106,10 +106,6 @@ private:
 	std::map<CString, COLORREF> m_colorCache;  // per-frame house color cache, cleared at DrawMap start
 	std::map<std::string, CString> m_picFileCache;  // (unit type + direction) -> picture filename
 
-	// incremental pan fast-path state
-	BOOL m_bPanFastPath = FALSE;   // next DrawMap should use the incremental pan path
-	bool m_lastFrameValid = false; // a full/pan frame was rendered successfully before
-	ProjectedVec m_lastViewOffset; // view offset of the last rendered frame
 	bool m_resizePreview = false;  // present the cached frame while live-resizing
 	RECT m_lastPresentSourceRect = { 0, 0, 0, 0 };
 
@@ -152,6 +148,8 @@ protected:
 	afx_msg void OnLButtonUp(UINT nFlags, CPoint point);
 	afx_msg void OnMove(int x, int y);
 	afx_msg void OnSize(UINT nType, int cx, int cy);
+	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
+	afx_msg void OnDestroy();
 	afx_msg void OnChar(UINT nChar, UINT nRepCnt, UINT nFlags);
 	afx_msg void OnDeadChar(UINT nChar, UINT nRepCnt, UINT nFlags);
 	afx_msg void OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags);
@@ -176,16 +174,12 @@ public:
 	RECT GetScaledDisplayRect() const;
 	void SetScroll(int xscroll, int yscroll);
 	void DrawMap();
-	bool PresentPanPreview();
-	bool PatchPanPreviewBands(const RECT& stripX, const RECT& stripY);
-	bool DrawMapPan(int left, int right, int top, int bottom, DWORD MM_heightstart, BOOL bMarbleHeight);
 	struct DrawMapCellContext
 	{
-		DDSURFACEDESC2& ddsd;
+		VulkanScene& scene;
 		RECT r;
 		DWORD MM_heightstart;
 		BOOL bMarbleHeight;
-		bool bPanMode;
 	};
 	void DrawMapTerrainCell(const FIELDDATA& m, const ProjectedCoords& drawCoords, const DrawMapCellContext& ctx);
 	void DrawMapTerrainAnim(const FIELDDATA& m, const ProjectedCoords& drawCoords, const DrawMapCellContext& ctx, DWORD dwOrigGround);
@@ -195,27 +189,25 @@ public:
 	BOOL m_NoMove;
 	void PlaceCurrentObjectAt(int x, int y);
 	void DrawObjectPreviewAt(int x, int y);
-	bool RefreshObjectScene(const MapCoords& oldPos, const MapCoords& newPos, bool eraseOldObject);
 	void SavePreviewRegion(const RECT& rect);
 	void RestorePreviewRegion();
 	void PlaceTile(const int x, const int y, const UINT nMouseFlags);
 	void ShowAllTileSets();
 	void HideTileSet(DWORD dwTileSet);
 	void FlipHighResBuffer(const RECT* sourceRectOverride = nullptr);
-	void BlitBackbufferToHighRes();
-	void EnsureHighResSurface();
 	void RenderUIOverlay();
 	bool InitializeVulkanRenderer();
+	void ReleaseVulkanRenderer();
 	int m_BrushSize_x;
 	int m_BrushSize_y;
 	BOOL ReachableFrom(DWORD dwStart, DWORD dwEnd);
 	void __fastcall ChangeTileHeight(DWORD dwPos, DWORD dwNewHeight, BOOL bNonMorphableMove, BOOL bOnlyThisTile=FALSE, BOOL bNoSlopes=FALSE);
 	void UpdateOverlayPictures(int id=-1);
 	void UpdateStatusBar(int x, int y);
-	void DrawCell(int x, int y, int w, int h, COLORREF col, BOOL dotted=FALSE, HDC hDC=nullptr);
-	void DrawCell(void* dest, int dest_width, int dest_height, int dest_pitch, int x, int y, int w, int h, int col, bool dotted=false, bool touchNeighbours=false, int colNeighbour=CLR_INVALID) const;
-	void DrawCellCursor(const MapCoords& mapCoords, const DDSURFACEDESC2& desc);
-	void DrawTube(const CTube& tube, const DDSURFACEDESC2* ddsd=nullptr, const COLORREF* color=nullptr) const;
+	void DrawCell(int x, int y, int w, int h, COLORREF col, BOOL dotted=FALSE);
+	void DrawCell(VulkanScene& scene, int x, int y, int w, int h, int col, bool dotted=false, bool touchNeighbours=false, int colNeighbour=CLR_INVALID) const;
+	void DrawCellCursor(const MapCoords& mapCoords);
+	void DrawTube(const CTube& tube, const COLORREF* color=nullptr) const;
 
 	/// <summary>
 	/// Converts from (world) pixel coordinates to logical map coordinates
@@ -280,113 +272,18 @@ public:
 	int GetOverlayDirection(int x, int y);
 	void SetError(const char* text);
 	CWnd* owner;
-	bool HasLostDirectDrawSurface() const;
-	void ReInitializeDDraw();
 	COLORREF GetColor(const char* house, const char* color=NULL);
 	COLORREF GetColorImpl(const char* house, const char* color);
 	CString GetCachedUnitPictureFilename(LPCTSTR type, int dir);
-	void Blit(LPDIRECTDRAWSURFACE4 pic, int x, int y, int width=-1, int height=-1)
-	{
-		if(pic==NULL) return;
-		if (m_gpuScene && VulkanScene::Current() == m_gpuScene.get())
-		{
-			m_gpuScene->Bitmap(pic, x + 1, y + 1);
-			return;
-		}
-
-		x+=1;
-		y+=1;
-		//y-=f_y;
-
-		RECT r;
-		GetDesktopWindow()->GetWindowRect(&r);
-		//GetWindowRect(&r);
-
-		if(width==-1 || height==-1)
-		{
-			DDSURFACEDESC2 ddsd;
-			memset(&ddsd, 0, sizeof(DDSURFACEDESC2));
-			ddsd.dwSize=sizeof(DDSURFACEDESC2);
-			ddsd.dwFlags=DDSD_WIDTH | DDSD_HEIGHT;
-			pic->GetSurfaceDesc(&ddsd);
-			width=ddsd.dwWidth;
-			height=ddsd.dwHeight;
-		}
-
-		if(x+width<0 || y+height<0) return;
-		if(x>r.right || y>r.bottom) return;
-
-		if(x<0 || y<0 || x+width>=r.right || y+height>=r.bottom)
-		{
-			
-
-			RECT blrect;
-			RECT srcRect;
-			srcRect.left=0;
-			srcRect.top=0;
-			srcRect.right=width;
-			srcRect.bottom=height;
-			blrect.left=x;
-			if(blrect.left<0) 
-			{
-				srcRect.left=r.left+1-blrect.left;
-				blrect.left=r.left+1;
-			}
-			blrect.top=y;
-			if(blrect.top<0) 
-			{
-				
-				//errstream << "BlRect.top=" << blrect.top << endl;
-				srcRect.top=(r.top+1)-blrect.top; //(r.top-blrect.top);
-				blrect.top=r.top+1;//r.top;
-				// errstream << blrect.top << " " << srcRect.top << endl;
-			}
-			blrect.right=(x+width);
-			if(x+width>r.right)
-			{
-				srcRect.right=width-((x+width)-r.right);// -(-blrect.right+r.right);
-				blrect.right=r.right;
-			}
-			blrect.bottom=(y+height);
-			if(y+height>r.bottom)
-			{
-				srcRect.bottom=height-((y+height)-r.bottom); // -(-blrect.bottom+r.bottom);
-				blrect.bottom=r.bottom;
-			}
-			DDBLTFX fx;
-			memset(&fx, 0, sizeof(DDBLTFX));
-			fx.dwSize=sizeof(DDBLTFX);
-			lpdsBack->Blt(&blrect, pic, &srcRect, DDBLT_KEYSRC, &fx);
-		}
-		else
-			lpdsBack->BltFast(x,y, pic, NULL, DDBLTFAST_SRCCOLORKEY);
-	}
 	void updateFontScaled();
-	void TextOut(int x, int y, const char* text, COLORREF col);
-	void TextOut(HDC hDC, int x, int y, const char* text, COLORREF col);
-	LPDIRECTDRAWSURFACE4 lpdsBack;
-	LPDIRECTDRAWSURFACE4 lpdsTemp; // used for saving the isoview when drawing current tile
-	LPDIRECTDRAWSURFACE4 lpdsBackHighRes; // used for rendering text and some lines in high-res
-	BOOL m_bSkipTempSave = FALSE; // if set, DrawMap() does not update lpdsTemp (used by the fast placement preview, as lpdsTemp must never contain the preview ghost)
 
-	// fast placement preview: the saved clean pixels below the currently shown preview ghost.
-	// They are used to erase the ghost on the next mouse move without a full map redraw and
-	// without relying on lpdsTemp (which may hold stale preview ghosts from other tools).
 	BOOL m_previewHasSaved = FALSE;
-	RECT m_previewSavedRect = { 0, 0, 0, 0 };
-	std::vector<BYTE> m_previewSavedPixels;
-	LPDIRECTDRAWSURFACE4 lpds;
-	DDPIXELFORMAT pf;	
 	std::unique_ptr<FSunPackLib::ColorConverter> m_color_converter;
-	LPDIRECTDRAW4 dd;
-	LPDIRECTDRAW dd_1;
-	// Opaque Rust-owned Vulkan renderer. DirectDraw remains only as a CPU
-	// raster-surface compatibility layer for the legacy drawing algorithms.
+	// Opaque Rust-owned Vulkan renderer and GPU scene recorder.
 	rs_vulkan_renderer* m_vulkanRenderer;
 	std::unique_ptr<VulkanScene> m_gpuScene;
 	bool m_lastPresentSucceeded = false;
 	int m_vulkanPresentFailures;
-	bool m_vulkanDisabled;
 	void HandleProperties(int n, int type);
 	void UpdateDialog(BOOL bRepos=TRUE);
 	CMenu m_menu;

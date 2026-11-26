@@ -50,7 +50,13 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
         let p = select(scene_pixel, screen_pixel, cmd.extra.z != 0u);
         if (any(p < cmd.clip.xy) || any(p >= cmd.clip.zw)) { continue; }
         if (cmd.data.x == 2u) {
-            if (line_covers(p, cmd.line, i32(cmd.extra.x))) { color = cmd.tint.y | 0xff000000u; }
+            if (line_covers(p, cmd.line, i32(cmd.extra.x))) {
+                if ((cmd.extra.y & 1u) != 0u) {
+                    color = (color ^ 0x00ffffffu) | 0xff000000u;
+                } else {
+                    color = cmd.tint.y | 0xff000000u;
+                }
+            }
             continue;
         }
         let local = p - cmd.rect.xy;

@@ -18,42 +18,44 @@
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#include <ddraw.h>
-#include <afx.h>
-#include <string>
-#include <map>
-#include <list>
-#include "Vec2.h"
+#pragma once
 
-// Very simple class that renders text through a prepared DirectDraw surface
-// Only supports ASCII chars 32 to 126, only supports monospace font
-// This is for rendering waypoint ids or credits on map without using GDI during rendering, nothing fancy
+#include <afx.h>
+#include <list>
+#include <map>
+#include <memory>
+#include <string>
+#include "Vec2.h"
+#include "VulkanScene.h"
+
+// Renders map overlay text through VulkanScene using a CPU-rasterized glyph
+// atlas for ASCII strings and an LRU bitmap cache for localized (non-ASCII) strings.
 class TextDrawer
 {
 public:
-    TextDrawer(IDirectDraw4* pDirectDraw, int fontSizeInPoints, COLORREF col, COLORREF shadowCol=CLR_INVALID);
+    TextDrawer(int fontSizeInPoints, COLORREF col, COLORREF shadowCol = CLR_INVALID);
     TextDrawer(const TextDrawer&) = delete;
     TextDrawer& operator=(const TextDrawer&) = delete;
 
     bool isValid() const;
 
-    void RenderText(IDirectDrawSurface4* target, int x, int y, const std::string& text, bool centered=false);
+    void RenderText(VulkanScene& scene, int x, int y, const std::string& text, bool centered = false);
 
     ProjectedVec GetExtent(const std::string& text) const;
 
 private:
     struct CachedString
     {
-        CComPtr<IDirectDrawSurface4> main;
-        CComPtr<IDirectDrawSurface4> shadow;
-        std::list<std::string>::iterator lruPos; // position of the key in m_lruOrder
+        std::shared_ptr<RgbaBitmap> main;
+        std::shared_ptr<RgbaBitmap> shadow;
+        std::list<std::string>::iterator lruPos;
         int w = 0;
         int h = 0;
     };
 
     CachedString& GetCachedString(const std::string& text);
 
-    CComPtr<IDirectDrawSurface4> m_fontSurface;
+    RgbaBitmap m_fontAtlas;
     ProjectedVec m_charExtent;
     int m_fontSizeInPoints;
     int m_fontSizeInPixels;
@@ -61,10 +63,7 @@ private:
     COLORREF m_shadowCol;
     COLORREF m_bkCol;
 
-    // Cache of fully rendered strings to avoid per-character blits every frame.
-    // Entries are evicted least-recently-used; map node references stay valid
-    // across evictions.
     std::map<std::string, CachedString> m_stringCache;
-    std::list<std::string> m_lruOrder; // front = least recently used, back = most recently used
+    std::list<std::string> m_lruOrder;
     static constexpr size_t m_maxCacheEntries = 512;
 };

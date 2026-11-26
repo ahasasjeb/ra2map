@@ -197,7 +197,7 @@ void AddTubeTool::render()
 	else if (m_hover_tube)
 	{
 		COLORREF col = RGB(0, 255, 0);
-		getView().DrawTube(*m_hover_tube, nullptr, &col);
+		getView().DrawTube(*m_hover_tube, &col);
 	}
 	
 }
@@ -232,7 +232,7 @@ void RemoveTubeTool::render()
 	for(auto& tube: m_hover_tubes)
 	{
 		COLORREF col = RGB(0, 255, 0);
-		getView().DrawTube(*tube, nullptr, &col);
+		getView().DrawTube(*tube, &col);
 	}
 }
 

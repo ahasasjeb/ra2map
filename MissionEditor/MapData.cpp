@@ -581,13 +581,9 @@ BOOL CMapData::LoadMap(const std::string& file)
 	{
 		try
 		{
-#ifdef NOSURFACES_OBJECTS			
 			if (it->second.bType == PICDATA_TYPE_BMP)
 			{
-				if (it->second.pic != NULL)
-				{
-					((LPDIRECTDRAWSURFACE4)it->second.pic)->Release();
-				}
+				it->second.bitmap.reset();
 			}
 			else
 			{
@@ -597,9 +593,6 @@ BOOL CMapData::LoadMap(const std::string& file)
 				}
 				if (it->second.vborder) delete[] it->second.vborder;
 			}
-#else
-			if (it->second.pic != NULL) it->second.pic->Release();
-#endif
 
 			it->second.pic = NULL;
 		}
@@ -4063,13 +4056,9 @@ void CMapData::CreateMap(DWORD dwWidth, DWORD dwHeight, LPCTSTR lpTerrainType, D
 	{
 		try
 		{
-#ifdef NOSURFACES_OBJECTS			
 			if (it->second.bType == PICDATA_TYPE_BMP)
 			{
-				if (it->second.pic != NULL)
-				{
-					((LPDIRECTDRAWSURFACE4)it->second.pic)->Release();
-				}
+				it->second.bitmap.reset();
 			}
 			else
 			{
@@ -4079,9 +4068,6 @@ void CMapData::CreateMap(DWORD dwWidth, DWORD dwHeight, LPCTSTR lpTerrainType, D
 				}
 				if (it->second.vborder) delete[] it->second.vborder;
 			}
-#else
-			if (it->second.pic != NULL) it->second.pic->Release();
-#endif
 
 			it->second.pic = NULL;
 		}

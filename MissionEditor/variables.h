@@ -88,7 +88,6 @@ extern int iPalIso[256];
 extern int iPalUnit[256];
 extern int iPalTheater[256];
 extern int iPalLib[256];
-extern int bpp;
 
 extern map<CString, int> color_conv;
 extern map<COLORREF, int> colorref_conv;

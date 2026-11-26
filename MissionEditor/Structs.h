@@ -33,6 +33,7 @@
 #include "Vec2.h"
 
 class MapTool;
+struct RgbaBitmap;
 
 
 enum class TheaterChar : char
@@ -105,8 +106,7 @@ struct VBORDER
 /*
 picdata
 
-Holds information for every picture:
-a directdraw surface, and additional data
+Holds indexed image or RGBA bitmap data for every picture.
 */
 struct PICDATA{
 	PICDATA() = default;
@@ -114,16 +114,13 @@ struct PICDATA{
 	PICDATA& operator=(const PICDATA& c) = default;
 	~PICDATA() = default;
 
-#ifndef NOSURFACES_OBJECTS
-	LPDIRECTDRAWSURFACE4 pic;
-#else
-	void* pic = nullptr; // BYTE* to image, exception: if bType==PICDATA_TYPE_BMP then this is a LPDIRECTDRAWSURFACE!
+	void* pic = nullptr; // BYTE* to indexed image, or bitmap.get() when bType == PICDATA_TYPE_BMP
 	VBORDER* vborder = nullptr;
 	int* pal = nullptr;
+	std::shared_ptr<RgbaBitmap> bitmap;
 	std::shared_ptr<std::vector<BYTE>> lighting;
 	std::shared_ptr<std::vector<BYTE>> rawPic;
 	std::shared_ptr<std::vector<VBORDER>> _vBorder;
-#endif
 	
 	FSunPackLib::VoxelNormalClass normalClass = FSunPackLib::VoxelNormalClass::Unknown;
 	short x = 0; // for SHPs (starting point of main graphic inside surface)
@@ -141,9 +138,7 @@ struct PICDATA{
 		return ProjectedVec(x, y);
 	}
 
-#ifdef NOSURFACES_OBJECTS
 	void createVBorder();
-#endif
 
 };
 
@@ -153,15 +148,8 @@ TILEPIC / TILEDATA
 Holds information for every tile/subtile in TS.
 */
 struct SUBTILE{
-#ifndef NOSURFACES
-	LPDIRECTDRAWSURFACE4 pic;
-#else
-#ifdef NOSURFACES_EXTRACT
-	BOOL bNotExtracted; // pic is not extracted, even if NOSURFACES_EXTRACT is specifed. Probably there is inner transparency!
-#endif
-	BYTE* pic; // optionally use direct blitting? This is either a palette index array or non-palette data (if NOSURFACES_EXTRACT is specified)
+	BYTE* pic; // palette index array uploaded on demand by VulkanScene
 	VBORDER * vborder;
-#endif
 	
 	WORD wWidth; // width of tile
 	WORD wHeight; // height "

@@ -47,7 +47,6 @@
 #include "InputBox.h"
 #include "floatedit.h"
 #include "MyComboBox.h"
-#include <ddraw.h>
 // #include "structs.h"
 // #include "variables.h"
 // #include "functions.h"

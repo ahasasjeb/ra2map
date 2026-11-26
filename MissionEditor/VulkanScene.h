@@ -2,28 +2,39 @@
 
 #include "RustCore.h"
 #include <array>
+#include <cstdint>
 #include <map>
 #include <tuple>
 #include <vector>
 
-#ifdef NOSURFACES_EXTRACT
-#error VulkanScene requires indexed TMP textures; disable NOSURFACES_EXTRACT.
-#endif
 static_assert(sizeof(rs_scene_command) == 96, "scene command must match the shader layout");
 
-// Records the existing painter order without locking/rasterizing map surfaces.
-// DirectDraw is used only to decode/upload legacy bitmap assets on cache misses.
+struct RgbaBitmap
+{
+	uint64_t id = 0;
+	int width = 0;
+	int height = 0;
+	std::vector<unsigned int> pixels; // 0 = transparent, 0xffRRGGBB (little-endian BGRA) = opaque
+
+	bool empty() const
+	{
+		return width <= 0 || height <= 0 || pixels.size() < static_cast<size_t>(width) * height;
+	}
+};
+
+uint64_t NextRgbaBitmapId();
+
+// Records scene draw commands in painter order for the Vulkan GPU compute compositor.
 class VulkanScene
 {
 public:
-	VulkanScene(rs_vulkan_renderer* renderer, IDirectDrawSurface4* back);
-	~VulkanScene();
-	static VulkanScene* Current();
+	explicit VulkanScene(rs_vulkan_renderer* renderer);
+	~VulkanScene() = default;
+
 	static void InvalidateAssets();
-	static VulkanScene* ForPixels(const void* pixels);
-	bool Describe(IDirectDrawSurface4* surface, DDSURFACEDESC2& desc);
-	bool IsTarget(IDirectDrawSurface4* surface) const;
+
 	void Begin(const RECT& source);
+	bool IsActive() const { return m_active; }
 	void SaveBase();
 	void RestoreBase();
 	void SavePreview();
@@ -31,17 +42,18 @@ public:
 	void BeginOverlay(const RECT& screen, bool highRes);
 	void EndOverlay();
 	bool Present(const RECT& source, int width, int height, bool vsync);
+
 	void Indexed(const BYTE* pixels, int width, int height, const short* borders,
 		const BYTE* lighting, const int* palette, const int* remap,
 		bool half, int x, int y, const RECT& clip);
-	bool Bitmap(IDirectDrawSurface4* source, int x, int y, const RECT* sourceRect = nullptr);
-	void Line(int x0, int y0, int x1, int y1, unsigned int color, int period, int width, int height);
+	bool Bitmap(const RgbaBitmap& source, int x, int y, const RECT* sourceRect = nullptr);
+	void Line(int x0, int y0, int x1, int y1, unsigned int color, int period = 1, bool invert = false);
 
 private:
 	unsigned int Upload(const unsigned int* words, size_t count);
 	void DropOverlay();
+
 	rs_vulkan_renderer* m_renderer;
-	IDirectDrawSurface4* m_back;
 	RECT m_source{};
 	RECT m_screen{};
 	bool m_screenSpace = false;
@@ -53,6 +65,6 @@ private:
 	size_t m_overlayStart = 0, m_overlayEnd = 0;
 	std::map<std::tuple<const void*, int, int, const void*>, unsigned int> m_images;
 	std::map<std::array<unsigned int, 256>, unsigned int> m_palettes;
-	struct BitmapAsset { CComPtr<IDirectDrawSurface4> surface; unsigned int offset; int width, height; };
-	std::map<IDirectDrawSurface4*, BitmapAsset> m_bitmaps;
+	struct BitmapAsset { unsigned int offset; int width, height; };
+	std::map<uint64_t, BitmapAsset> m_bitmaps;
 };

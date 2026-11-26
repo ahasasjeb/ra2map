@@ -23,17 +23,6 @@
  Place any definitions here
 **************************/
 
-// set NOSURFACES to use palettized tile drawing - probably slower, but using less memory
-#define NOSURFACES
-// Keep TMP pixels indexed for the Vulkan scene asset cache. Extracting them
-// into packed 32-bit row spans loses the texture layout and palette identity.
-// #define NOSURFACES_EXTRACT
-// #undef NOSURFACES // enable this if display is too slow
-
-// set NOSURFACES_OBJECTS to use palettized object & overlay drawing - slower, but better display
-#define NOSURFACES_OBJECTS
-// #undef NOSURFACES_OBJECTS
-
 // MW 08/07/01: define SMUDGE_SUPP if you want to support smudges
 // added this as switch because if there are problems with this new feature we can just disable it
 #define SMUDGE_SUPP

@@ -35,6 +35,8 @@
 #include "PalettedImageComposition.h"
 #include "AlliesEditorDlg.h"
 #include "PanScroll.h"
+#include "VulkanScene.h"
+#include "functions.h"
 
 class TestError : public std::runtime_error
 {
@@ -119,6 +121,7 @@ int Tests::run()
 		[this]() { test_alliance_sync(); },
 		[this]() { test_rules_section_cache(); },
 		[this]() { test_pan_scroll(); },
+		[this]() { test_vulkan_color_and_bitmap(); },
 	});
 	for (const auto f : test_functions)
 	{
@@ -1005,4 +1008,51 @@ void Tests::test_rules_section_cache()
 	mapData.BuildRulesSectionCache();
 	REPORT_TEST(mapData.IsRulesSection("NewProjectile"));
 	REPORT_TEST(mapData.IsRulesSection("NewWeapon"));
+}
+
+void Tests::test_vulkan_color_and_bitmap()
+{
+	FSunPackLib::ColorConverter conv;
+	REPORT_TEST(conv.GetColor(0x12, 0x34, 0x56) == 0x00123456);
+	REPORT_TEST(conv.GetColor(0xAB, 0x12, 0x34, 0x56) == static_cast<int>(0xAB123456u));
+	REPORT_TEST(conv.GetColor(RGB(0x12, 0x34, 0x56)) == 0x00123456);
+
+	// Create a 2x2 32-bit DIB section: top-left white (key), top-right red,
+	// bottom-left green, bottom-right white (key).
+	BITMAPINFO bmi = {};
+	bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+	bmi.bmiHeader.biWidth = 2;
+	bmi.bmiHeader.biHeight = -2; // top-down
+	bmi.bmiHeader.biPlanes = 1;
+	bmi.bmiHeader.biBitCount = 32;
+	bmi.bmiHeader.biCompression = BI_RGB;
+
+	void* bits = nullptr;
+	HBITMAP hbm = ::CreateDIBSection(nullptr, &bmi, DIB_RGB_COLORS, &bits, nullptr, 0);
+	REPORT_TEST(hbm != nullptr && bits != nullptr);
+	auto* px = static_cast<uint32_t*>(bits);
+	px[0] = 0x00FFFFFFu; // white
+	px[1] = 0x00FF0000u; // red (BGRA32: R=0xFF)
+	px[2] = 0x0000FF00u; // green
+	px[3] = 0x00FFFFFFu; // white
+
+	CBitmap bmp;
+	bmp.Attach(hbm);
+
+	auto rgbaAutoKey = BitmapToRgbaBitmap(bmp, CLR_INVALID);
+	REPORT_TEST(rgbaAutoKey != nullptr);
+	REPORT_TEST(rgbaAutoKey->width == 2 && rgbaAutoKey->height == 2);
+	REPORT_TEST(rgbaAutoKey->pixels.size() == 4);
+	REPORT_TEST(rgbaAutoKey->pixels[0] == 0u);
+	REPORT_TEST(rgbaAutoKey->pixels[1] == 0xFFFF0000u);
+	REPORT_TEST(rgbaAutoKey->pixels[2] == 0xFF00FF00u);
+	REPORT_TEST(rgbaAutoKey->pixels[3] == 0u);
+
+	auto rgbaExplicitKey = BitmapToRgbaBitmap(bmp, RGB(0, 255, 0));
+	REPORT_TEST(rgbaExplicitKey != nullptr);
+	REPORT_TEST(rgbaExplicitKey->id != rgbaAutoKey->id);
+	REPORT_TEST(rgbaExplicitKey->pixels[0] == 0xFFFFFFFFu);
+	REPORT_TEST(rgbaExplicitKey->pixels[1] == 0xFFFF0000u);
+	REPORT_TEST(rgbaExplicitKey->pixels[2] == 0u);
+	REPORT_TEST(rgbaExplicitKey->pixels[3] == 0xFFFFFFFFu);
 }

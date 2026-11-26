@@ -25,6 +25,7 @@
 #include "TSoptions.h"
 #include "variables.h"
 #include "functions.h"
+#include "VulkanScene.h"
 #include "inlines.h"
 #include "mmsystem.h"
 
@@ -1989,42 +1990,47 @@ void GetDrawBorder(const BYTE* data, int width, int line, int& left, int& right,
 	}
 }
 
-CComPtr<IDirectDrawSurface4> BitmapToSurface(IDirectDraw4 * pDD, const CBitmap& bitmap)
+std::shared_ptr<RgbaBitmap> BitmapToRgbaBitmap(const CBitmap& bitmap, COLORREF transparentColor)
 {
-	BITMAP bm;
-	GetObject(bitmap, sizeof(bm), &bm);
-
-	DDSURFACEDESC2 desc = { 0 };
-	ZeroMemory(&desc, sizeof(desc));
-	desc.dwSize = sizeof(desc);
-	desc.dwFlags = DDSD_CAPS | DDSD_HEIGHT | DDSD_WIDTH;
-	desc.ddsCaps.dwCaps = DDSCAPS_OFFSCREENPLAIN;
-	desc.dwWidth = bm.bmWidth;
-	desc.dwHeight = bm.bmHeight;
-
-	auto pSurface = CComPtr<IDirectDrawSurface4>();
-	if (pDD->CreateSurface(&desc, &pSurface, nullptr) != DD_OK)
+	BITMAP bm{};
+	if (GetObject(bitmap, sizeof(bm), &bm) == 0 || bm.bmWidth <= 0 || bm.bmHeight <= 0)
 		return nullptr;
 
-	pSurface->Restore();
+	BITMAPINFO bi{};
+	bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+	bi.bmiHeader.biWidth = bm.bmWidth;
+	bi.bmiHeader.biHeight = -bm.bmHeight; // top-down
+	bi.bmiHeader.biPlanes = 1;
+	bi.bmiHeader.biBitCount = 32;
+	bi.bmiHeader.biCompression = BI_RGB;
 
-	CDC bitmapDC;
-	if (!bitmapDC.CreateCompatibleDC(nullptr))
+	auto result = std::make_shared<RgbaBitmap>();
+	result->id = NextRgbaBitmapId();
+	result->width = bm.bmWidth;
+	result->height = bm.bmHeight;
+	result->pixels.resize(static_cast<size_t>(bm.bmWidth) * bm.bmHeight);
+
+	HDC hdc = ::GetDC(nullptr);
+	if (!hdc)
 		return nullptr;
-	bitmapDC.SelectObject(bitmap);
-
-	HDC hSurfaceDC = nullptr;
-	if (pSurface->GetDC(&hSurfaceDC) != DD_OK)
+	const int lines = ::GetDIBits(hdc, static_cast<HBITMAP>(bitmap.GetSafeHandle()),
+		0, static_cast<UINT>(bm.bmHeight), result->pixels.data(), &bi, DIB_RGB_COLORS);
+	::ReleaseDC(nullptr, hdc);
+	if (lines == 0)
 		return nullptr;
 
-	CDC surfaceDC;
-	surfaceDC.Attach(hSurfaceDC);
+	const unsigned int keyBgr = (transparentColor == CLR_INVALID)
+		? (result->pixels[0] & 0x00ffffffu)
+		: ((static_cast<unsigned int>(GetRValue(transparentColor)) << 16)
+			| (static_cast<unsigned int>(GetGValue(transparentColor)) << 8)
+			| static_cast<unsigned int>(GetBValue(transparentColor)));
 
-	auto success = surfaceDC.BitBlt(0, 0, bm.bmWidth, bm.bmHeight, &bitmapDC, 0, 0, SRCCOPY);
-	surfaceDC.Detach();
-	pSurface->ReleaseDC(hSurfaceDC);
-    
-	return pSurface;
+	for (auto& px : result->pixels)
+	{
+		const unsigned int bgr = px & 0x00ffffffu;
+		px = (bgr == keyBgr) ? 0u : (bgr | 0xff000000u);
+	}
+	return result;
 }
 
 

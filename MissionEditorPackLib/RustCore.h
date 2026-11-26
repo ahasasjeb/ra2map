@@ -310,9 +310,8 @@ int rs_csf_parse(
 );
 
 // ---------------------------------------------------------------------------
-// Vulkan presentation backend. Rust owns the Vulkan instance/device,
-// swapchain, synchronization primitives and persistently mapped upload memory.
-// The legacy CPU rasterizer supplies a read-only final pixel view.
+// Vulkan GPU scene renderer. Rust owns the Vulkan instance/device,
+// swapchain, synchronization primitives, and compute compositor.
 // ---------------------------------------------------------------------------
 
 typedef struct rs_vulkan_renderer rs_vulkan_renderer;
@@ -321,33 +320,8 @@ int rs_vulkan_create(void* hwnd, rs_vulkan_renderer** out_renderer);
 
 void rs_vulkan_destroy(rs_vulkan_renderer* renderer);
 
-// Reserves the swapchain and mapped upload storage before the legacy editor
-// loads its large graphics cache. Delaying this allocation until the first
-// frame can exhaust address space in the 32-bit process on large modded maps.
 int rs_vulkan_prepare(
     rs_vulkan_renderer* renderer,
-    int target_width,
-    int target_height,
-    int vsync
-);
-
-// Presents src_width/src_height pixels from the source rectangle, scaling to
-// the Vulkan swapchain extent. Pixel masks describe the little-endian source
-// format used by the DirectDraw-compatible CPU raster surface.
-int rs_vulkan_present(
-    rs_vulkan_renderer* renderer,
-    const unsigned char* pixels,
-    int surface_width,
-    int surface_height,
-    int pitch,
-    unsigned int bytes_per_pixel,
-    unsigned int red_mask,
-    unsigned int green_mask,
-    unsigned int blue_mask,
-    int src_left,
-    int src_top,
-    int src_width,
-    int src_height,
     int target_width,
     int target_height,
     int vsync

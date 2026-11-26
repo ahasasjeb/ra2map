@@ -175,7 +175,7 @@ public:
 	void LoadStrings();
 	void FreeAll();
 	void FreeTileSet();
-	BOOL InitDirectDraw();
+	BOOL InitRenderer();
 	
 	void InitTMPs(CProgressCtrl* prog=NULL);
 	void InitPalettes();

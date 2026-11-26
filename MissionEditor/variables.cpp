@@ -94,8 +94,6 @@ int iPalUnit[256];
 int iPalTheater[256];
 int iPalLib[256];
 
-int bpp;
-
 map<CString, int> color_conv;
 map<COLORREF, int> colorref_conv;
 

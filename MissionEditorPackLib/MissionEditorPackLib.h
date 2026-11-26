@@ -22,7 +22,6 @@
 #define FSUNPACKLIB_INCLUDED
 
 #include <windows.h>
-#include <ddraw.h>
 #include <memory>
 #include <vector>
 #include <string>
@@ -82,17 +81,13 @@ namespace FSunPackLib
 
 	extern "C" extern int last_succeeded_operation;
 
-	class ColorConverterImpl;
 	class ColorConverter
 	{
 	public:
-		ColorConverter(const DDPIXELFORMAT& pf);
+		ColorConverter() = default;
 		int GetColor(int a, int r, int g, int b) const;
 		int GetColor(int r, int g, int b) const;
 		int GetColor(COLORREF col) const;
-
-	private:
-		std::shared_ptr<ColorConverterImpl> m_impl;
 	};
 
 // base 64
@@ -197,10 +192,8 @@ Returns the SHP image header of a image in a SHP file
 
 
 
-	BOOL LoadTMPImageInSurface(IDirectDraw4* pdd, int iStart, int iCount, LPDIRECTDRAWSURFACE4* pdds, HTSPALETTE hPalette);
 	BOOL LoadTMPImage(int iStart, int iCount, BYTE** lpTileArray);
 
-	BOOL LoadSHPImageInSurface(IDirectDraw4* pdd, HTSPALETTE hPalette, int iImageIndex, int iCount, LPDIRECTDRAWSURFACE4* pdds);
 	BOOL LoadSHPImage(int iImageIndex, int iCount, BYTE** lpPics);
 	BOOL LoadSHPImage(int iImageIndex, std::vector<BYTE>& pic);
 
@@ -218,15 +211,11 @@ Returns the SHP image header of a image in a SHP file
 
 	BOOL GetVXLSectionInfo(int section, VoxelNormalClass& normalClass);
 
-	BOOL LoadVXLImageInSurface(const VoxelNormalTables& normalTables, Vec3f lightDirection, IDirectDraw4* pdd, int iStart, int iCount, Vec3f rotation, Vec3f modelOffset, LPDIRECTDRAWSURFACE4* pdds, HTSPALETTE hPalette, int* lpXCenter = NULL, int* lpYCenter = NULL, int ZAdjust = 0, int* lpXCenterZMax = NULL, int* lpYCenterZMax = NULL, int i3dCenterX = -1, int i3dCenterY = -1);
-
 	// modelOffset is applied before VXL/HVA translates and scales and before model-to-world rotation
 	BOOL LoadVXLImage(const VoxelNormalTables& normalTables, Vec3f lightDirection, Vec3f rotation, Vec3f modelOffset, std::vector<BYTE>& image, std::vector<BYTE>& lighting, int* lpXCenter = NULL, int* lpYCenter = NULL, int ZAdjust = 0, int* lpXCenterZMax = NULL, int* lpYCenterZMax = NULL, int i3dCenterX = -1, int i3dCenterY = -1, RECT* vxlrect = NULL);
 
 
 	BOOL WriteMixFile(LPCTSTR lpMixFile, LPCSTR* lpFiles, DWORD dwFileCount, Game game);
-
-	HRESULT SetColorKey(IDirectDrawSurface4* pDDS, COLORREF rgb);
 
 };
 

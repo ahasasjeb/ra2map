@@ -24,7 +24,7 @@ if ($LASTEXITCODE -ne 0) {
 $cargoBuildRoot = Join-Path -Path $targetRoot -ChildPath 'build'
 $luaLibraries = @(
     Get-ChildItem -LiteralPath $cargoBuildRoot -Filter 'lua5.5.lib' -File -Recurse |
-        Where-Object { $_.FullName -match '[\\/]mlua-sys-[^\\/]+[\\/]out[\\/]lib[\\/]lua5\.5\.lib$' } |
+        Where-Object { $_.FullName -match '[\\/]mlua-sys[-\\/][^\\/]+[\\/]out[\\/]lib[\\/]lua5\.5\.lib$' } |
         Sort-Object -Property LastWriteTimeUtc -Descending
 )
 if ($luaLibraries.Count -eq 0) {
