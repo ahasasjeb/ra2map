@@ -76,6 +76,111 @@ impl FrameResources {
     }
 }
 
+struct SwapchainState<'a> {
+    swapchain: &'a mut vk::SwapchainKHR,
+    swapchain_images: &'a mut Vec<vk::Image>,
+    present_semaphores: &'a mut Vec<vk::Semaphore>,
+    present_mode: &'a mut vk::PresentModeKHR,
+    image_initialized: &'a mut Vec<bool>,
+    swapchain_format: &'a mut vk::Format,
+    swapchain_extent: &'a mut vk::Extent2D,
+    requested_extent: &'a mut vk::Extent2D,
+    vsync: &'a mut bool,
+    swapchain_dirty: &'a mut bool,
+    current_frame: &'a mut usize,
+}
+
+trait SwapchainLifecycleOps {
+    unsafe fn create_swapchain(
+        &mut self,
+        old_swapchain: vk::SwapchainKHR,
+    ) -> Result<vk::SwapchainKHR, vk::Result>;
+    unsafe fn destroy_swapchain(&mut self, swapchain: vk::SwapchainKHR);
+    unsafe fn get_swapchain_images(
+        &mut self,
+        swapchain: vk::SwapchainKHR,
+    ) -> Result<Vec<vk::Image>, vk::Result>;
+    unsafe fn create_semaphore(&mut self) -> Result<vk::Semaphore, vk::Result>;
+    unsafe fn destroy_semaphore(&mut self, semaphore: vk::Semaphore);
+}
+
+impl SwapchainState<'_> {
+    unsafe fn retire_current_swapchain(&mut self, ops: &mut impl SwapchainLifecycleOps) {
+        let retired = std::mem::replace(self.swapchain, vk::SwapchainKHR::null());
+        self.swapchain_images.clear();
+        self.image_initialized.clear();
+        for semaphore in self.present_semaphores.drain(..) {
+            unsafe { ops.destroy_semaphore(semaphore) };
+        }
+        *self.swapchain_format = vk::Format::UNDEFINED;
+        *self.swapchain_extent = vk::Extent2D::default();
+        *self.requested_extent = vk::Extent2D::default();
+        *self.swapchain_dirty = true;
+        *self.current_frame = 0;
+        if retired != vk::SwapchainKHR::null() {
+            unsafe { ops.destroy_swapchain(retired) };
+        }
+    }
+
+    unsafe fn replace_swapchain_resources(
+        &mut self,
+        format: vk::Format,
+        extent: vk::Extent2D,
+        requested_extent: vk::Extent2D,
+        present_mode: vk::PresentModeKHR,
+        vsync: bool,
+        ops: &mut impl SwapchainLifecycleOps,
+    ) -> Result<VulkanStatus, String> {
+        let old_swapchain = *self.swapchain;
+        let create_result = unsafe { ops.create_swapchain(old_swapchain) };
+        // Per VkSwapchainCreateInfoKHR, passing a non-null oldSwapchain retires it even when
+        // vkCreateSwapchainKHR fails. The caller has already waited for the device to be idle,
+        // so tear down the retired swapchain and swapchain-bound state right away and never
+        // pass the retired handle as oldSwapchain again.
+        unsafe { self.retire_current_swapchain(ops) };
+
+        let new_swapchain = match create_result {
+            Ok(swapchain) => swapchain,
+            Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => {
+                return Ok(VulkanStatus::SwapchainOutOfDate);
+            }
+            Err(error) => return Err(format!("vkCreateSwapchainKHR failed: {error:?}")),
+        };
+        let new_images = match unsafe { ops.get_swapchain_images(new_swapchain) } {
+            Ok(images) => images,
+            Err(error) => {
+                unsafe { ops.destroy_swapchain(new_swapchain) };
+                return Err(format!("vkGetSwapchainImagesKHR failed: {error:?}"));
+            }
+        };
+        let mut new_semaphores = Vec::with_capacity(new_images.len());
+        for _ in &new_images {
+            match unsafe { ops.create_semaphore() } {
+                Ok(semaphore) => new_semaphores.push(semaphore),
+                Err(error) => {
+                    for semaphore in new_semaphores.drain(..) {
+                        unsafe { ops.destroy_semaphore(semaphore) };
+                    }
+                    unsafe { ops.destroy_swapchain(new_swapchain) };
+                    return Err(format!("create per-image present semaphore: {error:?}"));
+                }
+            }
+        }
+        *self.swapchain = new_swapchain;
+        *self.swapchain_images = new_images;
+        *self.present_semaphores = new_semaphores;
+        *self.present_mode = present_mode;
+        *self.image_initialized = vec![false; self.swapchain_images.len()];
+        *self.swapchain_format = format;
+        *self.swapchain_extent = extent;
+        *self.requested_extent = requested_extent;
+        *self.vsync = vsync;
+        *self.swapchain_dirty = false;
+        *self.current_frame = 0;
+        Ok(VulkanStatus::Ok)
+    }
+}
+
 struct VulkanRenderer {
     _entry: Entry,
     instance: ash::Instance,
@@ -476,7 +581,7 @@ impl VulkanRenderer {
         .into_iter()
         .find(|mode| capabilities.supported_composite_alpha.contains(*mode))
         .ok_or_else(|| "the Vulkan surface reported no composite-alpha mode".to_string())?;
-        let create_info = vk::SwapchainCreateInfoKHR::default()
+        let create_info_template = vk::SwapchainCreateInfoKHR::default()
             .surface(self.surface)
             .min_image_count(image_count)
             .image_format(format.format)
@@ -488,56 +593,77 @@ impl VulkanRenderer {
             .pre_transform(capabilities.current_transform)
             .composite_alpha(composite_alpha)
             .present_mode(present_mode)
-            .clipped(true)
-            .old_swapchain(self.swapchain);
-        let new_swapchain = match unsafe { self.swapchain_loader.create_swapchain(&create_info, None) } {
-            Ok(swapchain) => swapchain,
-            Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => {
-                self.swapchain_dirty = true;
-                return Ok(VulkanStatus::SwapchainOutOfDate);
-            }
-            Err(error) => return Err(format!("vkCreateSwapchainKHR failed: {error:?}")),
-        };
-        let new_images = match unsafe { self.swapchain_loader.get_swapchain_images(new_swapchain) }
-        {
-            Ok(images) => images,
-            Err(error) => {
-                unsafe { self.swapchain_loader.destroy_swapchain(new_swapchain, None) };
-                return Err(format!("vkGetSwapchainImagesKHR failed: {error:?}"));
-            }
-        };
-        if self.swapchain != vk::SwapchainKHR::null() {
-            unsafe {
-                self.swapchain_loader
-                    .destroy_swapchain(self.swapchain, None)
-            };
+            .clipped(true);
+
+        struct RealSwapchainOps<'a> {
+            device: &'a ash::Device,
+            swapchain_loader: &'a ash::khr::swapchain::Device,
+            create_info_template: vk::SwapchainCreateInfoKHR<'a>,
         }
-        self.swapchain = new_swapchain;
-        self.swapchain_images = new_images;
-        for semaphore in self.present_semaphores.drain(..) {
-            unsafe { self.device.destroy_semaphore(semaphore, None) };
-        }
-        self.present_mode = present_mode;
-        for _ in &self.swapchain_images {
-            self.present_semaphores.push(
+
+        impl SwapchainLifecycleOps for RealSwapchainOps<'_> {
+            unsafe fn create_swapchain(
+                &mut self,
+                old_swapchain: vk::SwapchainKHR,
+            ) -> Result<vk::SwapchainKHR, vk::Result> {
+                let create_info = self.create_info_template.old_swapchain(old_swapchain);
+                unsafe { self.swapchain_loader.create_swapchain(&create_info, None) }
+            }
+
+            unsafe fn destroy_swapchain(&mut self, swapchain: vk::SwapchainKHR) {
+                unsafe { self.swapchain_loader.destroy_swapchain(swapchain, None) };
+            }
+
+            unsafe fn get_swapchain_images(
+                &mut self,
+                swapchain: vk::SwapchainKHR,
+            ) -> Result<Vec<vk::Image>, vk::Result> {
+                unsafe { self.swapchain_loader.get_swapchain_images(swapchain) }
+            }
+
+            unsafe fn create_semaphore(&mut self) -> Result<vk::Semaphore, vk::Result> {
                 unsafe {
                     self.device
                         .create_semaphore(&vk::SemaphoreCreateInfo::default(), None)
                 }
-                .map_err(|error| format!("create per-image present semaphore: {error:?}"))?,
-            );
+            }
+
+            unsafe fn destroy_semaphore(&mut self, semaphore: vk::Semaphore) {
+                unsafe { self.device.destroy_semaphore(semaphore, None) };
+            }
         }
-        self.image_initialized = vec![false; self.swapchain_images.len()];
-        self.swapchain_format = format.format;
-        self.swapchain_extent = extent;
-        self.requested_extent = vk::Extent2D {
-            width: requested_width,
-            height: requested_height,
+
+        let mut ops = RealSwapchainOps {
+            device: &self.device,
+            swapchain_loader: &self.swapchain_loader,
+            create_info_template,
         };
-        self.vsync = vsync;
-        self.swapchain_dirty = false;
-        self.current_frame = 0;
-        Ok(VulkanStatus::Ok)
+        let mut state = SwapchainState {
+            swapchain: &mut self.swapchain,
+            swapchain_images: &mut self.swapchain_images,
+            present_semaphores: &mut self.present_semaphores,
+            present_mode: &mut self.present_mode,
+            image_initialized: &mut self.image_initialized,
+            swapchain_format: &mut self.swapchain_format,
+            swapchain_extent: &mut self.swapchain_extent,
+            requested_extent: &mut self.requested_extent,
+            vsync: &mut self.vsync,
+            swapchain_dirty: &mut self.swapchain_dirty,
+            current_frame: &mut self.current_frame,
+        };
+        unsafe {
+            state.replace_swapchain_resources(
+                format.format,
+                extent,
+                vk::Extent2D {
+                    width: requested_width,
+                    height: requested_height,
+                },
+                present_mode,
+                vsync,
+                &mut ops,
+            )
+        }
     }
 
     unsafe fn recover_signaled_fence(&mut self, frame_index: usize) {
@@ -687,6 +813,262 @@ pub unsafe extern "C" fn rs_vulkan_last_error(dst: *mut c_char, dst_cap: usize) 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ash::vk::Handle;
+    use std::collections::VecDeque;
+
+    struct FakeSwapchainOps {
+        create_results: VecDeque<Result<vk::SwapchainKHR, vk::Result>>,
+        images_results: VecDeque<Result<Vec<vk::Image>, vk::Result>>,
+        semaphore_results: VecDeque<Result<vk::Semaphore, vk::Result>>,
+        passed_old_swapchains: Vec<vk::SwapchainKHR>,
+        destroyed_swapchains: Vec<vk::SwapchainKHR>,
+        destroyed_semaphores: Vec<vk::Semaphore>,
+        next_semaphore_raw: u64,
+    }
+
+    impl FakeSwapchainOps {
+        fn new() -> Self {
+            Self {
+                create_results: VecDeque::new(),
+                images_results: VecDeque::new(),
+                semaphore_results: VecDeque::new(),
+                passed_old_swapchains: Vec::new(),
+                destroyed_swapchains: Vec::new(),
+                destroyed_semaphores: Vec::new(),
+                next_semaphore_raw: 0x200,
+            }
+        }
+    }
+
+    impl SwapchainLifecycleOps for FakeSwapchainOps {
+        unsafe fn create_swapchain(
+            &mut self,
+            old_swapchain: vk::SwapchainKHR,
+        ) -> Result<vk::SwapchainKHR, vk::Result> {
+            self.passed_old_swapchains.push(old_swapchain);
+            self.create_results
+                .pop_front()
+                .expect("unexpected create_swapchain call")
+        }
+
+        unsafe fn destroy_swapchain(&mut self, swapchain: vk::SwapchainKHR) {
+            self.destroyed_swapchains.push(swapchain);
+        }
+
+        unsafe fn get_swapchain_images(
+            &mut self,
+            _swapchain: vk::SwapchainKHR,
+        ) -> Result<Vec<vk::Image>, vk::Result> {
+            self.images_results
+                .pop_front()
+                .expect("unexpected get_swapchain_images call")
+        }
+
+        unsafe fn create_semaphore(&mut self) -> Result<vk::Semaphore, vk::Result> {
+            if let Some(result) = self.semaphore_results.pop_front() {
+                return result;
+            }
+            let raw = self.next_semaphore_raw;
+            self.next_semaphore_raw += 1;
+            Ok(vk::Semaphore::from_raw(raw))
+        }
+
+        unsafe fn destroy_semaphore(&mut self, semaphore: vk::Semaphore) {
+            self.destroyed_semaphores.push(semaphore);
+        }
+    }
+
+    #[test]
+    fn retired_swapchain_is_destroyed_and_not_reused_after_out_of_date() {
+        let initial_swapchain = vk::SwapchainKHR::from_raw(0x10);
+        let replacement_swapchain = vk::SwapchainKHR::from_raw(0x20);
+        let old_sem_a = vk::Semaphore::from_raw(0x101);
+        let old_sem_b = vk::Semaphore::from_raw(0x102);
+
+        let mut swapchain = initial_swapchain;
+        let mut swapchain_images = vec![vk::Image::from_raw(1), vk::Image::from_raw(2)];
+        let mut present_semaphores = vec![old_sem_a, old_sem_b];
+        let mut present_mode = vk::PresentModeKHR::FIFO;
+        let mut image_initialized = vec![true, true];
+        let mut swapchain_format = vk::Format::B8G8R8A8_UNORM;
+        let mut swapchain_extent = vk::Extent2D {
+            width: 320,
+            height: 240,
+        };
+        let mut requested_extent = swapchain_extent;
+        let mut vsync = true;
+        let mut swapchain_dirty = true;
+        let mut current_frame = 1;
+
+        let mut ops = FakeSwapchainOps::new();
+        ops.create_results
+            .push_back(Err(vk::Result::ERROR_OUT_OF_DATE_KHR));
+        ops.create_results.push_back(Ok(replacement_swapchain));
+        ops.images_results.push_back(Ok(vec![
+            vk::Image::from_raw(10),
+            vk::Image::from_raw(11),
+            vk::Image::from_raw(12),
+        ]));
+
+        let mut state = SwapchainState {
+            swapchain: &mut swapchain,
+            swapchain_images: &mut swapchain_images,
+            present_semaphores: &mut present_semaphores,
+            present_mode: &mut present_mode,
+            image_initialized: &mut image_initialized,
+            swapchain_format: &mut swapchain_format,
+            swapchain_extent: &mut swapchain_extent,
+            requested_extent: &mut requested_extent,
+            vsync: &mut vsync,
+            swapchain_dirty: &mut swapchain_dirty,
+            current_frame: &mut current_frame,
+        };
+
+        // 1. Existing swapchain -> recreate fails with ERROR_OUT_OF_DATE_KHR.
+        let status = unsafe {
+            state.replace_swapchain_resources(
+                vk::Format::B8G8R8A8_UNORM,
+                vk::Extent2D {
+                    width: 640,
+                    height: 480,
+                },
+                vk::Extent2D {
+                    width: 640,
+                    height: 480,
+                },
+                vk::PresentModeKHR::MAILBOX,
+                false,
+                &mut ops,
+            )
+        }
+        .expect("out-of-date should return recoverable status");
+        assert_eq!(status, VulkanStatus::SwapchainOutOfDate);
+        assert!(ops.passed_old_swapchains == vec![initial_swapchain]);
+        assert!(ops.destroyed_swapchains == vec![initial_swapchain]);
+        assert!(ops.destroyed_semaphores == vec![old_sem_a, old_sem_b]);
+        assert!(*state.swapchain == vk::SwapchainKHR::null());
+        assert!(state.swapchain_images.is_empty());
+        assert!(state.present_semaphores.is_empty());
+        assert!(state.image_initialized.is_empty());
+        assert!(*state.swapchain_format == vk::Format::UNDEFINED);
+        assert_eq!((state.swapchain_extent.width, state.swapchain_extent.height), (0, 0));
+        assert_eq!((state.requested_extent.width, state.requested_extent.height), (0, 0));
+        assert!(*state.swapchain_dirty);
+        assert_eq!(*state.current_frame, 0);
+
+        // 2. Subsequent recreate succeeds and must pass VK_NULL_HANDLE as oldSwapchain.
+        let status = unsafe {
+            state.replace_swapchain_resources(
+                vk::Format::B8G8R8A8_UNORM,
+                vk::Extent2D {
+                    width: 640,
+                    height: 480,
+                },
+                vk::Extent2D {
+                    width: 640,
+                    height: 480,
+                },
+                vk::PresentModeKHR::MAILBOX,
+                false,
+                &mut ops,
+            )
+        }
+        .expect("second recreate should succeed");
+        assert_eq!(status, VulkanStatus::Ok);
+        assert!(
+            ops.passed_old_swapchains == vec![initial_swapchain, vk::SwapchainKHR::null()]
+        );
+        assert!(ops.destroyed_swapchains == vec![initial_swapchain]);
+        assert!(*state.swapchain == replacement_swapchain);
+        assert_eq!(state.swapchain_images.len(), 3);
+        assert_eq!(state.present_semaphores.len(), 3);
+        assert_eq!(*state.image_initialized, vec![false, false, false]);
+        assert!(*state.swapchain_format == vk::Format::B8G8R8A8_UNORM);
+        assert_eq!(
+            (state.swapchain_extent.width, state.swapchain_extent.height),
+            (640, 480)
+        );
+        assert_eq!(
+            (state.requested_extent.width, state.requested_extent.height),
+            (640, 480)
+        );
+        assert!(*state.present_mode == vk::PresentModeKHR::MAILBOX);
+        assert!(!*state.vsync);
+        assert!(!*state.swapchain_dirty);
+        assert_eq!(*state.current_frame, 0);
+    }
+
+    #[test]
+    fn retired_swapchain_and_partial_resources_cleaned_up_on_hard_errors() {
+        let initial_swapchain = vk::SwapchainKHR::from_raw(0x30);
+        let new_swapchain = vk::SwapchainKHR::from_raw(0x40);
+        let old_sem = vk::Semaphore::from_raw(0x301);
+        let partial_sem = vk::Semaphore::from_raw(0x401);
+
+        let mut swapchain = initial_swapchain;
+        let mut swapchain_images = vec![vk::Image::from_raw(1)];
+        let mut present_semaphores = vec![old_sem];
+        let mut present_mode = vk::PresentModeKHR::FIFO;
+        let mut image_initialized = vec![true];
+        let mut swapchain_format = vk::Format::B8G8R8A8_UNORM;
+        let mut swapchain_extent = vk::Extent2D {
+            width: 100,
+            height: 100,
+        };
+        let mut requested_extent = swapchain_extent;
+        let mut vsync = true;
+        let mut swapchain_dirty = false;
+        let mut current_frame = 1;
+
+        let mut ops = FakeSwapchainOps::new();
+        ops.create_results.push_back(Ok(new_swapchain));
+        ops.images_results
+            .push_back(Ok(vec![vk::Image::from_raw(2), vk::Image::from_raw(3)]));
+        ops.semaphore_results.push_back(Ok(partial_sem));
+        ops.semaphore_results
+            .push_back(Err(vk::Result::ERROR_OUT_OF_HOST_MEMORY));
+
+        let mut state = SwapchainState {
+            swapchain: &mut swapchain,
+            swapchain_images: &mut swapchain_images,
+            present_semaphores: &mut present_semaphores,
+            present_mode: &mut present_mode,
+            image_initialized: &mut image_initialized,
+            swapchain_format: &mut swapchain_format,
+            swapchain_extent: &mut swapchain_extent,
+            requested_extent: &mut requested_extent,
+            vsync: &mut vsync,
+            swapchain_dirty: &mut swapchain_dirty,
+            current_frame: &mut current_frame,
+        };
+
+        let err = unsafe {
+            state.replace_swapchain_resources(
+                vk::Format::B8G8R8A8_UNORM,
+                vk::Extent2D {
+                    width: 200,
+                    height: 200,
+                },
+                vk::Extent2D {
+                    width: 200,
+                    height: 200,
+                },
+                vk::PresentModeKHR::FIFO,
+                true,
+                &mut ops,
+            )
+        }
+        .expect_err("semaphore allocation failure should return Err");
+        assert!(err.contains("present semaphore"));
+        assert!(ops.passed_old_swapchains == vec![initial_swapchain]);
+        assert!(ops.destroyed_swapchains == vec![initial_swapchain, new_swapchain]);
+        assert!(ops.destroyed_semaphores == vec![old_sem, partial_sem]);
+        assert!(*state.swapchain == vk::SwapchainKHR::null());
+        assert!(state.swapchain_images.is_empty());
+        assert!(state.present_semaphores.is_empty());
+        assert!(state.image_initialized.is_empty());
+        assert!(*state.swapchain_dirty);
+    }
 
     #[test]
     fn creates_vulkan_instance_with_win32_surface_extensions() {
