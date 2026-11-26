@@ -84,6 +84,7 @@ public:
 		std::function<VulkanPresentResult(const RECT& source, int width, int height, bool vsync, std::string& errorOut)> present;
 		std::function<void()> release;
 		std::function<void(const std::string&)> log;
+		std::function<bool(UINT_PTR timerId, unsigned int delayMs)> setTimer;
 	};
 
 	void SetVulkanTestHooks(VulkanTestHooks* hooks);
@@ -94,8 +95,10 @@ public:
 		unsigned int transientDelayMs = TileSetVulkanRecovery::kDefaultTransientSwapchainDelayMs);
 	const TileSetVulkanRecovery& GetVulkanRecoveryForTest() const { return m_vulkanRecovery; }
 	const RECT& GetRetryButtonRectForTest() const { return m_retryButtonRect; }
-	bool IsRetryTimerActiveForTest() const { return m_retryTimerActive; }
-	bool IsTransientTimerActiveForTest() const { return m_transientSwapchainTimerActive; }
+	bool IsRetryTimerActiveForTest() const { return m_activeRetryTimerId != 0; }
+	bool IsTransientTimerActiveForTest() const { return m_activeTransientTimerId != 0; }
+	UINT_PTR GetActiveRetryTimerIdForTest() const { return m_activeRetryTimerId; }
+	UINT_PTR GetActiveTransientTimerIdForTest() const { return m_activeTransientTimerId; }
 	void TriggerDrawForTest(CDC* pDC) { OnDraw(pDC); }
 
 	virtual void AssertValid() const;
@@ -122,17 +125,14 @@ protected:
 		DWORD imageIndex;
 	};
 
-	static constexpr UINT_PTR kVulkanRetryTimerId = 1;
-	static constexpr UINT_PTR kVulkanTransientSwapchainTimerId = 2;
-
 	TileSetVulkanInitResult InitializeVulkanRenderer(int width, int height, std::string& errorOut);
 	VulkanPresentResult PresentVulkanScene(const RECT& source, int width, int height, bool vsync, std::string& errorOut);
 	void ReleaseVulkanRenderer();
 	bool IsViewVisible() const;
 	bool IsViewMinimizedOrZeroSized(const RECT& clientRect) const;
 	void ApplyRecoveryAction(const TileSetVulkanRecoveryAction& action);
-	bool StartRecoveryTimer(UINT_PTR timerId, unsigned int delayMs, bool& activeFlag);
-	void CancelRecoveryTimer(UINT_PTR timerId, bool& activeFlag);
+	bool StartRecoveryTimer(UINT_PTR timerId, unsigned int delayMs, UINT_PTR& activeTimerId);
+	void CancelRecoveryTimer(UINT_PTR& activeTimerId);
 	void LogRecoveryMessage(const std::string& message);
 	void DrawRecoveryFallback(CDC* pDC, const RECT& clientRect);
 
@@ -146,8 +146,8 @@ protected:
 	rs_vulkan_renderer* m_vulkanRenderer = nullptr;
 	std::unique_ptr<VulkanScene> m_gpuScene;
 	TileSetVulkanRecovery m_vulkanRecovery;
-	bool m_retryTimerActive = false;
-	bool m_transientSwapchainTimerActive = false;
+	UINT_PTR m_activeRetryTimerId = 0;
+	UINT_PTR m_activeTransientTimerId = 0;
 	RECT m_retryButtonRect{};
 #ifdef _DEBUG
 	struct DebugFaultInjection

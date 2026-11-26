@@ -51,8 +51,8 @@ CTileSetBrowserView::CTileSetBrowserView()
 
 CTileSetBrowserView::~CTileSetBrowserView()
 {
-	m_retryTimerActive = false;
-	m_transientSwapchainTimerActive = false;
+	m_activeRetryTimerId = 0;
+	m_activeTransientTimerId = 0;
 	ReleaseVulkanRenderer();
 }
 
@@ -140,8 +140,8 @@ void CTileSetBrowserView::SetRecoveryConfigForTest(
 	int maxTransientSwapchainRetries,
 	unsigned int transientDelayMs)
 {
-	CancelRecoveryTimer(kVulkanRetryTimerId, m_retryTimerActive);
-	CancelRecoveryTimer(kVulkanTransientSwapchainTimerId, m_transientSwapchainTimerActive);
+	CancelRecoveryTimer(m_activeRetryTimerId);
+	CancelRecoveryTimer(m_activeTransientTimerId);
 	m_vulkanRecovery = TileSetVulkanRecovery(
 		maxAutoRetries,
 		retryDelayMs,
@@ -297,21 +297,34 @@ bool CTileSetBrowserView::IsViewMinimizedOrZeroSized(const RECT& clientRect) con
 	return false;
 }
 
-bool CTileSetBrowserView::StartRecoveryTimer(UINT_PTR timerId, unsigned int delayMs, bool& activeFlag)
+bool CTileSetBrowserView::StartRecoveryTimer(UINT_PTR timerId, unsigned int delayMs, UINT_PTR& activeTimerId)
 {
-	if (m_hWnd == nullptr)
+	if (m_hWnd == nullptr || timerId == 0)
 		return false;
-	if (activeFlag)
-		::KillTimer(m_hWnd, timerId);
-	activeFlag = (::SetTimer(m_hWnd, timerId, delayMs > 0 ? delayMs : 1u, nullptr) != 0);
-	return activeFlag;
+	if (activeTimerId != 0)
+	{
+		::KillTimer(m_hWnd, activeTimerId);
+		activeTimerId = 0;
+	}
+	const unsigned int effectiveDelay = delayMs > 0 ? delayMs : 1u;
+#ifdef _DEBUG
+	if (m_testHooks != nullptr && m_testHooks->setTimer && !m_testHooks->setTimer(timerId, effectiveDelay))
+		return false;
+#endif
+	if (::SetTimer(m_hWnd, timerId, effectiveDelay, nullptr) == 0)
+		return false;
+	activeTimerId = timerId;
+	return true;
 }
 
-void CTileSetBrowserView::CancelRecoveryTimer(UINT_PTR timerId, bool& activeFlag)
+void CTileSetBrowserView::CancelRecoveryTimer(UINT_PTR& activeTimerId)
 {
-	if (activeFlag && m_hWnd != nullptr)
-		::KillTimer(m_hWnd, timerId);
-	activeFlag = false;
+	if (activeTimerId != 0)
+	{
+		if (m_hWnd != nullptr)
+			::KillTimer(m_hWnd, activeTimerId);
+		activeTimerId = 0;
+	}
 }
 
 void CTileSetBrowserView::LogRecoveryMessage(const std::string& message)
@@ -335,26 +348,46 @@ void CTileSetBrowserView::ApplyRecoveryAction(const TileSetVulkanRecoveryAction&
 		ReleaseVulkanRenderer();
 
 	if (action.cancelRetryTimer)
-		CancelRecoveryTimer(kVulkanRetryTimerId, m_retryTimerActive);
+		CancelRecoveryTimer(m_activeRetryTimerId);
 
 	if (action.cancelTransientTimer)
-		CancelRecoveryTimer(kVulkanTransientSwapchainTimerId, m_transientSwapchainTimerActive);
+		CancelRecoveryTimer(m_activeTransientTimerId);
 
 	if (!action.logMessage.empty())
 		LogRecoveryMessage(action.logMessage);
 
 	if (action.startRetryTimer)
 	{
-		if (!StartRecoveryTimer(kVulkanRetryTimerId, action.retryDelayMs, m_retryTimerActive))
+		if (!StartRecoveryTimer(
+			static_cast<UINT_PTR>(action.retryTimerToken),
+			action.retryDelayMs,
+			m_activeRetryTimerId))
 		{
 			const TileSetVulkanRecoveryAction fallback = m_vulkanRecovery.OnRetryTimerScheduleFailed();
+			if (fallback.shouldReleaseRenderer)
+				ReleaseVulkanRenderer();
+			if (fallback.cancelRetryTimer)
+				CancelRecoveryTimer(m_activeRetryTimerId);
+			if (fallback.cancelTransientTimer)
+				CancelRecoveryTimer(m_activeTransientTimerId);
 			if (!fallback.logMessage.empty())
 				LogRecoveryMessage(fallback.logMessage);
+			if (fallback.invalidate && m_hWnd != nullptr)
+				Invalidate(FALSE);
 		}
 	}
 
 	if (action.startTransientTimer)
-		StartRecoveryTimer(kVulkanTransientSwapchainTimerId, action.transientDelayMs, m_transientSwapchainTimerActive);
+	{
+		if (!StartRecoveryTimer(
+			static_cast<UINT_PTR>(action.transientTimerToken),
+			action.transientDelayMs,
+			m_activeTransientTimerId))
+		{
+			const TileSetVulkanRecoveryAction fallback = m_vulkanRecovery.OnTransientTimerScheduleFailed();
+			ApplyRecoveryAction(fallback);
+		}
+	}
 
 	if (action.invalidate && m_hWnd != nullptr)
 		Invalidate(FALSE);
@@ -1112,17 +1145,28 @@ void CTileSetBrowserView::OnSize(UINT nType, int cx, int cy)
 
 void CTileSetBrowserView::OnTimer(UINT_PTR nIDEvent)
 {
-	if (nIDEvent == kVulkanRetryTimerId || nIDEvent == kVulkanTransientSwapchainTimerId)
+	const uint64_t token = static_cast<uint64_t>(nIDEvent);
+	const bool isRetryToken = TileSetVulkanRecovery::IsRetryTimerToken(token);
+	const bool isTransientToken = TileSetVulkanRecovery::IsTransientTimerToken(token);
+	if (isRetryToken || isTransientToken)
 	{
+		if (m_hWnd != nullptr)
+			::KillTimer(m_hWnd, nIDEvent);
+
+		if (isRetryToken && nIDEvent == m_activeRetryTimerId)
+			m_activeRetryTimerId = 0;
+		else if (isTransientToken && nIDEvent == m_activeTransientTimerId)
+			m_activeTransientTimerId = 0;
+
 		RECT r{};
 		if (m_hWnd != nullptr)
 			GetClientRect(&r);
 		const int width = r.right - r.left;
 		const int height = r.bottom - r.top;
 		const bool visible = IsViewVisible() && !IsViewMinimizedOrZeroSized(r);
-		const TileSetVulkanRecoveryAction action = (nIDEvent == kVulkanRetryTimerId)
-			? m_vulkanRecovery.OnRetryTimer(visible, width, height)
-			: m_vulkanRecovery.OnTransientSwapchainTimer(visible, width, height);
+		const TileSetVulkanRecoveryAction action = isRetryToken
+			? m_vulkanRecovery.OnRetryTimer(token, visible, width, height)
+			: m_vulkanRecovery.OnTransientSwapchainTimer(token, visible, width, height);
 		ApplyRecoveryAction(action);
 		return;
 	}

@@ -1074,6 +1074,8 @@ void Tests::test_tileset_vulkan_recovery()
 		bool rendererAlive = false;
 		bool retryTimerActive = false;
 		bool transientTimerActive = false;
+		uint64_t activeRetryToken = 0;
+		uint64_t activeTransientToken = 0;
 		int createCount = 0;
 		int destroyCount = 0;
 		int presentCount = 0;
@@ -1084,6 +1086,7 @@ void Tests::test_tileset_vulkan_recovery()
 
 		std::function<TileSetVulkanInitResult(std::string&)> onInit;
 		std::function<VulkanPresentResult(std::string&)> onPresent;
+		std::function<bool(uint64_t, unsigned int)> onSetTimer;
 
 		void Apply(const TileSetVulkanRecoveryAction& action)
 		{
@@ -1095,21 +1098,41 @@ void Tests::test_tileset_vulkan_recovery()
 			if (action.cancelRetryTimer && retryTimerActive)
 			{
 				retryTimerActive = false;
+				activeRetryToken = 0;
 				++timerCancelCount;
 			}
 			if (action.cancelTransientTimer && transientTimerActive)
 			{
 				transientTimerActive = false;
+				activeTransientToken = 0;
 			}
 			if (!action.logMessage.empty())
 				logs.push_back(action.logMessage);
 			if (action.startRetryTimer)
 			{
-				retryTimerActive = true;
-				++timerStartCount;
+				if (onSetTimer && !onSetTimer(action.retryTimerToken, action.retryDelayMs))
+				{
+					Apply(recovery.OnRetryTimerScheduleFailed());
+				}
+				else
+				{
+					retryTimerActive = true;
+					activeRetryToken = action.retryTimerToken;
+					++timerStartCount;
+				}
 			}
 			if (action.startTransientTimer)
-				transientTimerActive = true;
+			{
+				if (onSetTimer && !onSetTimer(action.transientTimerToken, action.transientDelayMs))
+				{
+					Apply(recovery.OnTransientTimerScheduleFailed());
+				}
+				else
+				{
+					transientTimerActive = true;
+					activeTransientToken = action.transientTimerToken;
+				}
+			}
 			if (action.invalidate)
 				++invalidateCount;
 		}
@@ -1146,14 +1169,24 @@ void Tests::test_tileset_vulkan_recovery()
 			Apply(recovery.OnPresentResult(presentRes, error));
 		}
 
+		void FireRetryTimerToken(uint64_t token)
+		{
+			Apply(recovery.OnRetryTimer(token, visible && !minimized, width, height));
+		}
+
 		void FireRetryTimer()
 		{
-			Apply(recovery.OnRetryTimer(visible && !minimized, width, height));
+			FireRetryTimerToken(activeRetryToken);
+		}
+
+		void FireTransientTimerToken(uint64_t token)
+		{
+			Apply(recovery.OnTransientSwapchainTimer(token, visible && !minimized, width, height));
 		}
 
 		void FireTransientTimer()
 		{
-			Apply(recovery.OnTransientSwapchainTimer(visible && !minimized, width, height));
+			FireTransientTimerToken(activeTransientToken);
 		}
 
 		void Resize(bool isMinimized, int w, int h)
@@ -1381,7 +1414,136 @@ void Tests::test_tileset_vulkan_recovery()
 		TEST(h.createCount == createsBefore);
 	}
 
-	// 6. Real CTileSetBrowserView window integration test using test double hooks.
+		// 5b. Consecutive repaints while waiting for the transient timer must NOT
+		// consume the transient out-of-date budget or escalate to a hard failure.
+		{
+			RecoveryHarness h;
+			h.onPresent = [](std::string&) { return VulkanPresentResult::SwapchainOutOfDate; };
+			h.Paint();
+			TEST(h.rendererAlive && h.presentCount == 1);
+			TEST(h.transientTimerActive && h.recovery.IsWaitingForTransientRetry());
+			TEST(h.recovery.GetConsecutiveSwapchainRetries() == 1);
+			TEST(h.recovery.GetConsecutiveFailures() == 0);
+			TEST(h.recovery.GetState() == TileSetVulkanRecoveryState::Healthy);
+
+			// Repeat 6 ordinary repaints + redundant same-size WM_SIZE without firing timer.
+			for (int i = 0; i < 6; ++i)
+				h.Paint();
+			h.Resize(false, h.width, h.height);
+			h.Paint();
+			TEST(h.presentCount == 1);
+			TEST(h.rendererAlive && h.destroyCount == 0);
+			TEST(h.recovery.GetConsecutiveSwapchainRetries() == 1);
+			TEST(h.recovery.GetConsecutiveFailures() == 0);
+			TEST(h.recovery.GetState() == TileSetVulkanRecoveryState::Healthy);
+			TEST(h.transientTimerActive);
+
+			// Once the active transient timer fires, the next paint proceeds and recovers.
+			h.onPresent = [](std::string&) { return VulkanPresentResult::Succeeded; };
+			h.FireTransientTimer();
+			TEST(!h.transientTimerActive && !h.recovery.IsWaitingForTransientRetry());
+			h.Paint();
+			TEST(h.presentCount == 2 && h.rendererAlive);
+			TEST(h.recovery.GetConsecutiveSwapchainRetries() == 0);
+			TEST(h.recovery.GetState() == TileSetVulkanRecoveryState::Healthy);
+		}
+
+		// 5c. After cancel & reschedule, stale timer tokens from the previous round
+		// must NOT wake the new round (for both retry and transient timers).
+		{
+			RecoveryHarness h;
+			h.onPresent = [](std::string& err)
+			{
+				err = "scene present: ERROR_DEVICE_LOST";
+				return VulkanPresentResult::Failed;
+			};
+
+			h.Paint(); // failure #1 -> RetryScheduled with token1
+			const uint64_t staleRetryToken = h.activeRetryToken;
+			TEST(staleRetryToken != 0 && h.retryTimerActive);
+
+			// Hide cancels token1; show reschedules with a distinct token2.
+			h.SetVisible(false);
+			TEST(!h.retryTimerActive && h.recovery.GetState() == TileSetVulkanRecoveryState::RetryPaused);
+			h.SetVisible(true);
+			const uint64_t freshRetryToken = h.activeRetryToken;
+			TEST(freshRetryToken != 0 && freshRetryToken != staleRetryToken);
+			TEST(h.recovery.GetState() == TileSetVulkanRecoveryState::RetryScheduled);
+
+			// Stale queued WM_TIMER carrying token1 must NOT wake the new round.
+			const int invalidatesBefore = h.invalidateCount;
+			h.FireRetryTimerToken(staleRetryToken);
+			TEST(h.recovery.GetState() == TileSetVulkanRecoveryState::RetryScheduled);
+			TEST(h.retryTimerActive && h.activeRetryToken == freshRetryToken);
+			TEST(h.invalidateCount == invalidatesBefore);
+			h.Paint();
+			TEST(h.createCount == 1 && h.presentCount == 1);
+
+			// Genuine token2 wakes the new round.
+			h.FireRetryTimerToken(freshRetryToken);
+			TEST(h.recovery.GetState() == TileSetVulkanRecoveryState::RetryDue);
+			TEST(!h.retryTimerActive);
+			h.onPresent = [](std::string&) { return VulkanPresentResult::Succeeded; };
+			h.Paint();
+			TEST(h.createCount == 2 && h.presentCount == 2 && h.rendererAlive);
+			TEST(h.recovery.GetState() == TileSetVulkanRecoveryState::Healthy);
+
+			// Same generation isolation for transient swapchain timers.
+			h.onPresent = [](std::string&) { return VulkanPresentResult::SwapchainOutOfDate; };
+			h.Paint();
+			const uint64_t staleTransientToken = h.activeTransientToken;
+			TEST(staleTransientToken != 0 && h.transientTimerActive);
+
+			// Resize cancels old transient timer; next Paint schedules a fresh generation.
+			h.Resize(false, 280, 360);
+			TEST(!h.transientTimerActive);
+			h.Paint();
+			const uint64_t freshTransientToken = h.activeTransientToken;
+			TEST(freshTransientToken != 0 && freshTransientToken != staleTransientToken);
+			const int presentsBefore = h.presentCount;
+
+			// Stale transient token must NOT unblock painting or cancel the active timer.
+			h.FireTransientTimerToken(staleTransientToken);
+			TEST(h.transientTimerActive && h.activeTransientToken == freshTransientToken);
+			TEST(h.recovery.IsWaitingForTransientRetry());
+			h.Paint();
+			TEST(h.presentCount == presentsBefore);
+
+			// Genuine transient token unblocks painting.
+			h.onPresent = [](std::string&) { return VulkanPresentResult::Succeeded; };
+			h.FireTransientTimerToken(freshTransientToken);
+			TEST(!h.transientTimerActive && !h.recovery.IsWaitingForTransientRetry());
+			h.Paint();
+			TEST(h.presentCount == presentsBefore + 1);
+		}
+
+		// 5d. Transient SetTimer failure must not strand the view in a permanent wait.
+		{
+			RecoveryHarness h;
+			h.onPresent = [](std::string&) { return VulkanPresentResult::SwapchainOutOfDate; };
+			// Fail transient SetTimer only; allow retry SetTimer to succeed.
+			h.onSetTimer = [](uint64_t token, unsigned int)
+			{
+				return !TileSetVulkanRecovery::IsTransientTimerToken(token);
+			};
+			h.Paint();
+			TEST(!h.transientTimerActive && !h.recovery.IsWaitingForTransientRetry());
+			TEST(!h.rendererAlive && h.destroyCount == 1);
+			TEST(h.recovery.GetState() == TileSetVulkanRecoveryState::RetryScheduled);
+			TEST(h.retryTimerActive);
+			TEST(h.logs.size() == 1);
+
+			// If SetTimer also fails for the retry timer, recovery stops cleanly with fallback.
+			h.onSetTimer = [](uint64_t, unsigned int) { return false; };
+			h.FireRetryTimer();
+			h.Paint();
+			TEST(!h.transientTimerActive && !h.retryTimerActive);
+			TEST(h.recovery.IsStopped());
+			TEST(h.recovery.ShouldDrawFallback());
+			TEST(h.logs.size() == 2);
+		}
+
+		// 6. Real CTileSetBrowserView window integration test using test double hooks.
 	{
 		if (AfxGetInstanceHandle() == nullptr)
 			AfxWinInit(::GetModuleHandle(nullptr), nullptr, ::GetCommandLine(), 0);
@@ -1406,7 +1568,9 @@ void Tests::test_tileset_vulkan_recovery()
 		int creates = 0;
 		int destroys = 0;
 		int presents = 0;
-		bool failPresent = true;
+		VulkanPresentResult nextPresentResult = VulkanPresentResult::Failed;
+		bool allowRetrySetTimer = true;
+		bool allowTransientSetTimer = true;
 		std::vector<std::string> viewLogs;
 
 		CTileSetBrowserView::VulkanTestHooks hooks{};
@@ -1418,15 +1582,20 @@ void Tests::test_tileset_vulkan_recovery()
 		hooks.present = [&](const RECT&, int, int, bool, std::string& errorOut)
 		{
 			++presents;
-			if (failPresent)
-			{
+			if (nextPresentResult == VulkanPresentResult::Failed)
 				errorOut = "mock present failure";
-				return VulkanPresentResult::Failed;
-			}
-			return VulkanPresentResult::Succeeded;
+			return nextPresentResult;
 		};
 		hooks.release = [&]() { ++destroys; };
 		hooks.log = [&](const std::string& msg) { viewLogs.push_back(msg); };
+		hooks.setTimer = [&](UINT_PTR timerId, unsigned int)
+		{
+			if (TileSetVulkanRecovery::IsRetryTimerToken(static_cast<uint64_t>(timerId)))
+				return allowRetrySetTimer;
+			if (TileSetVulkanRecovery::IsTransientTimerToken(static_cast<uint64_t>(timerId)))
+				return allowTransientSetTimer;
+			return true;
+		};
 
 		view.SetVulkanTestHooks(&hooks);
 		view.SetRecoveryConfigForTest(3, 15, 3, 15);
@@ -1443,7 +1612,9 @@ void Tests::test_tileset_vulkan_recovery()
 		TEST(view.IsRetryTimerActiveForTest());
 		for (int retry = 1; retry <= 3; ++retry)
 		{
-			view.SendMessage(WM_TIMER, 1, 0);
+			const UINT_PTR timerId = view.GetActiveRetryTimerIdForTest();
+			TEST(timerId != 0);
+			view.SendMessage(WM_TIMER, timerId, 0);
 			drawView();
 			TEST(creates == 1 + retry && destroys == 1 + retry && presents == 1 + retry);
 		}
@@ -1461,7 +1632,7 @@ void Tests::test_tileset_vulkan_recovery()
 		// Retry button is laid out; clicking it after clearing fault recovers!
 		const RECT retryRect = view.GetRetryButtonRectForTest();
 		TEST(retryRect.right > retryRect.left && retryRect.bottom > retryRect.top);
-		failPresent = false;
+		nextPresentResult = VulkanPresentResult::Succeeded;
 		const int clickX = (retryRect.left + retryRect.right) / 2;
 		const int clickY = (retryRect.top + retryRect.bottom) / 2;
 		view.SendMessage(WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(clickX, clickY));
@@ -1469,14 +1640,63 @@ void Tests::test_tileset_vulkan_recovery()
 		TEST(creates == 5 && destroys == 4 && presents == 5);
 		TEST(view.GetVulkanRecoveryForTest().GetState() == TileSetVulkanRecoveryState::Healthy);
 
-		// Hiding and destroying while a retry timer is pending cancels timer and releases safely.
-		failPresent = true;
+		// Consecutive repaints while transient swapchain timer is pending do NOT consume budget.
+		nextPresentResult = VulkanPresentResult::SwapchainOutOfDate;
 		drawView();
+		TEST(presents == 6 && destroys == 4);
+		TEST(view.IsTransientTimerActiveForTest());
+		TEST(view.GetVulkanRecoveryForTest().GetConsecutiveSwapchainRetries() == 1);
+		const UINT_PTR firstTransientId = view.GetActiveTransientTimerIdForTest();
+		for (int i = 0; i < 5; ++i)
+			drawView();
+		TEST(presents == 6 && destroys == 4);
+		TEST(view.GetVulkanRecoveryForTest().GetConsecutiveSwapchainRetries() == 1);
+		TEST(view.GetVulkanRecoveryForTest().GetState() == TileSetVulkanRecoveryState::Healthy);
+
+		// Cancel & reschedule transient timer via resize; old WM_TIMER ID must NOT wake new round.
+		view.SendMessage(WM_SIZE, SIZE_RESTORED, MAKELPARAM(310, 225));
+		TEST(!view.IsTransientTimerActiveForTest());
+		drawView();
+		TEST(presents == 7);
+		const UINT_PTR secondTransientId = view.GetActiveTransientTimerIdForTest();
+		TEST(secondTransientId != 0 && secondTransientId != firstTransientId);
+		view.SendMessage(WM_TIMER, firstTransientId, 0);
+		TEST(view.IsTransientTimerActiveForTest());
+		TEST(view.GetActiveTransientTimerIdForTest() == secondTransientId);
+		drawView();
+		TEST(presents == 7);
+		nextPresentResult = VulkanPresentResult::Succeeded;
+		view.SendMessage(WM_TIMER, secondTransientId, 0);
+		TEST(!view.IsTransientTimerActiveForTest());
+		drawView();
+		TEST(presents == 8);
+
+		// Transient SetTimer failure escalates cleanly instead of hanging forever.
+		allowTransientSetTimer = false;
+		nextPresentResult = VulkanPresentResult::SwapchainOutOfDate;
+		drawView();
+		TEST(!view.IsTransientTimerActiveForTest());
 		TEST(view.IsRetryTimerActiveForTest());
+		TEST(destroys == 5);
+		TEST(view.GetVulkanRecoveryForTest().GetState() == TileSetVulkanRecoveryState::RetryScheduled);
+		allowTransientSetTimer = true;
+
+		// Hiding and showing cancels & reschedules retry timer with a new generation;
+		// a stale WM_TIMER carrying the old ID must NOT wake the new round.
+		const UINT_PTR staleRetryId = view.GetActiveRetryTimerIdForTest();
+		TEST(staleRetryId != 0);
 		view.ShowWindow(SW_HIDE);
 		TEST(!view.IsRetryTimerActiveForTest());
 		view.ShowWindow(SW_SHOW);
+		const UINT_PTR freshRetryId = view.GetActiveRetryTimerIdForTest();
+		TEST(freshRetryId != 0 && freshRetryId != staleRetryId);
+		view.SendMessage(WM_TIMER, staleRetryId, 0);
 		TEST(view.IsRetryTimerActiveForTest());
+		TEST(view.GetActiveRetryTimerIdForTest() == freshRetryId);
+		TEST(view.GetVulkanRecoveryForTest().GetState() == TileSetVulkanRecoveryState::RetryScheduled);
+		drawView();
+		TEST(creates == 5); // still blocked while waiting for freshRetryId
+
 		view.DestroyWindow();
 		TEST(!view.IsRetryTimerActiveForTest());
 		hostWindow.DestroyWindow();

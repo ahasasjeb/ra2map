@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include "VulkanScene.h"
 
@@ -24,9 +25,11 @@ struct TileSetVulkanRecoveryAction
 {
 	bool startRetryTimer = false;
 	unsigned int retryDelayMs = 0;
+	uint64_t retryTimerToken = 0;
 	bool cancelRetryTimer = false;
 	bool startTransientTimer = false;
 	unsigned int transientDelayMs = 0;
+	uint64_t transientTimerToken = 0;
 	bool cancelTransientTimer = false;
 	bool invalidate = false;
 	bool shouldReleaseRenderer = false;
@@ -44,6 +47,19 @@ public:
 	static constexpr unsigned int kDefaultRetryDelayMs = 250;
 	static constexpr int kDefaultMaxTransientSwapchainRetries = 3;
 	static constexpr unsigned int kDefaultTransientSwapchainDelayMs = 50;
+	static constexpr uint64_t kRetryTimerTokenBase = 0x10000u;
+	static constexpr uint64_t kTransientTimerTokenBase = 0x20000u;
+	static constexpr uint64_t kTimerTokenGenerationMask = 0xFFFFu;
+
+	static bool IsRetryTimerToken(uint64_t token)
+	{
+		return token >= kRetryTimerTokenBase && token <= (kRetryTimerTokenBase | kTimerTokenGenerationMask);
+	}
+
+	static bool IsTransientTimerToken(uint64_t token)
+	{
+		return token >= kTransientTimerTokenBase && token <= (kTransientTimerTokenBase | kTimerTokenGenerationMask);
+	}
 
 	explicit TileSetVulkanRecovery(
 		int maxAutoRetries = kDefaultMaxAutoRetries,
@@ -61,6 +77,9 @@ public:
 	int GetConsecutiveFailures() const { return m_consecutiveFailures; }
 	int GetMaxAutoRetries() const { return m_maxAutoRetries; }
 	int GetConsecutiveSwapchainRetries() const { return m_consecutiveSwapchainRetries; }
+	uint64_t GetActiveRetryTimerToken() const { return m_activeRetryTimerToken; }
+	uint64_t GetActiveTransientTimerToken() const { return m_activeTransientTimerToken; }
+	bool IsWaitingForTransientRetry() const { return m_activeTransientTimerToken != 0; }
 	bool IsStopped() const { return m_state == TileSetVulkanRecoveryState::Stopped; }
 	bool IsRecovering() const
 	{
@@ -90,13 +109,24 @@ public:
 		}
 
 		if (m_state == TileSetVulkanRecoveryState::Healthy || m_state == TileSetVulkanRecoveryState::RetryDue)
+		{
+			if (m_activeTransientTimerToken != 0)
+				return false;
+			if (m_lastWidth == 0 && m_lastHeight == 0)
+			{
+				m_lastWidth = width;
+				m_lastHeight = height;
+			}
 			return true;
+		}
 
 		if (m_state == TileSetVulkanRecoveryState::RetryPaused)
 		{
 			m_state = TileSetVulkanRecoveryState::RetryScheduled;
+			m_activeRetryTimerToken = NextRetryTimerToken();
 			outAction.startRetryTimer = true;
 			outAction.retryDelayMs = m_retryDelayMs;
+			outAction.retryTimerToken = m_activeRetryTimerToken;
 		}
 		return false;
 	}
@@ -127,6 +157,8 @@ public:
 			m_state = TileSetVulkanRecoveryState::Healthy;
 			m_consecutiveFailures = 0;
 			m_consecutiveSwapchainRetries = 0;
+			m_activeRetryTimerToken = 0;
+			m_activeTransientTimerToken = 0;
 			m_firstError.clear();
 			m_lastError.clear();
 			m_hasLoggedFirstError = false;
@@ -148,10 +180,12 @@ public:
 	TileSetVulkanRecoveryAction OnMinimizedOrHidden()
 	{
 		TileSetVulkanRecoveryAction action{};
+		m_activeTransientTimerToken = 0;
 		action.cancelTransientTimer = true;
 		if (m_state == TileSetVulkanRecoveryState::RetryScheduled || m_state == TileSetVulkanRecoveryState::RetryDue)
 		{
 			m_state = TileSetVulkanRecoveryState::RetryPaused;
+			m_activeRetryTimerToken = 0;
 			action.cancelRetryTimer = true;
 		}
 		return action;
@@ -166,21 +200,29 @@ public:
 		if (minimized || width <= 0 || height <= 0)
 			return OnMinimizedOrHidden();
 
-		if (width != m_lastWidth || height != m_lastHeight)
+		const bool sizeChanged = (width != m_lastWidth || height != m_lastHeight);
+		if (sizeChanged)
 		{
 			m_lastWidth = width;
 			m_lastHeight = height;
 			m_consecutiveSwapchainRetries = 0;
+			m_activeTransientTimerToken = 0;
+			action.cancelTransientTimer = true;
+			action.invalidate = true;
+		}
+		else if (m_activeTransientTimerToken == 0)
+		{
+			action.invalidate = true;
 		}
 
-		action.cancelTransientTimer = true;
 		if (m_state == TileSetVulkanRecoveryState::RetryPaused && visible)
 		{
 			m_state = TileSetVulkanRecoveryState::RetryScheduled;
+			m_activeRetryTimerToken = NextRetryTimerToken();
 			action.startRetryTimer = true;
 			action.retryDelayMs = m_retryDelayMs;
+			action.retryTimerToken = m_activeRetryTimerToken;
 		}
-		action.invalidate = true;
 		return action;
 	}
 
@@ -196,18 +238,24 @@ public:
 		if (m_state == TileSetVulkanRecoveryState::RetryPaused && width > 0 && height > 0)
 		{
 			m_state = TileSetVulkanRecoveryState::RetryScheduled;
+			m_activeRetryTimerToken = NextRetryTimerToken();
 			action.startRetryTimer = true;
 			action.retryDelayMs = m_retryDelayMs;
+			action.retryTimerToken = m_activeRetryTimerToken;
 			action.invalidate = true;
 		}
 		return action;
 	}
 
-	TileSetVulkanRecoveryAction OnRetryTimer(bool visible, int width, int height)
+	TileSetVulkanRecoveryAction OnRetryTimer(uint64_t timerToken, bool visible, int width, int height)
 	{
 		TileSetVulkanRecoveryAction action{};
+		if (m_destroyed || timerToken == 0 || timerToken != m_activeRetryTimerToken)
+			return action;
+
+		m_activeRetryTimerToken = 0;
 		action.cancelRetryTimer = true;
-		if (m_destroyed || m_state != TileSetVulkanRecoveryState::RetryScheduled)
+		if (m_state != TileSetVulkanRecoveryState::RetryScheduled)
 			return action;
 
 		if (!visible || width <= 0 || height <= 0)
@@ -221,11 +269,15 @@ public:
 		return action;
 	}
 
-	TileSetVulkanRecoveryAction OnTransientSwapchainTimer(bool visible, int width, int height)
+	TileSetVulkanRecoveryAction OnTransientSwapchainTimer(uint64_t timerToken, bool visible, int width, int height)
 	{
 		TileSetVulkanRecoveryAction action{};
+		if (m_destroyed || timerToken == 0 || timerToken != m_activeTransientTimerToken)
+			return action;
+
+		m_activeTransientTimerToken = 0;
 		action.cancelTransientTimer = true;
-		if (m_destroyed || !visible || width <= 0 || height <= 0)
+		if (!visible || width <= 0 || height <= 0)
 			return action;
 
 		if (m_state == TileSetVulkanRecoveryState::Healthy || m_state == TileSetVulkanRecoveryState::RetryDue)
@@ -236,8 +288,12 @@ public:
 	TileSetVulkanRecoveryAction OnRetryTimerScheduleFailed()
 	{
 		TileSetVulkanRecoveryAction action{};
+		m_activeRetryTimerToken = 0;
+		m_activeTransientTimerToken = 0;
 		action.cancelRetryTimer = true;
 		action.cancelTransientTimer = true;
+		action.shouldReleaseRenderer = true;
+		action.invalidate = true;
 		m_state = TileSetVulkanRecoveryState::Stopped;
 		if (!m_hasLoggedStopped)
 		{
@@ -247,12 +303,20 @@ public:
 		return action;
 	}
 
+	TileSetVulkanRecoveryAction OnTransientTimerScheduleFailed()
+	{
+		m_activeTransientTimerToken = 0;
+		return RecordFailure("swapchain recovery", "could not schedule transient swapchain retry timer");
+	}
+
 	TileSetVulkanRecoveryAction RequestManualRetry(bool visible, int width, int height)
 	{
 		TileSetVulkanRecoveryAction action{};
 		if (m_destroyed)
 			return action;
 
+		m_activeRetryTimerToken = 0;
+		m_activeTransientTimerToken = 0;
 		action.cancelRetryTimer = true;
 		action.cancelTransientTimer = true;
 		m_consecutiveFailures = 0;
@@ -271,6 +335,8 @@ public:
 	{
 		TileSetVulkanRecoveryAction action{};
 		m_destroyed = true;
+		m_activeRetryTimerToken = 0;
+		m_activeTransientTimerToken = 0;
 		action.cancelRetryTimer = true;
 		action.cancelTransientTimer = true;
 		action.shouldReleaseRenderer = true;
@@ -280,14 +346,30 @@ public:
 	}
 
 private:
+	uint64_t NextRetryTimerToken()
+	{
+		const uint64_t token = kRetryTimerTokenBase | (m_nextRetryTimerGeneration & kTimerTokenGenerationMask);
+		++m_nextRetryTimerGeneration;
+		return token;
+	}
+
+	uint64_t NextTransientTimerToken()
+	{
+		const uint64_t token = kTransientTimerTokenBase | (m_nextTransientTimerGeneration & kTimerTokenGenerationMask);
+		++m_nextTransientTimerGeneration;
+		return token;
+	}
+
 	TileSetVulkanRecoveryAction OnSwapchainOutOfDate(const char* stage, const std::string& errorMessage)
 	{
 		if (m_consecutiveSwapchainRetries < m_maxTransientSwapchainRetries)
 		{
 			++m_consecutiveSwapchainRetries;
+			m_activeTransientTimerToken = NextTransientTimerToken();
 			TileSetVulkanRecoveryAction action{};
 			action.startTransientTimer = true;
 			action.transientDelayMs = m_transientDelayMs;
+			action.transientTimerToken = m_activeTransientTimerToken;
 			return action;
 		}
 
@@ -302,6 +384,7 @@ private:
 		TileSetVulkanRecoveryAction action{};
 		action.shouldReleaseRenderer = true;
 		action.cancelTransientTimer = true;
+		m_activeTransientTimerToken = 0;
 		m_consecutiveSwapchainRetries = 0;
 
 		const std::string normalized = errorMessage.empty() ? "unknown Vulkan error" : errorMessage;
@@ -319,13 +402,16 @@ private:
 		if (m_consecutiveFailures <= m_maxAutoRetries)
 		{
 			m_state = TileSetVulkanRecoveryState::RetryScheduled;
+			m_activeRetryTimerToken = NextRetryTimerToken();
 			action.startRetryTimer = true;
 			action.retryDelayMs = m_retryDelayMs;
+			action.retryTimerToken = m_activeRetryTimerToken;
 			action.logMessage = firstLog;
 			return action;
 		}
 
 		m_state = TileSetVulkanRecoveryState::Stopped;
+		m_activeRetryTimerToken = 0;
 		action.cancelRetryTimer = true;
 		if (!m_hasLoggedStopped)
 		{
@@ -365,6 +451,10 @@ private:
 	TileSetVulkanRecoveryState m_state = TileSetVulkanRecoveryState::Healthy;
 	int m_consecutiveFailures = 0;
 	int m_consecutiveSwapchainRetries = 0;
+	uint64_t m_activeRetryTimerToken = 0;
+	uint64_t m_activeTransientTimerToken = 0;
+	uint64_t m_nextRetryTimerGeneration = 1;
+	uint64_t m_nextTransientTimerGeneration = 1;
 	int m_lastWidth = 0;
 	int m_lastHeight = 0;
 	bool m_hasLoggedFirstError = false;
