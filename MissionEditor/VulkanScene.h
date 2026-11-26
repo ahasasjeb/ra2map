@@ -24,6 +24,14 @@ struct RgbaBitmap
 
 uint64_t NextRgbaBitmapId();
 
+enum class VulkanPresentResult
+{
+	Succeeded,
+	Minimized,
+	SwapchainOutOfDate,
+	Failed,
+};
+
 // Records scene draw commands in painter order for the Vulkan GPU compute compositor.
 class VulkanScene
 {
@@ -41,6 +49,7 @@ public:
 	void RestorePreview();
 	void BeginOverlay(const RECT& screen, bool highRes);
 	void EndOverlay();
+	VulkanPresentResult PresentWithResult(const RECT& source, int width, int height, bool vsync);
 	bool Present(const RECT& source, int width, int height, bool vsync);
 
 	void Indexed(const BYTE* pixels, int width, int height, const short* borders,

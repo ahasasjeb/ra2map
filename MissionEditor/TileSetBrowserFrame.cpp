@@ -49,6 +49,7 @@ CTileSetBrowserFrame::~CTileSetBrowserFrame()
 BEGIN_MESSAGE_MAP(CTileSetBrowserFrame, CFrameWnd)
 	//{{AFX_MSG_MAP(CTileSetBrowserFrame)
 	ON_WM_SIZE()
+	ON_WM_SHOWWINDOW()
 	//}}AFX_MSG_MAP
 END_MESSAGE_MAP()
 
@@ -112,5 +113,12 @@ void CTileSetBrowserFrame::OnSize(UINT nType, int cx, int cy)
 
 	RecalcLayout();
 
+}
+
+void CTileSetBrowserFrame::OnShowWindow(BOOL bShow, UINT nStatus)
+{
+	CFrameWnd::OnShowWindow(bShow, nStatus);
+	if (m_view.GetSafeHwnd() != nullptr)
+		m_view.NotifyVisibilityChanged(bShow != FALSE);
 }
 

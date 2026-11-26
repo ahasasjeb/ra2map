@@ -14,11 +14,20 @@ use std::slice;
 mod scene;
 
 const RS_OK: i32 = 0;
+const RS_VULKAN_MINIMIZED: i32 = 1;
+const RS_VULKAN_SWAPCHAIN_OUT_OF_DATE: i32 = 2;
 const RS_ERR_BAD_ARG: i32 = -1;
 const RS_ERR_PANIC: i32 = -3;
 const RS_ERR_VULKAN_UNAVAILABLE: i32 = -10;
 const RS_ERR_VULKAN_RUNTIME: i32 = -11;
 const MAX_FRAMES_IN_FLIGHT: usize = 2;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum VulkanStatus {
+    Ok,
+    Minimized,
+    SwapchainOutOfDate,
+}
 
 thread_local! {
     static LAST_ERROR: RefCell<String> = const { RefCell::new(String::new()) };
@@ -407,7 +416,7 @@ impl VulkanRenderer {
         requested_width: u32,
         requested_height: u32,
         vsync: bool,
-    ) -> Result<(), String> {
+    ) -> Result<VulkanStatus, String> {
         unsafe { self.device.device_wait_idle() }
             .map_err(|error| format!("vkDeviceWaitIdle failed during resize: {error:?}"))?;
         let capabilities = unsafe {
@@ -449,7 +458,8 @@ impl VulkanRenderer {
             }
         };
         if extent.width == 0 || extent.height == 0 {
-            return Err("cannot create a Vulkan swapchain for a zero-sized window".into());
+            self.swapchain_dirty = true;
+            return Ok(VulkanStatus::Minimized);
         }
         let desired_images = capabilities.min_image_count.saturating_add(1);
         let image_count = if capabilities.max_image_count != 0 {
@@ -480,8 +490,14 @@ impl VulkanRenderer {
             .present_mode(present_mode)
             .clipped(true)
             .old_swapchain(self.swapchain);
-        let new_swapchain = unsafe { self.swapchain_loader.create_swapchain(&create_info, None) }
-            .map_err(|error| format!("vkCreateSwapchainKHR failed: {error:?}"))?;
+        let new_swapchain = match unsafe { self.swapchain_loader.create_swapchain(&create_info, None) } {
+            Ok(swapchain) => swapchain,
+            Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => {
+                self.swapchain_dirty = true;
+                return Ok(VulkanStatus::SwapchainOutOfDate);
+            }
+            Err(error) => return Err(format!("vkCreateSwapchainKHR failed: {error:?}")),
+        };
         let new_images = match unsafe { self.swapchain_loader.get_swapchain_images(new_swapchain) }
         {
             Ok(images) => images,
@@ -521,7 +537,7 @@ impl VulkanRenderer {
         self.vsync = vsync;
         self.swapchain_dirty = false;
         self.current_frame = 0;
-        Ok(())
+        Ok(VulkanStatus::Ok)
     }
 
     unsafe fn recover_signaled_fence(&mut self, frame_index: usize) {
@@ -629,9 +645,17 @@ pub unsafe extern "C" fn rs_vulkan_prepare(
         )
     }));
     match result {
-        Ok(Ok(())) => {
+        Ok(Ok(VulkanStatus::Ok)) => {
             set_last_error("");
             RS_OK
+        }
+        Ok(Ok(VulkanStatus::Minimized)) => {
+            set_last_error("");
+            RS_VULKAN_MINIMIZED
+        }
+        Ok(Ok(VulkanStatus::SwapchainOutOfDate)) => {
+            set_last_error("");
+            RS_VULKAN_SWAPCHAIN_OUT_OF_DATE
         }
         Ok(Err(error)) => {
             set_last_error(error);

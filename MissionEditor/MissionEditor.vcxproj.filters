@@ -562,6 +562,9 @@
     <ClInclude Include="TileSetBrowserView.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="TileSetVulkanRecovery.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="ToolSettingsBar.h">
       <Filter>Header Files</Filter>
     </ClInclude>

@@ -448,6 +448,7 @@
     <ClInclude Include="TextDrawer.h" />
     <ClInclude Include="TileSetBrowserFrame.h" />
     <ClInclude Include="TileSetBrowserView.h" />
+    <ClInclude Include="TileSetVulkanRecovery.h" />
     <ClInclude Include="ToolSettingsBar.h" />
     <ClInclude Include="TriggerActionsDlg.h" />
     <ClInclude Include="TriggerEditorDlg.h" />

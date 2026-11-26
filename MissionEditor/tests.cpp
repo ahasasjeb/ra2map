@@ -36,6 +36,8 @@
 #include "AlliesEditorDlg.h"
 #include "PanScroll.h"
 #include "VulkanScene.h"
+#include "TileSetVulkanRecovery.h"
+#include "TileSetBrowserView.h"
 #include "functions.h"
 
 class TestError : public std::runtime_error
@@ -122,6 +124,7 @@ int Tests::run()
 		[this]() { test_rules_section_cache(); },
 		[this]() { test_pan_scroll(); },
 		[this]() { test_vulkan_color_and_bitmap(); },
+		[this]() { test_tileset_vulkan_recovery(); },
 	});
 	for (const auto f : test_functions)
 	{
@@ -1055,4 +1058,427 @@ void Tests::test_vulkan_color_and_bitmap()
 	REPORT_TEST(rgbaExplicitKey->pixels[1] == 0xFFFF0000u);
 	REPORT_TEST(rgbaExplicitKey->pixels[2] == 0u);
 	REPORT_TEST(rgbaExplicitKey->pixels[3] == 0xFFFFFFFFu);
+}
+
+void Tests::test_tileset_vulkan_recovery()
+{
+	struct RecoveryHarness
+	{
+		TileSetVulkanRecovery recovery{ 3, 250, 3, 50 };
+		bool visible = true;
+		bool minimized = false;
+		int width = 240;
+		int height = 320;
+		bool rendererAlive = false;
+		bool retryTimerActive = false;
+		bool transientTimerActive = false;
+		int createCount = 0;
+		int destroyCount = 0;
+		int presentCount = 0;
+		int invalidateCount = 0;
+		int timerStartCount = 0;
+		int timerCancelCount = 0;
+		std::vector<std::string> logs;
+
+		std::function<TileSetVulkanInitResult(std::string&)> onInit;
+		std::function<VulkanPresentResult(std::string&)> onPresent;
+
+		void Apply(const TileSetVulkanRecoveryAction& action)
+		{
+			if (action.shouldReleaseRenderer && rendererAlive)
+			{
+				rendererAlive = false;
+				++destroyCount;
+			}
+			if (action.cancelRetryTimer && retryTimerActive)
+			{
+				retryTimerActive = false;
+				++timerCancelCount;
+			}
+			if (action.cancelTransientTimer && transientTimerActive)
+			{
+				transientTimerActive = false;
+			}
+			if (!action.logMessage.empty())
+				logs.push_back(action.logMessage);
+			if (action.startRetryTimer)
+			{
+				retryTimerActive = true;
+				++timerStartCount;
+			}
+			if (action.startTransientTimer)
+				transientTimerActive = true;
+			if (action.invalidate)
+				++invalidateCount;
+		}
+
+		void Paint()
+		{
+			TileSetVulkanRecoveryAction gate{};
+			if (!recovery.CanAttemptRender(visible && !minimized, width, height, gate))
+			{
+				Apply(gate);
+				return;
+			}
+
+			std::string error;
+			if (!rendererAlive)
+			{
+				++createCount;
+				const TileSetVulkanInitResult initRes = onInit ? onInit(error) : TileSetVulkanInitResult::Succeeded;
+				if (initRes != TileSetVulkanInitResult::Failed)
+					rendererAlive = true;
+				else
+					++destroyCount; // failed init cleans up partial resources
+
+				if (initRes != TileSetVulkanInitResult::Succeeded)
+				{
+					Apply(recovery.OnInitializeResult(initRes, error));
+					return;
+				}
+			}
+
+			++presentCount;
+			error.clear();
+			const VulkanPresentResult presentRes = onPresent ? onPresent(error) : VulkanPresentResult::Succeeded;
+			Apply(recovery.OnPresentResult(presentRes, error));
+		}
+
+		void FireRetryTimer()
+		{
+			Apply(recovery.OnRetryTimer(visible && !minimized, width, height));
+		}
+
+		void FireTransientTimer()
+		{
+			Apply(recovery.OnTransientSwapchainTimer(visible && !minimized, width, height));
+		}
+
+		void Resize(bool isMinimized, int w, int h)
+		{
+			minimized = isMinimized;
+			width = w;
+			height = h;
+			Apply(recovery.OnSize(minimized, width, height, visible));
+		}
+
+		void SetVisible(bool isVisible)
+		{
+			visible = isVisible;
+			Apply(recovery.OnShowWindow(visible && !minimized, width, height));
+		}
+
+		void ManualRetry()
+		{
+			Apply(recovery.RequestManualRetry(visible && !minimized, width, height));
+		}
+
+		void Destroy()
+		{
+			Apply(recovery.OnDestroy());
+		}
+	};
+
+	// 1. Init succeeds, present continuously fails -> bounded retries, then stop.
+	{
+		RecoveryHarness h;
+		h.onPresent = [](std::string& err)
+		{
+			err = "scene present: ERROR_DEVICE_LOST";
+			return VulkanPresentResult::Failed;
+		};
+
+		h.Paint(); // initial failure -> retry #1 scheduled
+		TEST(h.createCount == 1 && h.destroyCount == 1 && !h.rendererAlive);
+		TEST(h.recovery.GetState() == TileSetVulkanRecoveryState::RetryScheduled);
+		TEST(h.retryTimerActive);
+		TEST(h.invalidateCount == 0); // never unconditionally invalidate on failure
+		TEST(h.logs.size() == 1);
+
+		// Extra paints / resize / scroll while waiting for timer must NOT recreate Vulkan.
+		h.Paint();
+		h.Paint();
+		h.Resize(false, 260, 340);
+		h.Paint();
+		TEST(h.createCount == 1 && h.destroyCount == 1 && h.presentCount == 1);
+
+		// Exhaust all 3 delayed retries.
+		for (int retry = 1; retry <= 3; ++retry)
+		{
+			h.FireRetryTimer();
+			TEST(!h.retryTimerActive);
+			TEST(h.recovery.GetState() == TileSetVulkanRecoveryState::RetryDue);
+			h.Paint();
+			TEST(h.createCount == 1 + retry && h.destroyCount == 1 + retry && !h.rendererAlive);
+		}
+
+		TEST(h.recovery.IsStopped());
+		TEST(!h.retryTimerActive);
+		TEST(h.logs.size() == 2); // first useful error + final stopped log only
+
+		// Further paints, resizes, minimize/restore must NOT bypass the cap.
+		for (int i = 0; i < 5; ++i)
+			h.Paint();
+		h.Resize(true, 0, 0);
+		h.Resize(false, 300, 400);
+		h.Paint();
+		TEST(h.createCount == 4 && h.destroyCount == 4 && h.presentCount == 4);
+		TEST(h.recovery.IsStopped());
+		TEST(h.logs.size() == 2);
+
+		// User explicit retry after fault clears recovers cleanly.
+		h.onPresent = [](std::string&) { return VulkanPresentResult::Succeeded; };
+		h.ManualRetry();
+		TEST(h.recovery.GetState() == TileSetVulkanRecoveryState::Healthy);
+		TEST(h.recovery.GetConsecutiveFailures() == 0);
+		h.Paint();
+		TEST(h.createCount == 5 && h.destroyCount == 4 && h.rendererAlive);
+		TEST(h.recovery.GetState() == TileSetVulkanRecoveryState::Healthy);
+	}
+
+	// 2. Single transient present failure recovers automatically and resets counter.
+	{
+		RecoveryHarness h;
+		int failRemaining = 1;
+		h.onPresent = [&failRemaining](std::string& err)
+		{
+			if (failRemaining > 0)
+			{
+				--failRemaining;
+				err = "scene submit: ERROR_DEVICE_LOST";
+				return VulkanPresentResult::Failed;
+			}
+			return VulkanPresentResult::Succeeded;
+		};
+
+		h.Paint();
+		TEST(h.createCount == 1 && h.destroyCount == 1 && !h.rendererAlive);
+		TEST(h.recovery.GetState() == TileSetVulkanRecoveryState::RetryScheduled);
+		h.FireRetryTimer();
+		h.Paint();
+		TEST(h.createCount == 2 && h.destroyCount == 1 && h.rendererAlive);
+		TEST(h.recovery.GetState() == TileSetVulkanRecoveryState::Healthy);
+		TEST(h.recovery.GetConsecutiveFailures() == 0);
+
+		// A later failure gets a fresh full retry budget and logs a fresh first error.
+		failRemaining = 1;
+		h.Paint();
+		TEST(h.recovery.GetConsecutiveFailures() == 1);
+		TEST(h.recovery.GetState() == TileSetVulkanRecoveryState::RetryScheduled);
+		TEST(h.logs.size() == 2);
+	}
+
+	// 3. Pure initialization failure is also bounded and recoverable via manual retry.
+	{
+		RecoveryHarness h;
+		bool failInit = true;
+		h.onInit = [&failInit](std::string& err)
+		{
+			if (failInit)
+			{
+				err = "vkCreateDevice failed: ERROR_INITIALIZATION_FAILED";
+				return TileSetVulkanInitResult::Failed;
+			}
+			return TileSetVulkanInitResult::Succeeded;
+		};
+
+		h.Paint();
+		for (int i = 0; i < 3; ++i)
+		{
+			h.FireRetryTimer();
+			h.Paint();
+		}
+		TEST(h.recovery.IsStopped());
+		TEST(h.createCount == 4 && h.presentCount == 0 && !h.rendererAlive);
+		TEST(h.logs.size() == 2);
+
+		h.Paint();
+		TEST(h.createCount == 4);
+
+		failInit = false;
+		h.ManualRetry();
+		h.Paint();
+		TEST(h.recovery.GetState() == TileSetVulkanRecoveryState::Healthy);
+		TEST(h.rendererAlive && h.presentCount == 1);
+	}
+
+	// 4. Minimize/zero-size and normal resize swapchain out-of-date are not permanent failures.
+	{
+		RecoveryHarness h;
+		h.Paint();
+		TEST(h.rendererAlive && h.createCount == 1 && h.destroyCount == 0);
+
+		// Minimized client rect and Vulkan Minimized status do not destroy device or count failure.
+		h.Resize(true, 0, 0);
+		h.Paint();
+		h.Resize(false, 240, 320);
+		h.onPresent = [](std::string&) { return VulkanPresentResult::Minimized; };
+		h.Paint();
+		TEST(h.rendererAlive && h.destroyCount == 0 && h.recovery.GetConsecutiveFailures() == 0);
+		TEST(h.recovery.GetState() == TileSetVulkanRecoveryState::Healthy);
+
+		// Live resize causing repeated SwapchainOutOfDate across size changes stays Healthy.
+		h.onPresent = [](std::string&) { return VulkanPresentResult::SwapchainOutOfDate; };
+		for (int step = 0; step < 6; ++step)
+		{
+			h.Resize(false, 240 + step * 10, 320 + step * 5);
+			h.Paint();
+		}
+		TEST(h.rendererAlive && h.destroyCount == 0 && h.recovery.GetConsecutiveFailures() == 0);
+		TEST(h.logs.empty());
+
+		// After resize settles, normal present succeeds.
+		h.onPresent = [](std::string&) { return VulkanPresentResult::Succeeded; };
+		h.FireTransientTimer();
+		h.Paint();
+		TEST(h.rendererAlive && h.recovery.GetState() == TileSetVulkanRecoveryState::Healthy);
+
+		// Endless SwapchainOutOfDate at constant size escalates instead of looping forever.
+		h.onPresent = [](std::string&) { return VulkanPresentResult::SwapchainOutOfDate; };
+		for (int i = 0; i < 4; ++i)
+		{
+			h.Paint();
+			if (h.transientTimerActive)
+				h.FireTransientTimer();
+		}
+		TEST(!h.rendererAlive && h.destroyCount == 1);
+		TEST(h.recovery.GetState() == TileSetVulkanRecoveryState::RetryScheduled);
+	}
+
+	// 5. Minimize/hide/destroy during pending retry cancels timers and preserves cap.
+	{
+		RecoveryHarness h;
+		h.onPresent = [](std::string& err)
+		{
+			err = "scene present: ERROR_SURFACE_LOST_KHR";
+			return VulkanPresentResult::Failed;
+		};
+
+		h.Paint(); // failure #1 -> RetryScheduled
+		TEST(h.retryTimerActive && h.recovery.GetConsecutiveFailures() == 1);
+
+		// Hiding the sidebar cancels the pending retry timer immediately.
+		h.SetVisible(false);
+		TEST(!h.retryTimerActive);
+		TEST(h.recovery.GetState() == TileSetVulkanRecoveryState::RetryPaused);
+		TEST(h.recovery.GetConsecutiveFailures() == 1);
+
+		// Showing again resumes retry scheduling without resetting failure count.
+		h.SetVisible(true);
+		TEST(h.retryTimerActive);
+		TEST(h.recovery.GetState() == TileSetVulkanRecoveryState::RetryScheduled);
+		TEST(h.recovery.GetConsecutiveFailures() == 1);
+
+		// Closing/destroying the window while retry is pending cancels timer cleanly.
+		h.Destroy();
+		TEST(!h.retryTimerActive);
+		const int createsBefore = h.createCount;
+		h.FireRetryTimer();
+		h.Paint();
+		h.ManualRetry();
+		TEST(h.createCount == createsBefore);
+	}
+
+	// 6. Real CTileSetBrowserView window integration test using test double hooks.
+	{
+		if (AfxGetInstanceHandle() == nullptr)
+			AfxWinInit(::GetModuleHandle(nullptr), nullptr, ::GetCommandLine(), 0);
+
+		CWnd hostWindow;
+		LPCTSTR hostClass = AfxRegisterWndClass(0);
+		const BOOL hostCreated = hostWindow.CreateEx(
+			0, hostClass, "TileSetRecoveryTestHost",
+			WS_POPUP | WS_VISIBLE,
+			-32000, -32000, 320, 240,
+			nullptr, 0);
+		TEST(hostCreated != FALSE);
+
+		CTileSetBrowserView view;
+		const BOOL viewCreated = view.Create(
+			nullptr, nullptr,
+			WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_HSCROLL,
+			CRect(0, 0, 320, 240), &hostWindow, 1001, nullptr);
+		TEST(viewCreated != FALSE);
+		view.SetScrollSizes(MM_TEXT, CSize(320, 1000));
+
+		int creates = 0;
+		int destroys = 0;
+		int presents = 0;
+		bool failPresent = true;
+		std::vector<std::string> viewLogs;
+
+		CTileSetBrowserView::VulkanTestHooks hooks{};
+		hooks.initialize = [&](int, int, bool, std::string&)
+		{
+			++creates;
+			return TileSetVulkanInitResult::Succeeded;
+		};
+		hooks.present = [&](const RECT&, int, int, bool, std::string& errorOut)
+		{
+			++presents;
+			if (failPresent)
+			{
+				errorOut = "mock present failure";
+				return VulkanPresentResult::Failed;
+			}
+			return VulkanPresentResult::Succeeded;
+		};
+		hooks.release = [&]() { ++destroys; };
+		hooks.log = [&](const std::string& msg) { viewLogs.push_back(msg); };
+
+		view.SetVulkanTestHooks(&hooks);
+		view.SetRecoveryConfigForTest(3, 15, 3, 15);
+
+		auto drawView = [&]()
+		{
+			CClientDC dc(&view);
+			view.TriggerDrawForTest(&dc);
+		};
+
+		// Initial failure + 3 delayed retries -> Stopped.
+		drawView();
+		TEST(creates == 1 && destroys == 1 && presents == 1);
+		TEST(view.IsRetryTimerActiveForTest());
+		for (int retry = 1; retry <= 3; ++retry)
+		{
+			view.SendMessage(WM_TIMER, 1, 0);
+			drawView();
+			TEST(creates == 1 + retry && destroys == 1 + retry && presents == 1 + retry);
+		}
+		TEST(view.GetVulkanRecoveryForTest().IsStopped());
+		TEST(!view.IsRetryTimerActiveForTest());
+		TEST(viewLogs.size() == 2);
+
+		// Scrolling, resizing, and extra paints in Stopped state do not retry.
+		view.SendMessage(WM_VSCROLL, SB_LINEDOWN, 0);
+		view.SendMessage(WM_SIZE, SIZE_RESTORED, MAKELPARAM(300, 220));
+		drawView();
+		drawView();
+		TEST(creates == 4 && destroys == 4 && presents == 4);
+
+		// Retry button is laid out; clicking it after clearing fault recovers!
+		const RECT retryRect = view.GetRetryButtonRectForTest();
+		TEST(retryRect.right > retryRect.left && retryRect.bottom > retryRect.top);
+		failPresent = false;
+		const int clickX = (retryRect.left + retryRect.right) / 2;
+		const int clickY = (retryRect.top + retryRect.bottom) / 2;
+		view.SendMessage(WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(clickX, clickY));
+		drawView();
+		TEST(creates == 5 && destroys == 4 && presents == 5);
+		TEST(view.GetVulkanRecoveryForTest().GetState() == TileSetVulkanRecoveryState::Healthy);
+
+		// Hiding and destroying while a retry timer is pending cancels timer and releases safely.
+		failPresent = true;
+		drawView();
+		TEST(view.IsRetryTimerActiveForTest());
+		view.ShowWindow(SW_HIDE);
+		TEST(!view.IsRetryTimerActiveForTest());
+		view.ShowWindow(SW_SHOW);
+		TEST(view.IsRetryTimerActiveForTest());
+		view.DestroyWindow();
+		TEST(!view.IsRetryTimerActiveForTest());
+		hostWindow.DestroyWindow();
+	}
+
+	REPORT_TEST(true);
 }

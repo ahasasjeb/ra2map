@@ -46,4 +46,5 @@ private:
 	void test_rules_section_cache();
 	void test_pan_scroll();
 	void test_vulkan_color_and_bitmap();
+	void test_tileset_vulkan_recovery();
 };

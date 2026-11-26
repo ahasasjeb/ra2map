@@ -301,12 +301,14 @@ void VulkanScene::Line(int x0, int y0, int x1, int y1, unsigned int color, int p
 	m_commands.push_back(cmd);
 }
 
-bool VulkanScene::Present(const RECT& source, int width, int height, bool vsync)
+VulkanPresentResult VulkanScene::PresentWithResult(const RECT& source, int width, int height, bool vsync)
 {
-	if (m_failed || width <= 0 || height <= 0 || source.right <= source.left || source.bottom <= source.top)
-		return false;
+	if (m_failed)
+		return VulkanPresentResult::Failed;
+	if (width <= 0 || height <= 0 || source.right <= source.left || source.bottom <= source.top)
+		return VulkanPresentResult::Minimized;
 	const rs_scene_command empty{};
-	return rs_vulkan_scene_present(
+	const int status = rs_vulkan_scene_present(
 		m_renderer,
 		m_commands.empty() ? &empty : m_commands.data(),
 		m_commands.size(),
@@ -316,5 +318,18 @@ bool VulkanScene::Present(const RECT& source, int width, int height, bool vsync)
 		static_cast<float>(source.bottom - source.top) / height,
 		width,
 		height,
-		vsync ? 1 : 0) == RS_OK;
+		vsync ? 1 : 0);
+	if (status == RS_OK)
+		return VulkanPresentResult::Succeeded;
+	if (status == RS_VULKAN_MINIMIZED)
+		return VulkanPresentResult::Minimized;
+	if (status == RS_VULKAN_SWAPCHAIN_OUT_OF_DATE)
+		return VulkanPresentResult::SwapchainOutOfDate;
+	return VulkanPresentResult::Failed;
+}
+
+bool VulkanScene::Present(const RECT& source, int width, int height, bool vsync)
+{
+	const VulkanPresentResult result = PresentWithResult(source, width, height, vsync);
+	return result == VulkanPresentResult::Succeeded || result == VulkanPresentResult::SwapchainOutOfDate;
 }

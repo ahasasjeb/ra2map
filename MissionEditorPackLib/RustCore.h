@@ -35,6 +35,8 @@
 
 // status codes
 #define RS_OK 0
+#define RS_VULKAN_MINIMIZED 1
+#define RS_VULKAN_SWAPCHAIN_OUT_OF_DATE 2
 #define RS_ERR_BAD_ARG (-1)
 #define RS_ERR_SMALL_BUFFER (-2)
 #define RS_ERR_PANIC (-3)

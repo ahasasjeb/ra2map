@@ -343,7 +343,7 @@ impl VulkanRenderer {
         width: u32,
         height: u32,
         vsync: bool,
-    ) -> Result<(), String> {
+    ) -> Result<VulkanStatus, String> {
         let start = Instant::now();
         let requested = vk::Extent2D { width, height };
         if self.swapchain_dirty
@@ -351,7 +351,12 @@ impl VulkanRenderer {
             || self.requested_extent != requested
             || self.vsync != vsync
         {
-            unsafe { self.recreate_swapchain(width, height, vsync) }?;
+            match unsafe { self.recreate_swapchain(width, height, vsync) }? {
+                VulkanStatus::Ok => {}
+                status @ (VulkanStatus::Minimized | VulkanStatus::SwapchainOutOfDate) => {
+                    return Ok(status);
+                }
+            }
         }
         let frame = self.current_frame;
         let fence = self.frames[frame].fence;
@@ -388,7 +393,7 @@ impl VulkanRenderer {
             Ok(value) => value,
             Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => {
                 self.swapchain_dirty = true;
-                return Ok(());
+                return Ok(VulkanStatus::SwapchainOutOfDate);
             }
             Err(e) => return Err(format!("scene acquire: {e:?}")),
         };
@@ -626,9 +631,13 @@ impl VulkanRenderer {
             .swapchains(&swapchains)
             .image_indices(&indices)
             .wait_semaphores(&complete);
+        let mut present_status = VulkanStatus::Ok;
         match unsafe { self.swapchain_loader.queue_present(self.queue, &info) } {
             Ok(changed) => self.swapchain_dirty = suboptimal || changed,
-            Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => self.swapchain_dirty = true,
+            Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => {
+                self.swapchain_dirty = true;
+                present_status = VulkanStatus::SwapchainOutOfDate;
+            }
             Err(e) => return Err(format!("scene present: {e:?}")),
         }
         s.frame_count += 1;
@@ -638,7 +647,7 @@ impl VulkanRenderer {
             recorded.duration_since(acquired).as_secs_f64() * 1000.0,
             recorded.elapsed().as_secs_f64() * 1000.0,
         ];
-        Ok(())
+        Ok(present_status)
     }
 }
 
@@ -698,6 +707,33 @@ fn ffi_result(result: Result<Result<(), String>, Box<dyn std::any::Any + Send>>)
     }
 }
 
+fn ffi_status_result(
+    result: Result<Result<VulkanStatus, String>, Box<dyn std::any::Any + Send>>,
+) -> i32 {
+    match result {
+        Ok(Ok(VulkanStatus::Ok)) => {
+            set_last_error("");
+            RS_OK
+        }
+        Ok(Ok(VulkanStatus::Minimized)) => {
+            set_last_error("");
+            RS_VULKAN_MINIMIZED
+        }
+        Ok(Ok(VulkanStatus::SwapchainOutOfDate)) => {
+            set_last_error("");
+            RS_VULKAN_SWAPCHAIN_OUT_OF_DATE
+        }
+        Ok(Err(e)) => {
+            set_last_error(e);
+            RS_ERR_VULKAN_RUNTIME
+        }
+        Err(_) => {
+            set_last_error("panic in Vulkan scene renderer");
+            RS_ERR_PANIC
+        }
+    }
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn rs_vulkan_scene_present(
     renderer: *mut RsVulkanRenderer,
@@ -724,7 +760,7 @@ pub unsafe extern "C" fn rs_vulkan_scene_present(
     {
         return RS_ERR_BAD_ARG;
     }
-    ffi_result(catch_unwind(AssertUnwindSafe(|| {
+    ffi_status_result(catch_unwind(AssertUnwindSafe(|| {
         let r = unsafe { &mut (*renderer).inner };
         let mut scene = match r.scene.take() {
             Some(scene) => scene,
@@ -1039,6 +1075,40 @@ mod tests {
             );
             r.device.device_wait_idle().unwrap();
             s.destroy(&r);
+        }
+    }
+
+    #[test]
+    fn zero_sized_window_reports_minimized_status_without_error() {
+        unsafe {
+            let name: Vec<u16> = "STATIC\0".encode_utf16().collect();
+            let handle = CreateWindowExW(
+                0,
+                name.as_ptr(),
+                name.as_ptr(),
+                0,
+                0,
+                0,
+                0,
+                0,
+                ptr::null_mut(),
+                ptr::null_mut(),
+                GetModuleHandleW(ptr::null()),
+                ptr::null_mut(),
+            );
+            assert!(!handle.is_null());
+            let _window = Window(handle);
+            let mut renderer: *mut RsVulkanRenderer = ptr::null_mut();
+            assert_eq!(rs_vulkan_create(handle, &mut renderer), RS_OK);
+            assert!(!renderer.is_null());
+
+            assert_eq!(rs_vulkan_prepare(renderer, 64, 64, 1), RS_VULKAN_MINIMIZED);
+            let empty = SceneCommand::default();
+            assert_eq!(
+                rs_vulkan_scene_present(renderer, &empty, 0, 0.0, 0.0, 1.0, 1.0, 64, 64, 1),
+                RS_VULKAN_MINIMIZED
+            );
+            rs_vulkan_destroy(renderer);
         }
     }
 

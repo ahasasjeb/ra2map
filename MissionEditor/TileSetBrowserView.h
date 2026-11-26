@@ -28,8 +28,13 @@
 //
 
 #include <memory>
+#include <string>
 #include <vector>
+#ifdef _DEBUG
+#include <functional>
+#endif
 #include "VulkanScene.h"
+#include "TileSetVulkanRecovery.h"
 
 struct rs_vulkan_renderer;
 
@@ -69,8 +74,30 @@ public:
 	void SetTileSets(const std::vector<DWORD>& tileSets, BOOL bOnlyRedraw=FALSE);
 	DWORD GetTileID(DWORD dwTileSet, DWORD dwType);
 	int m_currentTileSet = 0;
+	void RetryVulkanRecovery();
+	void NotifyVisibilityChanged(bool visible);
 	virtual ~CTileSetBrowserView();
 #ifdef _DEBUG
+	struct VulkanTestHooks
+	{
+		std::function<TileSetVulkanInitResult(int width, int height, bool vsync, std::string& errorOut)> initialize;
+		std::function<VulkanPresentResult(const RECT& source, int width, int height, bool vsync, std::string& errorOut)> present;
+		std::function<void()> release;
+		std::function<void(const std::string&)> log;
+	};
+
+	void SetVulkanTestHooks(VulkanTestHooks* hooks);
+	void SetRecoveryConfigForTest(
+		int maxAutoRetries,
+		unsigned int retryDelayMs,
+		int maxTransientSwapchainRetries = TileSetVulkanRecovery::kDefaultMaxTransientSwapchainRetries,
+		unsigned int transientDelayMs = TileSetVulkanRecovery::kDefaultTransientSwapchainDelayMs);
+	const TileSetVulkanRecovery& GetVulkanRecoveryForTest() const { return m_vulkanRecovery; }
+	const RECT& GetRetryButtonRectForTest() const { return m_retryButtonRect; }
+	bool IsRetryTimerActiveForTest() const { return m_retryTimerActive; }
+	bool IsTransientTimerActiveForTest() const { return m_transientSwapchainTimerActive; }
+	void TriggerDrawForTest(CDC* pDC) { OnDraw(pDC); }
+
 	virtual void AssertValid() const;
 	virtual void Dump(CDumpContext& dc) const;
 #endif
@@ -82,6 +109,9 @@ public:
 	afx_msg BOOL OnMouseWheel(UINT nFlags, short zDelta, CPoint pt);
 	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
 	afx_msg void OnSize(UINT nType, int cx, int cy);
+	afx_msg void OnTimer(UINT_PTR nIDEvent);
+	afx_msg void OnShowWindow(BOOL bShow, UINT nStatus);
+	afx_msg BOOL OnSetCursor(CWnd* pWnd, UINT nHitTest, UINT message);
 	afx_msg void OnDestroy();
 	//}}AFX_MSG
 	DECLARE_MESSAGE_MAP()
@@ -92,8 +122,19 @@ protected:
 		DWORD imageIndex;
 	};
 
-	bool InitializeVulkanRenderer();
+	static constexpr UINT_PTR kVulkanRetryTimerId = 1;
+	static constexpr UINT_PTR kVulkanTransientSwapchainTimerId = 2;
+
+	TileSetVulkanInitResult InitializeVulkanRenderer(int width, int height, std::string& errorOut);
+	VulkanPresentResult PresentVulkanScene(const RECT& source, int width, int height, bool vsync, std::string& errorOut);
 	void ReleaseVulkanRenderer();
+	bool IsViewVisible() const;
+	bool IsViewMinimizedOrZeroSized(const RECT& clientRect) const;
+	void ApplyRecoveryAction(const TileSetVulkanRecoveryAction& action);
+	bool StartRecoveryTimer(UINT_PTR timerId, unsigned int delayMs, bool& activeFlag);
+	void CancelRecoveryTimer(UINT_PTR timerId, bool& activeFlag);
+	void LogRecoveryMessage(const std::string& message);
+	void DrawRecoveryFallback(CDC* pDC, const RECT& clientRect);
 
 	int m_CurrentMode;
 	int m_tilecount = 0;
@@ -104,6 +145,22 @@ protected:
 	std::vector<OverlayImageRef> m_currentOverlayImages;
 	rs_vulkan_renderer* m_vulkanRenderer = nullptr;
 	std::unique_ptr<VulkanScene> m_gpuScene;
+	TileSetVulkanRecovery m_vulkanRecovery;
+	bool m_retryTimerActive = false;
+	bool m_transientSwapchainTimerActive = false;
+	RECT m_retryButtonRect{};
+#ifdef _DEBUG
+	struct DebugFaultInjection
+	{
+		bool loaded = false;
+		int failInitRemaining = 0;
+		int failPresentRemaining = 0;
+	};
+
+	VulkanTestHooks* m_testHooks = nullptr;
+	bool m_testRendererActive = false;
+	DebugFaultInjection m_debugFaultInjection;
+#endif
 };
 
 /////////////////////////////////////////////////////////////////////////////

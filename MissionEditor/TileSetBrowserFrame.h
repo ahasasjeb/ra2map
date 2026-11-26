@@ -64,6 +64,7 @@ public:
 	// Generierte Nachrichtenzuordnungsfunktionen
 	//{{AFX_MSG(CTileSetBrowserFrame)
 	afx_msg void OnSize(UINT nType, int cx, int cy);
+	afx_msg void OnShowWindow(BOOL bShow, UINT nStatus);
 	//}}AFX_MSG
 	DECLARE_MESSAGE_MAP()
 };
