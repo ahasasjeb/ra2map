@@ -57,6 +57,10 @@ public:
 		bool half, int x, int y, const RECT& clip);
 	bool Bitmap(const RgbaBitmap& source, int x, int y, const RECT* sourceRect = nullptr);
 	void Line(int x0, int y0, int x1, int y1, unsigned int color, int period = 1, bool invert = false);
+#ifdef _DEBUG
+	const std::vector<rs_scene_command>& GetCommandsForTest() const { return m_commands; }
+	const RECT& GetSourceForTest() const { return m_source; }
+#endif
 
 private:
 	unsigned int Upload(const unsigned int* words, size_t count);

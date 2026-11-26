@@ -85,6 +85,7 @@ public:
 		std::function<void()> release;
 		std::function<void(const std::string&)> log;
 		std::function<bool(UINT_PTR timerId, unsigned int delayMs)> setTimer;
+		bool recordSceneCommands = false;
 	};
 
 	void SetVulkanTestHooks(VulkanTestHooks* hooks);
@@ -93,6 +94,9 @@ public:
 		unsigned int retryDelayMs,
 		int maxTransientSwapchainRetries = TileSetVulkanRecovery::kDefaultMaxTransientSwapchainRetries,
 		unsigned int transientDelayMs = TileSetVulkanRecovery::kDefaultTransientSwapchainDelayMs);
+	void ConfigureSyntheticTilesForTest(const std::vector<DWORD>& tileIds, int tileWidth, int tileHeight);
+	void ConfigureSyntheticOverlaysForTest(const std::vector<std::pair<DWORD, DWORD>>& overlays, int tileWidth, int tileHeight);
+	const VulkanScene* GetGpuSceneForTest() const { return m_gpuScene.get(); }
 	const TileSetVulkanRecovery& GetVulkanRecoveryForTest() const { return m_vulkanRecovery; }
 	const RECT& GetRetryButtonRectForTest() const { return m_retryButtonRect; }
 	bool IsRetryTimerActiveForTest() const { return m_activeRetryTimerId != 0; }

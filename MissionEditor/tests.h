@@ -47,5 +47,6 @@ private:
 	void test_pan_scroll();
 	void test_vulkan_color_and_bitmap();
 	void test_tileset_vulkan_recovery();
+	void test_tileset_browser_long_list_coords();
 	void test_crash_reporter();
 };

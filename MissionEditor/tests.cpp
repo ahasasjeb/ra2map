@@ -126,6 +126,7 @@ int Tests::run()
 		[this]() { test_pan_scroll(); },
 		[this]() { test_vulkan_color_and_bitmap(); },
 		[this]() { test_tileset_vulkan_recovery(); },
+		[this]() { test_tileset_browser_long_list_coords(); },
 		[this]() { test_crash_reporter(); },
 	});
 	for (const auto f : test_functions)
@@ -1702,6 +1703,315 @@ void Tests::test_tileset_vulkan_recovery()
 		hostWindow.DestroyWindow();
 	}
 
+	REPORT_TEST(true);
+}
+
+void Tests::test_tileset_browser_long_list_coords()
+{
+	extern ACTIONDATA AD;
+	extern PICDATA* ovrlpics[0xFF][max_ovrl_img];
+
+	if (AfxGetInstanceHandle() == nullptr)
+		AfxWinInit(::GetModuleHandle(nullptr), nullptr, ::GetCommandLine(), 0);
+
+	constexpr int kViewWidth = 240;
+	constexpr int kViewHeight = 240;
+	constexpr int kTileWidth = 80;
+	constexpr int kTileHeight = 80;
+	constexpr int kCols = kViewWidth / kTileWidth; // 3
+	constexpr int kRows = 900;                     // 72,000 px total (> 32,768 and > 65,536)
+	constexpr int kItemCount = kRows * kCols;
+
+	// Build a synthetic tile catalog with a shared 16x16 subtile image.
+	std::vector<BYTE> subtilePixels(16 * 16, 1);
+	std::vector<short> subtileBorders(16 * 2);
+	for (int row = 0; row < 16; ++row)
+	{
+		subtileBorders[row * 2] = 0;
+		subtileBorders[row * 2 + 1] = 15;
+	}
+	SUBTILE sharedSubtile{};
+	sharedSubtile.pic = subtilePixels.data();
+	sharedSubtile.vborder = reinterpret_cast<VBORDER*>(subtileBorders.data());
+	sharedSubtile.wWidth = 16;
+	sharedSubtile.wHeight = 16;
+	sharedSubtile.sX = 0;
+	sharedSubtile.sY = 0;
+	sharedSubtile.bZHeight = 0;
+
+	std::vector<TILEDATA> syntheticTiles(kItemCount);
+	std::vector<DWORD> tileIds(kItemCount);
+	for (int i = 0; i < kItemCount; ++i)
+	{
+		TILEDATA& td = syntheticTiles[i];
+		td.rect = RECT{ 0, 0, 16, 16 };
+		td.cx = 1;
+		td.cy = 1;
+		td.wTileCount = 1;
+		td.wTileSet = 0;
+		td.wMarbleGround = 0xFFFF;
+		td.tiles = &sharedSubtile;
+		tileIds[i] = static_cast<DWORD>(i);
+	}
+
+	TILEDATA* syntheticTileDataPtr = syntheticTiles.data();
+	DWORD syntheticTileDataCount = static_cast<DWORD>(syntheticTiles.size());
+
+	// Synthetic overlays: one RGBA bitmap overlay and one indexed overlay.
+	auto syntheticBitmap = std::make_shared<RgbaBitmap>();
+	syntheticBitmap->id = NextRgbaBitmapId();
+	syntheticBitmap->width = 16;
+	syntheticBitmap->height = 16;
+	syntheticBitmap->pixels.assign(16 * 16, 0xFF00FF00u);
+
+	PICDATA bmpOverlay{};
+	bmpOverlay.pic = syntheticBitmap->pixels.data();
+	bmpOverlay.bitmap = syntheticBitmap;
+	bmpOverlay.bType = PICDATA_TYPE_BMP;
+	bmpOverlay.wMaxWidth = 16;
+	bmpOverlay.wMaxHeight = 16;
+
+	PICDATA indexedOverlay{};
+	indexedOverlay.pic = subtilePixels.data();
+	indexedOverlay.vborder = reinterpret_cast<VBORDER*>(subtileBorders.data());
+	indexedOverlay.bType = PICDATA_TYPE_SHP;
+	indexedOverlay.wMaxWidth = 16;
+	indexedOverlay.wMaxHeight = 16;
+
+	struct GlobalStateRestorer
+	{
+		TILEDATA** prevTileData;
+		DWORD* prevTileDataCount;
+		DWORD prevMode;
+		DWORD prevType;
+		DWORD prevData;
+		DWORD prevData2;
+		DWORD prevData3;
+		int prevZData;
+		PICDATA* prevOvrl[5][2];
+		~GlobalStateRestorer()
+		{
+			tiledata = prevTileData;
+			tiledata_count = prevTileDataCount;
+			AD.mode = prevMode;
+			AD.type = prevType;
+			AD.data = prevData;
+			AD.data2 = prevData2;
+			AD.data3 = prevData3;
+			AD.z_data = prevZData;
+			for (int t = 0; t < 5; ++t)
+			{
+				ovrlpics[1 + t][0] = prevOvrl[t][0];
+				ovrlpics[1 + t][1] = prevOvrl[t][1];
+			}
+		}
+	} restore{
+		tiledata,
+		tiledata_count,
+		AD.mode,
+		AD.type,
+		AD.data,
+		AD.data2,
+		AD.data3,
+		AD.z_data,
+		{
+			{ ovrlpics[1][0], ovrlpics[1][1] },
+			{ ovrlpics[2][0], ovrlpics[2][1] },
+			{ ovrlpics[3][0], ovrlpics[3][1] },
+			{ ovrlpics[4][0], ovrlpics[4][1] },
+			{ ovrlpics[5][0], ovrlpics[5][1] },
+		}
+	};
+
+	tiledata = &syntheticTileDataPtr;
+	tiledata_count = &syntheticTileDataCount;
+	for (int t = 1; t <= 5; ++t)
+	{
+		ovrlpics[t][0] = &bmpOverlay;
+		ovrlpics[t][1] = &indexedOverlay;
+	}
+	AD.mode = 0;
+	AD.type = 0;
+	AD.data = 0;
+	AD.data2 = 0;
+	AD.data3 = 0;
+	AD.z_data = 0;
+
+	const int windowWidth = kViewWidth + ::GetSystemMetrics(SM_CXVSCROLL) + 8;
+	CWnd hostWindow;
+	LPCTSTR hostClass = AfxRegisterWndClass(0);
+	TEST(hostWindow.CreateEx(
+		0, hostClass, "TileSetLongListTestHost",
+		WS_POPUP | WS_VISIBLE,
+		-32000, -32000, windowWidth + 32, kViewHeight + 32,
+		nullptr, 0) != FALSE);
+
+	CTileSetBrowserView view;
+	TEST(view.Create(
+		nullptr, nullptr,
+		WS_CHILD | WS_VISIBLE | WS_VSCROLL,
+		CRect(0, 0, windowWidth, kViewHeight), &hostWindow, 1002, nullptr) != FALSE);
+
+	RECT presentedSource{};
+	CTileSetBrowserView::VulkanTestHooks hooks{};
+	hooks.recordSceneCommands = true;
+	hooks.initialize = [](int, int, bool, std::string&) { return TileSetVulkanInitResult::Succeeded; };
+	hooks.present = [&](const RECT& source, int, int, bool, std::string&)
+	{
+		presentedSource = source;
+		return VulkanPresentResult::Succeeded;
+	};
+	view.SetVulkanTestHooks(&hooks);
+
+	auto drawView = [&]()
+	{
+		CClientDC dc(&view);
+		view.TriggerDrawForTest(&dc);
+	};
+
+	auto verifyHighlightRect = [](const std::vector<rs_scene_command>& cmds, int left, int top, int right, int bottom)
+	{
+		int lineCount = 0;
+		bool hasTop = false, hasBottom = false, hasLeft = false, hasRight = false;
+		for (const auto& cmd : cmds)
+		{
+			if (cmd.data[0] != 2)
+				continue;
+			++lineCount;
+			TEST(cmd.tint[1] == 0x00ff0000u);
+			const int x0 = cmd.line[0], y0 = cmd.line[1], x1 = cmd.line[2], y1 = cmd.line[3];
+			if (y0 == top && y1 == top && min(x0, x1) == left && max(x0, x1) == right) hasTop = true;
+			if (y0 == bottom && y1 == bottom && min(x0, x1) == left && max(x0, x1) == right) hasBottom = true;
+			if (x0 == left && x1 == left && min(y0, y1) == top && max(y0, y1) == bottom) hasLeft = true;
+			if (x0 == right && x1 == right && min(y0, y1) == top && max(y0, y1) == bottom) hasRight = true;
+		}
+		TEST(lineCount == 4);
+		TEST(hasTop && hasBottom && hasLeft && hasRight);
+	};
+
+	auto hasVisibleCommandAt = [](const std::vector<rs_scene_command>& cmds, unsigned int kind, int expectedX, int expectedY)
+	{
+		for (const auto& cmd : cmds)
+		{
+			if (cmd.data[0] != kind)
+				continue;
+			const int left = max(cmd.rect[0], cmd.clip[0]);
+			const int top = max(cmd.rect[1], cmd.clip[1]);
+			const int right = min(cmd.rect[0] + cmd.rect[2], cmd.clip[2]);
+			const int bottom = min(cmd.rect[1] + cmd.rect[3], cmd.clip[3]);
+			if (cmd.rect[0] == expectedX && cmd.rect[1] == expectedY && left < right && top < bottom)
+				return true;
+		}
+		return false;
+	};
+
+	// Checkpoints spanning below 32,768, above 32,768 (Line kSafeCoord), and above 65,536 (kMaxCoord).
+	struct Checkpoint { int row; int col; };
+	const Checkpoint checkpoints[] = {
+		{ 1, 1 },     // list y = 80    (< 32,768)
+		{ 420, 2 },   // list y = 33600 (> 32,768)
+		{ 830, 0 },   // list y = 66400 (> 65,536)
+	};
+
+	// 1. Mode 1 (tile catalog): verify preview, click selection, and highlight at all 3 thresholds.
+	view.ConfigureSyntheticTilesForTest(tileIds, kTileWidth, kTileHeight);
+	CRect clientRect;
+	view.GetClientRect(&clientRect);
+	const int colsMode1 = max(1, static_cast<int>(clientRect.Width()) / kTileWidth);
+
+	for (const auto& cp : checkpoints)
+	{
+		const int listY = cp.row * kTileHeight;
+		const int targetScrollY = max(0, listY - 40);
+		view.ScrollToPosition(CPoint(0, targetScrollY));
+		const int actualScrollX = view.GetScrollPos(SB_HORZ);
+		const int actualScrollY = view.GetScrollPos(SB_VERT);
+		TEST(actualScrollY == targetScrollY);
+
+		const int col = min(cp.col, colsMode1 - 1);
+		const int expectedIdx = cp.row * colsMode1 + col;
+		const int localX = col * kTileWidth - actualScrollX;
+		const int localY = listY - actualScrollY;
+
+		// Click center of the cell in client coordinates -> selects expected tile.
+		view.SendMessage(WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(localX + kTileWidth / 2, localY + kTileHeight / 2));
+		TEST(AD.mode == ACTIONMODE_SETTILE);
+		TEST(AD.type == static_cast<int>(tileIds[expectedIdx]));
+
+		// Draw and inspect VulkanScene commands in viewport-local coordinates.
+		drawView();
+		TEST(presentedSource.left == 0 && presentedSource.top == 0);
+		TEST(presentedSource.right == clientRect.Width() && presentedSource.bottom == clientRect.Height());
+		const VulkanScene* scene = view.GetGpuSceneForTest();
+		TEST(scene != nullptr);
+		const auto& cmds = scene->GetCommandsForTest();
+
+		const int expectedDrawX = localX + (kTileWidth - 16) / 2;
+		const int expectedDrawY = localY + (kTileHeight - 16) / 2;
+		TEST(hasVisibleCommandAt(cmds, 0u, expectedDrawX, expectedDrawY));
+		verifyHighlightRect(cmds, localX + 2, localY + 2, localX + kTileWidth - 2, localY + kTileHeight - 2);
+	}
+
+	// 2. Mode 2 (overlay catalog with both BMP and Indexed entries): verify at all 3 thresholds.
+	view.GetClientRect(&clientRect);
+	const int colsMode2 = max(1, static_cast<int>(clientRect.Width()) / kTileWidth);
+	TEST(colsMode2 >= 2); // ensures each row has both BMP and Indexed entries
+
+	std::vector<std::pair<DWORD, DWORD>> overlayEntries(kRows * colsMode2, { 1u, 0u });
+	for (int i = 0; i < static_cast<int>(overlayEntries.size()); ++i)
+		overlayEntries[i] = { 1u, static_cast<DWORD>(i & 1) }; // background: even=BMP(0), odd=Indexed(1)
+	// Give each checkpoint row unique overlay types so selection highlights only the clicked cell.
+	for (int ci = 0; ci < 3; ++ci)
+	{
+		const DWORD uniqueType = static_cast<DWORD>(2 + ci);
+		overlayEntries[checkpoints[ci].row * colsMode2 + 0] = { uniqueType, 0u }; // BMP
+		overlayEntries[checkpoints[ci].row * colsMode2 + 1] = { uniqueType, 1u }; // Indexed
+	}
+
+	view.ConfigureSyntheticOverlaysForTest(overlayEntries, kTileWidth, kTileHeight);
+	view.GetClientRect(&clientRect);
+
+	for (int ci = 0; ci < 3; ++ci)
+	{
+		const auto& cp = checkpoints[ci];
+		const DWORD expectedOverlayType = static_cast<DWORD>(2 + ci);
+		const int listY = cp.row * kTileHeight;
+		const int targetScrollY = max(0, listY - 40);
+		view.ScrollToPosition(CPoint(0, targetScrollY));
+		const int actualScrollX = view.GetScrollPos(SB_HORZ);
+		const int actualScrollY = view.GetScrollPos(SB_VERT);
+		TEST(actualScrollY == targetScrollY);
+
+		// Verify both a BMP cell and an Indexed cell on this row.
+		for (int subCol = 0; subCol < 2; ++subCol)
+		{
+			const DWORD expectedImageIndex = static_cast<DWORD>(subCol);
+			const unsigned int expectedCmdKind = (expectedImageIndex == 0) ? 1u : 0u; // 1=Bitmap, 0=Indexed
+			const int localX = subCol * kTileWidth - actualScrollX;
+			const int localY = listY - actualScrollY;
+
+			view.SendMessage(WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(localX + kTileWidth / 2, localY + kTileHeight / 2));
+			TEST(AD.mode == ACTIONMODE_PLACE);
+			TEST(AD.type == 6 && AD.data == 33
+				&& AD.data2 == static_cast<int>(expectedOverlayType)
+				&& AD.data3 == static_cast<int>(expectedImageIndex));
+
+			drawView();
+			TEST(presentedSource.left == 0 && presentedSource.top == 0);
+			TEST(presentedSource.right == clientRect.Width() && presentedSource.bottom == clientRect.Height());
+			const VulkanScene* scene = view.GetGpuSceneForTest();
+			TEST(scene != nullptr);
+			const auto& cmds = scene->GetCommandsForTest();
+
+			const int expectedDrawX = localX + (kTileWidth - 16) / 2;
+			const int expectedDrawY = localY + (kTileHeight - 16) / 2;
+			TEST(hasVisibleCommandAt(cmds, expectedCmdKind, expectedDrawX, expectedDrawY));
+			verifyHighlightRect(cmds, localX + 2, localY + 2, localX + kTileWidth - 2, localY + kTileHeight - 2);
+		}
+	}
+
+	view.DestroyWindow();
+	hostWindow.DestroyWindow();
 	REPORT_TEST(true);
 }
 
