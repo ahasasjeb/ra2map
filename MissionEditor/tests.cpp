@@ -132,6 +132,7 @@ int Tests::run()
 		[this]() { test_map_save_and_emergency_backup(); },
 		[this]() { test_autosave_isolation_and_rotation(); },
 		[this]() { test_isoview_vulkan_present_state(); },
+		[this]() { test_tileset_browser_resize_scroll_range(); },
 	});
 	for (const auto f : test_functions)
 	{
@@ -2883,5 +2884,217 @@ void Tests::test_isoview_vulkan_present_state()
 	scene.Begin(rectB);
 	TEST(!scene.HasPreview());
 
+	REPORT_TEST(true);
+}
+
+void Tests::test_tileset_browser_resize_scroll_range()
+{
+	extern ACTIONDATA AD;
+	extern PICDATA* ovrlpics[0xFF][max_ovrl_img];
+
+	// 1. Pure TileSetBrowserLayout edge cases.
+	{
+		const auto empty = TileSetBrowserLayout::Compute(320, 0, 80, 80);
+		TEST(empty.rows == 0 && empty.totalHeight == 0 && empty.HitTest(10, 10) == -1);
+
+		const auto zeroTile = TileSetBrowserLayout::Compute(320, 10, 0, 80);
+		TEST(zeroTile.rows == 0 && zeroTile.totalHeight == 0 && zeroTile.HitTest(10, 10) == -1);
+
+		// Exact multiple must not allocate a phantom blank row.
+		const auto exact = TileSetBrowserLayout::Compute(320, 8, 80, 80);
+		TEST(exact.cols == 4 && exact.rows == 2 && exact.totalHeight == 160);
+		TEST(exact.HitTest(319, 159) == 7);
+		TEST(exact.HitTest(0, 160) == -1);
+
+		// Partial last row: trailing empty slots must return -1.
+		const auto partial = TileSetBrowserLayout::Compute(320, 403, 80, 80);
+		TEST(partial.cols == 4 && partial.rows == 101 && partial.totalHeight == 8080);
+		TEST(partial.HitTest(2 * 80 + 40, 100 * 80 + 40) == 402);
+		TEST(partial.HitTest(3 * 80 + 40, 100 * 80 + 40) == -1);
+
+		// Scroll clamping.
+		TEST(TileSetBrowserLayout::ClampScrollPos(-5, 1000, 240) == 0);
+		TEST(TileSetBrowserLayout::ClampScrollPos(900, 1000, 240) == 760);
+		TEST(TileSetBrowserLayout::ClampScrollPos(500, 160, 240) == 0);
+	}
+
+	// 2. Real CTileSetBrowserView resize (4 cols -> 1 col -> 4 cols) for both Mode 1 and Mode 2.
+	if (AfxGetInstanceHandle() == nullptr)
+		AfxWinInit(::GetModuleHandle(nullptr), nullptr, ::GetCommandLine(), 0);
+
+	constexpr int kTileWidth = 80;
+	constexpr int kTileHeight = 80;
+	constexpr int kViewHeight = 240;
+	constexpr int kItemCount = 403; // non-multiple of 4
+
+	std::vector<BYTE> subtilePixels(16 * 16, 1);
+	std::vector<short> subtileBorders(16 * 2);
+	for (int row = 0; row < 16; ++row)
+	{
+		subtileBorders[row * 2] = 0;
+		subtileBorders[row * 2 + 1] = 15;
+	}
+	SUBTILE sharedSubtile{};
+	sharedSubtile.pic = subtilePixels.data();
+	sharedSubtile.vborder = reinterpret_cast<VBORDER*>(subtileBorders.data());
+	sharedSubtile.wWidth = 16;
+	sharedSubtile.wHeight = 16;
+
+	std::vector<TILEDATA> syntheticTiles(kItemCount);
+	std::vector<DWORD> tileIds(kItemCount);
+	for (int i = 0; i < kItemCount; ++i)
+	{
+		TILEDATA& td = syntheticTiles[i];
+		td.rect = RECT{ 0, 0, 16, 16 };
+		td.cx = 1;
+		td.cy = 1;
+		td.wTileCount = 1;
+		td.wTileSet = 0;
+		td.wMarbleGround = 0xFFFF;
+		td.tiles = &sharedSubtile;
+		tileIds[i] = static_cast<DWORD>(i);
+	}
+	TILEDATA* syntheticTileDataPtr = syntheticTiles.data();
+	DWORD syntheticTileDataCount = static_cast<DWORD>(syntheticTiles.size());
+
+	PICDATA indexedOverlay{};
+	indexedOverlay.pic = subtilePixels.data();
+	indexedOverlay.vborder = reinterpret_cast<VBORDER*>(subtileBorders.data());
+	indexedOverlay.bType = PICDATA_TYPE_SHP;
+	indexedOverlay.wMaxWidth = 16;
+	indexedOverlay.wMaxHeight = 16;
+
+	struct ResizeTestGlobalsGuard
+	{
+		TILEDATA** prevTileData = tiledata;
+		DWORD* prevTileDataCount = tiledata_count;
+		int prevMode = AD.mode;
+		int prevType = AD.type;
+		int prevData = AD.data;
+		int prevData2 = AD.data2;
+		int prevData3 = AD.data3;
+		int prevZData = AD.z_data;
+		PICDATA* prevOvrl1 = ovrlpics[1][0];
+		PICDATA* prevOvrl2 = ovrlpics[2][0];
+		~ResizeTestGlobalsGuard()
+		{
+			tiledata = prevTileData;
+			tiledata_count = prevTileDataCount;
+			AD.mode = prevMode;
+			AD.type = prevType;
+			AD.data = prevData;
+			AD.data2 = prevData2;
+			AD.data3 = prevData3;
+			AD.z_data = prevZData;
+			ovrlpics[1][0] = prevOvrl1;
+			ovrlpics[2][0] = prevOvrl2;
+		}
+	} guard;
+
+	tiledata = &syntheticTileDataPtr;
+	tiledata_count = &syntheticTileDataCount;
+	ovrlpics[1][0] = &indexedOverlay;
+	ovrlpics[2][0] = &indexedOverlay;
+
+	const int sbWidth = ::GetSystemMetrics(SM_CXVSCROLL);
+	const int wideWindowWidth = 4 * kTileWidth + sbWidth + 16;
+	const int narrowWindowWidth = kTileWidth + sbWidth + 8;
+
+	CWnd hostWindow;
+	LPCTSTR hostClass = AfxRegisterWndClass(0);
+	TEST(hostWindow.CreateEx(
+		0, hostClass, "TileSetResizeTestHost",
+		WS_POPUP | WS_VISIBLE,
+		-32000, -32000, wideWindowWidth + 32, kViewHeight + 32,
+		nullptr, 0) != FALSE);
+
+	CTileSetBrowserView view;
+	TEST(view.Create(
+		nullptr, nullptr,
+		WS_CHILD | WS_VISIBLE | WS_VSCROLL,
+		CRect(0, 0, wideWindowWidth, kViewHeight), &hostWindow, 1003, nullptr) != FALSE);
+
+	CTileSetBrowserView::VulkanTestHooks hooks{};
+	hooks.recordSceneCommands = true;
+	hooks.initialize = [](int, int, bool, std::string&) { return TileSetVulkanInitResult::Succeeded; };
+	hooks.present = [](const RECT&, int, int, bool, std::string&) { return VulkanPresentResult::Succeeded; };
+	view.SetVulkanTestHooks(&hooks);
+
+	auto verifyResizeFlow = [&](bool isOverlayMode)
+	{
+		// Start wide (4 columns)
+		view.MoveWindow(0, 0, wideWindowWidth, kViewHeight, FALSE);
+		CRect clientRect;
+		view.GetClientRect(&clientRect);
+		TEST(view.ComputeLayout(clientRect.Width()).cols == 4);
+		TEST(view.m_bottom_needed == 101 * kTileHeight);
+
+		// Shrink to 1 column via real WM_SIZE
+		view.MoveWindow(0, 0, narrowWindowWidth, kViewHeight, FALSE);
+		view.GetClientRect(&clientRect);
+		const auto narrowLayout = view.ComputeLayout(clientRect.Width());
+		TEST(narrowLayout.cols == 1);
+		TEST(narrowLayout.rows == kItemCount);
+		TEST(view.m_bottom_needed == kItemCount * kTileHeight);
+
+		// Scroll all the way to the last item (index 402) and click it!
+		const int lastIndex = kItemCount - 1;
+		const int narrowMaxScroll = max(0, view.m_bottom_needed - clientRect.Height());
+		view.ScrollToPosition(CPoint(0, narrowMaxScroll));
+		const int scrollY = view.GetScrollPos(SB_VERT);
+		TEST(scrollY == narrowMaxScroll);
+
+		const int localLastY = lastIndex * kTileHeight - scrollY;
+		TEST(localLastY >= 0 && localLastY + kTileHeight <= clientRect.Height());
+		AD.reset();
+		view.SendMessage(WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(kTileWidth / 2, localLastY + kTileHeight / 2));
+		if (!isOverlayMode)
+		{
+			TEST(AD.mode == ACTIONMODE_SETTILE && AD.type == lastIndex);
+		}
+		else
+		{
+			TEST(AD.mode == ACTIONMODE_PLACE && AD.type == 6 && AD.data == 33 && AD.data2 == 2 && AD.data3 == 0);
+		}
+
+		// Widen back to 4 columns while scrolled at the 1-column bottom -> scroll must be clamped!
+		view.MoveWindow(0, 0, wideWindowWidth, kViewHeight, FALSE);
+		view.GetClientRect(&clientRect);
+		const auto wideLayout = view.ComputeLayout(clientRect.Width());
+		TEST(wideLayout.cols == 4 && wideLayout.rows == 101);
+		TEST(view.m_bottom_needed == 101 * kTileHeight);
+
+		const int wideMaxScroll = max(0, view.m_bottom_needed - clientRect.Height());
+		const int clampedScrollY = view.GetScrollPos(SB_VERT);
+		TEST(clampedScrollY <= wideMaxScroll);
+		TEST(clampedScrollY == wideMaxScroll);
+
+		// Click the last item (row 100, col 2) at the clamped bottom!
+		const int wideLocalLastX = (lastIndex % wideLayout.cols) * kTileWidth - view.GetScrollPos(SB_HORZ);
+		const int wideLocalLastY = (lastIndex / wideLayout.cols) * kTileHeight - clampedScrollY;
+		AD.reset();
+		view.SendMessage(WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(wideLocalLastX + kTileWidth / 2, wideLocalLastY + kTileHeight / 2));
+		if (!isOverlayMode)
+		{
+			TEST(AD.mode == ACTIONMODE_SETTILE && AD.type == lastIndex);
+		}
+		else
+		{
+			TEST(AD.mode == ACTIONMODE_PLACE && AD.type == 6 && AD.data == 33 && AD.data2 == 2 && AD.data3 == 0);
+		}
+	};
+
+	// Mode 1: tiles
+	view.ConfigureSyntheticTilesForTest(tileIds, kTileWidth, kTileHeight);
+	verifyResizeFlow(false);
+
+	// Mode 2: overlays (last item has distinct overlayType=2)
+	std::vector<std::pair<DWORD, DWORD>> overlayEntries(kItemCount, { 1u, 0u });
+	overlayEntries.back() = { 2u, 0u };
+	view.ConfigureSyntheticOverlaysForTest(overlayEntries, kTileWidth, kTileHeight);
+	verifyResizeFlow(true);
+
+	view.DestroyWindow();
+	hostWindow.DestroyWindow();
 	REPORT_TEST(true);
 }

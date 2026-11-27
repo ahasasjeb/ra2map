@@ -75,12 +75,6 @@ BOOL CTileSetBrowserFrame::OnCreateClient(LPCREATESTRUCT lpcs, CCreateContext* p
 
 	RecalcLayout(TRUE);
 
-	CSize sizeTotal;
-	GetClientRect(&r);
-	sizeTotal.cx = r.right;
-	sizeTotal.cy = m_view.m_bottom_needed;
-	m_view.SetScrollSizes(MM_TEXT, sizeTotal);
-
 	m_view.ShowWindow(SW_SHOW);
 
 	return CFrameWnd::OnCreateClient(lpcs, pContext);
@@ -88,23 +82,18 @@ BOOL CTileSetBrowserFrame::OnCreateClient(LPCREATESTRUCT lpcs, CCreateContext* p
 
 void CTileSetBrowserFrame::RecalcLayout(BOOL bNotify)
 {
+	if (m_bar.GetSafeHwnd() != nullptr && m_view.GetSafeHwnd() != nullptr)
+	{
+		RECT r{};
+		RECT rm{};
+		GetClientRect(&rm);
+		m_bar.GetClientRect(&r);
 
-	RECT r;
-	RECT rm;
-	GetClientRect(&rm);
-	m_bar.GetClientRect(&r);
-
-	m_view.SetWindowPos(NULL, 0, r.bottom, rm.right, rm.bottom - r.bottom, SWP_NOZORDER);
-
-	m_view.GetClientRect(&r);
-	CSize sizeTotal;
-	sizeTotal.cx = r.right;
-	sizeTotal.cy = m_view.m_bottom_needed;
-	m_view.SetScrollSizes(MM_TEXT, sizeTotal);
+		m_view.SetWindowPos(NULL, 0, r.bottom, rm.right, max(0L, rm.bottom - r.bottom), SWP_NOZORDER);
+		m_view.UpdateScrollLayout();
+	}
 
 	CFrameWnd::RecalcLayout(bNotify);
-
-
 }
 
 void CTileSetBrowserFrame::OnSize(UINT nType, int cx, int cy)

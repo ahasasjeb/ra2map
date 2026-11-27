@@ -159,15 +159,7 @@ void CTileSetBrowserView::ConfigureSyntheticTilesForTest(
 	m_tile_width = tileWidth;
 	m_tile_height = tileHeight;
 	m_tilecount = static_cast<int>(tileIds.size());
-	RECT r{};
-	if (m_hWnd != nullptr)
-		GetClientRect(&r);
-	int max_r = (tileWidth > 0) ? (r.right / tileWidth) : 1;
-	if (max_r <= 0)
-		max_r = 1;
-	m_bottom_needed = m_tile_height * (1 + m_tilecount / max_r);
-	if (m_hWnd != nullptr)
-		SetScrollSizes(MM_TEXT, CSize(max(1L, r.right), max(1, m_bottom_needed)));
+	UpdateScrollLayout();
 }
 
 void CTileSetBrowserView::ConfigureSyntheticOverlaysForTest(
@@ -182,17 +174,81 @@ void CTileSetBrowserView::ConfigureSyntheticOverlaysForTest(
 	m_tile_width = tileWidth;
 	m_tile_height = tileHeight;
 	m_tilecount = static_cast<int>(m_currentOverlayImages.size());
-	RECT r{};
-	if (m_hWnd != nullptr)
-		GetClientRect(&r);
-	int max_r = (tileWidth > 0) ? (r.right / tileWidth) : 1;
-	if (max_r <= 0)
-		max_r = 1;
-	m_bottom_needed = m_tile_height * (1 + m_tilecount / max_r);
-	if (m_hWnd != nullptr)
-		SetScrollSizes(MM_TEXT, CSize(max(1L, r.right), max(1, m_bottom_needed)));
+	UpdateScrollLayout();
 }
 #endif
+
+int CTileSetBrowserView::GetCurrentItemCount() const
+{
+	if (m_CurrentMode == 1)
+		return static_cast<int>(m_currentTileIds.size());
+	if (m_CurrentMode == 2)
+		return static_cast<int>(m_currentOverlayImages.size());
+	return 0;
+}
+
+TileSetBrowserLayout CTileSetBrowserView::ComputeLayout(int clientWidth) const
+{
+	return TileSetBrowserLayout::Compute(clientWidth, GetCurrentItemCount(), m_tile_width, m_tile_height);
+}
+
+void CTileSetBrowserView::UpdateScrollLayout()
+{
+	if (m_updatingScrollLayout)
+		return;
+
+	struct ScopedReset
+	{
+		bool& flag;
+		~ScopedReset() { flag = false; }
+	} reset{ m_updatingScrollLayout };
+	m_updatingScrollLayout = true;
+
+	if (m_hWnd == nullptr)
+	{
+		const TileSetBrowserLayout layout = ComputeLayout(0);
+		m_bottom_needed = max(1, layout.totalHeight);
+		return;
+	}
+
+	// Two-pass convergence: showing or hiding WS_VSCROLL alters client width by
+	// SM_CXVSCROLL, which can change column count and total required height.
+	for (int pass = 0; pass < 2; ++pass)
+	{
+		RECT r{};
+		GetClientRect(&r);
+		const int clientW = r.right - r.left;
+		const int clientH = r.bottom - r.top;
+		if (clientW <= 0 || clientH <= 0)
+			return;
+
+		const TileSetBrowserLayout layout = ComputeLayout(clientW);
+		m_bottom_needed = max(1, layout.totalHeight);
+		SetScrollSizes(MM_TEXT, CSize(max(1, clientW), m_bottom_needed));
+
+		RECT after{};
+		GetClientRect(&after);
+		if ((after.right - after.left) == clientW && (after.bottom - after.top) == clientH)
+			break;
+	}
+
+	RECT finalRect{};
+	GetClientRect(&finalRect);
+	const int finalW = finalRect.right - finalRect.left;
+	const int finalH = finalRect.bottom - finalRect.top;
+	if (finalW > 0 && finalH > 0)
+	{
+		const int curX = GetScrollPos(SB_HORZ);
+		const int curY = GetScrollPos(SB_VERT);
+		const int clampedX = TileSetBrowserLayout::ClampScrollPos(curX, max(1, finalW), finalW);
+		const int clampedY = TileSetBrowserLayout::ClampScrollPos(curY, m_bottom_needed, finalH);
+		if (clampedX != curX || clampedY != curY)
+		{
+			ScrollToPosition(CPoint(clampedX, clampedY));
+			Invalidate(FALSE);
+		}
+	}
+}
 
 TileSetVulkanInitResult CTileSetBrowserView::InitializeVulkanRenderer(int width, int height, std::string& errorOut)
 {
@@ -615,10 +671,10 @@ void CTileSetBrowserView::OnDraw(CDC* pDC)
 	{
 		m_gpuScene->Begin(viewport);
 
-		if (tiledata != NULL && (*tiledata) != NULL && m_tilecount > 0 && m_tile_width > 0)
+		const TileSetBrowserLayout layout = ComputeLayout(width);
+		if (layout.rows > 0 && (m_CurrentMode != 1 || (tiledata != NULL && (*tiledata) != NULL)))
 		{
-			int max_r = width / m_tile_width;
-			if (max_r <= 0) max_r = 1;
+			const int max_r = layout.cols;
 
 			int cur_y = 0;
 			int cur_x = 0;
@@ -851,6 +907,10 @@ void CTileSetBrowserView::SetTileSets(const std::vector<DWORD>& tileSets, BOOL b
 
 	if (m_currentTileIds.empty())
 	{
+		m_tilecount = 0;
+		UpdateScrollLayout();
+		if (CFrameWnd* frame = GetParentFrame())
+			frame->RecalcLayout(TRUE);
 		RedrawWindow();
 		return;
 	}
@@ -900,12 +960,9 @@ void CTileSetBrowserView::SetTileSets(const std::vector<DWORD>& tileSets, BOOL b
 	m_tile_height += 6;
 	m_tilecount = static_cast<int>(m_currentTileIds.size());
 
-	RECT r;
-	GetClientRect(&r);
-	int max_r = r.right / m_tile_width;
-	if (max_r <= 0) max_r = 1;
-	m_bottom_needed = m_tile_height * (1 + m_tilecount / max_r);
-	GetParentFrame()->RecalcLayout(TRUE);
+	UpdateScrollLayout();
+	if (CFrameWnd* frame = GetParentFrame())
+		frame->RecalcLayout(TRUE);
 
 	RedrawWindow();
 
@@ -929,10 +986,10 @@ void CTileSetBrowserView::OnLButtonDown(UINT nFlags, CPoint point)
 	if (m_vulkanRecovery.IsRecovering())
 		return;
 
-	RECT r;
+	RECT r{};
 	GetClientRect(&r);
-
-	if (m_tilecount == 0)
+	const TileSetBrowserLayout layout = ComputeLayout(r.right - r.left);
+	if (layout.rows <= 0)
 		return;
 
 	SCROLLINFO scrinfo{};
@@ -943,120 +1000,76 @@ void CTileSetBrowserView::OnLButtonDown(UINT nFlags, CPoint point)
 	if (GetScrollInfo(SB_VERT, &scrinfo))
 		point.y += scrinfo.nPos;
 
-
-	int max_r = r.right / m_tile_width;
-
-	if (max_r == 0) max_r = 1;
-
-	int cur_y = 0;
-	int cur_x = 0;
-
-	int tile_width = m_tile_width;
-	int tile_height = m_tile_height;
+	const int hitIndex = layout.HitTest(point.x, point.y);
 
 	if (m_CurrentMode == 1)
 	{
-		int i;
-		for (i = 0;i < m_tilecount;i++)
+		if (hitIndex >= 0 && hitIndex < static_cast<int>(m_currentTileIds.size()))
 		{
-			const DWORD dwID = m_currentTileIds[i];
-			int curwidth = m_tile_width;
-			int curheight = m_tile_height;
+			const DWORD dwID = m_currentTileIds[hitIndex];
+			char c[50];
+			itoa(GetAddedHeight(dwID), c, 10);
+			OutputDebugString(c);
 
-			int posaddedx = (m_tile_width - curwidth) / 2;
-			int posaddedy = (m_tile_height - curheight) / 2;
+			int oldmode = AD.mode;
+			int oldid = AD.type;
 
-			if (point.x > cur_x + posaddedx && point.y > cur_y + posaddedy && point.x < cur_x + tile_width - posaddedx && point.y < cur_y + tile_height - posaddedy)
+			AD.mode = ACTIONMODE_SETTILE;
+			AD.type = dwID;
+			AD.data = 0;
+			AD.data2 = 0;
+			AD.data3 = 0;
+			AD.z_data = 0;
+
+			if (oldid < 0 || oldid >= *tiledata_count) oldid = 0;
+
+			const DWORD selectedTileSet = (*tiledata)[dwID].wTileSet;
+			if ((oldmode != ACTIONMODE_SETTILE || (*tiledata)[oldid].wTileSet != selectedTileSet)
+				&& theApp.m_pMainWnd != nullptr)
 			{
-				char c[50];
-				itoa(GetAddedHeight(dwID), c, 10);
-				OutputDebugString(c);
+				((CFinalSunDlg*)theApp.m_pMainWnd)->m_settingsbar.m_BrushSize = 0;
+				((CFinalSunDlg*)theApp.m_pMainWnd)->m_settingsbar.UpdateData(FALSE);
+				((CFinalSunDlg*)theApp.m_pMainWnd)->m_view.m_isoview->m_BrushSize_x = 1;
+				((CFinalSunDlg*)theApp.m_pMainWnd)->m_view.m_isoview->m_BrushSize_y = 1;
 
-				int oldmode = AD.mode;
-				int oldid = AD.type;
-
-				AD.mode = ACTIONMODE_SETTILE;
-				AD.type = dwID;
-				AD.data = 0;
-				AD.data2 = 0;
-				AD.data3 = 0;
-				AD.z_data = 0;
-
-				if (oldid < 0 || oldid >= *tiledata_count) oldid = 0;
-
-				const DWORD selectedTileSet = (*tiledata)[dwID].wTileSet;
-				if ((oldmode != ACTIONMODE_SETTILE || (*tiledata)[oldid].wTileSet != selectedTileSet)
-					&& theApp.m_pMainWnd != nullptr)
+				for (int i = 0; i < g_data.sections["StdBrushSize"].values.size(); i++)
 				{
-					((CFinalSunDlg*)theApp.m_pMainWnd)->m_settingsbar.m_BrushSize = 0;
-					((CFinalSunDlg*)theApp.m_pMainWnd)->m_settingsbar.UpdateData(FALSE);
-					((CFinalSunDlg*)theApp.m_pMainWnd)->m_view.m_isoview->m_BrushSize_x = 1;
-					((CFinalSunDlg*)theApp.m_pMainWnd)->m_view.m_isoview->m_BrushSize_y = 1;
-
-					int i;
-					for (i = 0;i < g_data.sections["StdBrushSize"].values.size();i++)
+					CString n = *g_data.sections["StdBrushSize"].GetValueName(i);
+					if ((*tiles).sections["General"].FindName(n) >= 0)
 					{
-						CString n = *g_data.sections["StdBrushSize"].GetValueName(i);
-						if ((*tiles).sections["General"].FindName(n) >= 0)
+						int tset = atoi((*tiles).sections["General"].values[n]);
+						if (tset == selectedTileSet)
 						{
-							int tset = atoi((*tiles).sections["General"].values[n]);
-							if (tset == selectedTileSet)
-							{
-								int bs = atoi(*g_data.sections["StdBrushSize"].GetValue(i));
-								((CFinalSunDlg*)theApp.m_pMainWnd)->m_settingsbar.m_BrushSize = bs - 1;
-								((CFinalSunDlg*)theApp.m_pMainWnd)->m_settingsbar.UpdateData(FALSE);
-								((CFinalSunDlg*)theApp.m_pMainWnd)->m_view.m_isoview->m_BrushSize_x = bs;
-								((CFinalSunDlg*)theApp.m_pMainWnd)->m_view.m_isoview->m_BrushSize_y = bs;
-							}
+							int bs = atoi(*g_data.sections["StdBrushSize"].GetValue(i));
+							((CFinalSunDlg*)theApp.m_pMainWnd)->m_settingsbar.m_BrushSize = bs - 1;
+							((CFinalSunDlg*)theApp.m_pMainWnd)->m_settingsbar.UpdateData(FALSE);
+							((CFinalSunDlg*)theApp.m_pMainWnd)->m_view.m_isoview->m_BrushSize_x = bs;
+							((CFinalSunDlg*)theApp.m_pMainWnd)->m_view.m_isoview->m_BrushSize_y = bs;
 						}
 					}
 				}
-
-				RedrawWindow();
-				return;
 			}
 
-			cur_x += tile_width;
-			if (i % max_r == max_r - 1)
-			{
-				cur_y += tile_height;
-				cur_x = 0;
-			}
+			RedrawWindow();
+			return;
 		}
 	}
 	else if (m_CurrentMode == 2)
 	{
-		for (size_t displayIndex = 0; displayIndex < m_currentOverlayImages.size(); ++displayIndex)
+		if (hitIndex >= 0 && hitIndex < static_cast<int>(m_currentOverlayImages.size()))
 		{
-			const OverlayImageRef& image = m_currentOverlayImages[displayIndex];
+			const OverlayImageRef& image = m_currentOverlayImages[hitIndex];
 			PICDATA* p = ovrlpics[image.overlayType][image.imageIndex];
 			if (p != NULL && p->pic != NULL)
 			{
-				int curwidth = m_tile_width;
-				int curheight = m_tile_height;
-
-				int posaddedx = (m_tile_width - curwidth) / 2;
-				int posaddedy = (m_tile_height - curheight) / 2;
-
-				if (point.x > cur_x + posaddedx && point.y > cur_y + posaddedy && point.x < cur_x + tile_width - posaddedx && point.y < cur_y + tile_height - posaddedy)
-				{
-					AD.mode = ACTIONMODE_PLACE;
-					AD.type = 6;
-					AD.data = 33;
-					AD.data2 = image.overlayType;
-					AD.data3 = image.imageIndex;
-					RedrawWindow();
-					return;
-				}
-
-				cur_x += tile_width;
-				if (displayIndex % max_r == max_r - 1)
-				{
-					cur_y += tile_height;
-					cur_x = 0;
-				}
+				AD.mode = ACTIONMODE_PLACE;
+				AD.type = 6;
+				AD.data = 33;
+				AD.data2 = image.overlayType;
+				AD.data3 = image.imageIndex;
+				RedrawWindow();
+				return;
 			}
-
 		}
 	}
 
@@ -1150,6 +1163,10 @@ void CTileSetBrowserView::SetOverlays(const std::vector<DWORD>& overlayTypes)
 
 	if (m_currentOverlayImages.empty())
 	{
+		m_tilecount = 0;
+		UpdateScrollLayout();
+		if (CFrameWnd* frame = GetParentFrame())
+			frame->RecalcLayout(TRUE);
 		RedrawWindow();
 		return;
 	}
@@ -1164,12 +1181,9 @@ void CTileSetBrowserView::SetOverlays(const std::vector<DWORD>& overlayTypes)
 	m_tile_width += 6;
 	m_tile_height += 6;
 
-	RECT r;
-	GetClientRect(&r);
-	int max_r = r.right / m_tile_width;
-	if (max_r <= 0) max_r = 1;
-	m_bottom_needed = m_tile_height * (1 + m_tilecount / max_r);
-	GetParentFrame()->RecalcLayout(TRUE);
+	UpdateScrollLayout();
+	if (CFrameWnd* frame = GetParentFrame())
+		frame->RecalcLayout(TRUE);
 	RedrawWindow();
 
 	((CFinalSunDlg*)theApp.m_pMainWnd)->m_view.m_isoview->SetForegroundWindow();
@@ -1200,6 +1214,8 @@ void CTileSetBrowserView::OnSize(UINT nType, int cx, int cy)
 {
 	CScrollView::OnSize(nType, cx, cy);
 	const bool minimized = (nType == SIZE_MINIMIZED) || (cx <= 0) || (cy <= 0);
+	if (!minimized)
+		UpdateScrollLayout();
 	const TileSetVulkanRecoveryAction action = m_vulkanRecovery.OnSize(minimized, cx, cy, IsViewVisible());
 	ApplyRecoveryAction(action);
 }

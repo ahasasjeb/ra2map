@@ -27,6 +27,8 @@
 // TileSetBrowserView.h : Header-Datei
 //
 
+#include <climits>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
@@ -37,6 +39,56 @@
 #include "TileSetVulkanRecovery.h"
 
 struct rs_vulkan_renderer;
+
+struct TileSetBrowserLayout
+{
+	int cols = 1;
+	int rows = 0;
+	int totalHeight = 0;
+	int itemCount = 0;
+	int tileWidth = 0;
+	int tileHeight = 0;
+
+	static TileSetBrowserLayout Compute(int clientWidth, int itemCount, int tileWidth, int tileHeight)
+	{
+		TileSetBrowserLayout layout;
+		layout.itemCount = itemCount > 0 ? itemCount : 0;
+		layout.tileWidth = tileWidth > 0 ? tileWidth : 0;
+		layout.tileHeight = tileHeight > 0 ? tileHeight : 0;
+		if (layout.itemCount <= 0 || layout.tileWidth <= 0 || layout.tileHeight <= 0)
+			return layout;
+
+		const int computedCols = clientWidth / layout.tileWidth;
+		layout.cols = computedCols > 0 ? computedCols : 1;
+		layout.rows = (layout.itemCount + layout.cols - 1) / layout.cols;
+		const int64_t height64 = static_cast<int64_t>(layout.rows) * static_cast<int64_t>(layout.tileHeight);
+		layout.totalHeight = height64 > INT_MAX ? INT_MAX : static_cast<int>(height64);
+		return layout;
+	}
+
+	int HitTest(int listX, int listY) const
+	{
+		if (rows <= 0 || itemCount <= 0 || tileWidth <= 0 || tileHeight <= 0 || listX < 0 || listY < 0)
+			return -1;
+		const int col = listX / tileWidth;
+		const int row = listY / tileHeight;
+		if (col < 0 || col >= cols || row < 0 || row >= rows)
+			return -1;
+		const int index = row * cols + col;
+		return (index >= 0 && index < itemCount) ? index : -1;
+	}
+
+	static int ClampScrollPos(int scrollPos, int totalSize, int viewportSize)
+	{
+		const int safeViewport = viewportSize > 0 ? viewportSize : 0;
+		const int maxScroll = totalSize > safeViewport ? (totalSize - safeViewport) : 0;
+		if (scrollPos < 0)
+			return 0;
+		if (scrollPos > maxScroll)
+			return maxScroll;
+		return scrollPos;
+	}
+};
 
 /////////////////////////////////////////////////////////////////////////////
 // Ansicht CTileSetBrowserView 
@@ -69,6 +121,8 @@ public:
 	int m_currentOverlay = 0;
 	int GetAddedHeight(DWORD dwID);
 	int m_bottom_needed;
+	void UpdateScrollLayout();
+	TileSetBrowserLayout ComputeLayout(int clientWidth) const;
 	void DrawIt();
 	void SetTileSet(DWORD dwTileSet, BOOL bOnlyRedraw=FALSE);
 	void SetTileSets(const std::vector<DWORD>& tileSets, BOOL bOnlyRedraw=FALSE);
@@ -140,10 +194,13 @@ protected:
 	void LogRecoveryMessage(const std::string& message);
 	void DrawRecoveryFallback(CDC* pDC, const RECT& clientRect);
 
+	int GetCurrentItemCount() const;
+
 	int m_CurrentMode;
 	int m_tilecount = 0;
 	int m_tile_height = 0;
 	int m_tile_width = 0;
+	bool m_updatingScrollLayout = false;
 	std::vector<DWORD> m_currentTileSets;
 	std::vector<DWORD> m_currentTileIds;
 	std::vector<OverlayImageRef> m_currentOverlayImages;

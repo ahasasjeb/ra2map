@@ -52,4 +52,5 @@ private:
 	void test_map_save_and_emergency_backup();
 	void test_autosave_isolation_and_rotation();
 	void test_isoview_vulkan_present_state();
+	void test_tileset_browser_resize_scroll_range();
 };
