@@ -22,11 +22,13 @@
 #include "MapSaveUtil.h"
 #include "IniFile.h"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdio>
 #include <map>
 #include <mutex>
+#include <vector>
 
 namespace MapSaveUtil
 {
@@ -535,5 +537,234 @@ namespace MapSaveUtil
 			static_cast<unsigned long>(lastErr));
 		result.error = errBuf;
 		return result;
+	}
+
+	namespace
+	{
+		std::wstring ToLowerInvariantW(const std::wstring& input)
+		{
+			if (input.empty())
+				return {};
+			const int needed = LCMapStringEx(
+				LOCALE_NAME_INVARIANT,
+				LCMAP_LOWERCASE,
+				input.data(),
+				static_cast<int>(input.size()),
+				nullptr,
+				0,
+				nullptr,
+				nullptr,
+				0);
+			if (needed <= 0)
+				return input;
+			std::wstring lowered(static_cast<size_t>(needed), L'\0');
+			LCMapStringEx(
+				LOCALE_NAME_INVARIANT,
+				LCMAP_LOWERCASE,
+				input.data(),
+				static_cast<int>(input.size()),
+				lowered.data(),
+				needed,
+				nullptr,
+				nullptr,
+				0);
+			return lowered;
+		}
+
+		std::string WideToUtf8MapUtil(const std::wstring& wide)
+		{
+			if (wide.empty())
+				return {};
+			const int needed = WideCharToMultiByte(
+				CP_UTF8, 0, wide.data(), static_cast<int>(wide.size()),
+				nullptr, 0, nullptr, nullptr);
+			if (needed <= 0)
+				return {};
+			std::string utf8(static_cast<size_t>(needed), '\0');
+			WideCharToMultiByte(
+				CP_UTF8, 0, wide.data(), static_cast<int>(wide.size()),
+				utf8.data(), needed, nullptr, nullptr);
+			return utf8;
+		}
+
+		bool IsValidAutoSaveTimestampSuffix(const std::wstring& suffix)
+		{
+			// Matches YYYYMMDD-HHMMSS or YYYYMMDD-HHMMSS-NNN (15 chars, or 17..19 chars with counter)
+			if (suffix.size() < 15)
+				return false;
+			for (size_t i = 0; i < 8; ++i)
+			{
+				if (suffix[i] < L'0' || suffix[i] > L'9')
+					return false;
+			}
+			if (suffix[8] != L'-')
+				return false;
+			for (size_t i = 9; i < 15; ++i)
+			{
+				if (suffix[i] < L'0' || suffix[i] > L'9')
+					return false;
+			}
+			if (suffix.size() == 15)
+				return true;
+			if (suffix[15] != L'-' || suffix.size() == 16 || suffix.size() > 20)
+				return false;
+			for (size_t i = 16; i < suffix.size(); ++i)
+			{
+				if (suffix[i] < L'0' || suffix[i] > L'9')
+					return false;
+			}
+			return true;
+		}
+	}
+
+	std::wstring ComputeMapSourceId(const std::filesystem::path& sourcePath)
+	{
+		std::error_code ec;
+		std::filesystem::path normalized = std::filesystem::weakly_canonical(sourcePath, ec);
+		if (ec || normalized.empty())
+		{
+			ec.clear();
+			normalized = std::filesystem::absolute(sourcePath, ec);
+			if (ec || normalized.empty())
+				normalized = sourcePath;
+			normalized = normalized.lexically_normal();
+		}
+		normalized.make_preferred();
+
+		std::wstring keyW = normalized.wstring();
+		while (keyW.size() > 3 && (keyW.back() == L'\\' || keyW.back() == L'/'))
+			keyW.pop_back();
+		keyW = ToLowerInvariantW(keyW);
+
+		const std::string keyUtf8 = WideToUtf8MapUtil(keyW);
+		uint64_t hash = 14695981039346656037ULL;
+		for (unsigned char ch : keyUtf8)
+		{
+			hash ^= static_cast<uint64_t>(ch);
+			hash *= 1099511628211ULL;
+		}
+
+		wchar_t hexBuf[24];
+		std::swprintf(hexBuf, _countof(hexBuf), L"%016llx", static_cast<unsigned long long>(hash));
+		return hexBuf;
+	}
+
+	AutoSavePathPlan BuildAutoSavePlan(
+		const std::filesystem::path& sourcePath,
+		const std::filesystem::path& directory,
+		bool versioned,
+		const SYSTEMTIME* nowOverride)
+	{
+		AutoSavePathPlan plan;
+		plan.sourceId = ComputeMapSourceId(sourcePath);
+
+		const std::wstring stem = sourcePath.stem().wstring();
+		const std::wstring ext = sourcePath.extension().wstring();
+		plan.versionedPrefix = stem + L"-" + plan.sourceId + L"-autosave-";
+
+		if (!versioned)
+		{
+			plan.destination = directory / (stem + L"-" + plan.sourceId + L"-autosave" + ext);
+			return plan;
+		}
+
+		SYSTEMTIME now{};
+		if (nowOverride)
+			now = *nowOverride;
+		else
+			GetLocalTime(&now);
+
+		wchar_t timestamp[32]{};
+		swprintf_s(
+			timestamp,
+			L"%04u%02u%02u-%02u%02u%02u",
+			now.wYear, now.wMonth, now.wDay,
+			now.wHour, now.wMinute, now.wSecond);
+
+		std::filesystem::path candidate = directory / (plan.versionedPrefix + timestamp + ext);
+		if (GetFileAttributesW(candidate.c_str()) != INVALID_FILE_ATTRIBUTES)
+		{
+			for (unsigned int counter = 1; counter <= 999; ++counter)
+			{
+				wchar_t numbered[48]{};
+				swprintf_s(numbered, L"%ls-%03u", timestamp, counter);
+				std::filesystem::path alt = directory / (plan.versionedPrefix + numbered + ext);
+				if (GetFileAttributesW(alt.c_str()) == INVALID_FILE_ATTRIBUTES)
+				{
+					candidate = std::move(alt);
+					break;
+				}
+			}
+		}
+
+		plan.destination = std::move(candidate);
+		return plan;
+	}
+
+	void PruneVersionedAutoSaves(
+		const std::filesystem::path& directory,
+		const std::wstring& versionedPrefix,
+		const std::wstring& extension,
+		size_t maxCount,
+		const std::filesystem::path& protectedPath)
+	{
+		if (directory.empty() || versionedPrefix.empty())
+			return;
+
+		struct EntryInfo
+		{
+			std::filesystem::path path;
+			std::wstring fileNameLower;
+			std::filesystem::file_time_type writeTime{};
+		};
+
+		std::wstring protectedNameLower;
+		if (!protectedPath.empty())
+			protectedNameLower = ToLowerInvariantW(protectedPath.filename().wstring());
+
+		std::error_code error;
+		std::vector<EntryInfo> files;
+		for (std::filesystem::directory_iterator it(directory, error), end; !error && it != end; it.increment(error))
+		{
+			std::error_code entryErr;
+			if (!it->is_regular_file(entryErr) || entryErr)
+				continue;
+
+			const std::wstring fileName = it->path().filename().wstring();
+			const std::wstring fileExt = it->path().extension().wstring();
+			if (_wcsicmp(fileExt.c_str(), extension.c_str()) != 0)
+				continue;
+
+			if (fileName.size() <= versionedPrefix.size() + fileExt.size())
+				continue;
+			if (_wcsnicmp(fileName.c_str(), versionedPrefix.c_str(), versionedPrefix.size()) != 0)
+				continue;
+
+			const size_t suffixLen = fileName.size() - versionedPrefix.size() - fileExt.size();
+			const std::wstring suffix = fileName.substr(versionedPrefix.size(), suffixLen);
+			if (!IsValidAutoSaveTimestampSuffix(suffix))
+				continue;
+
+			EntryInfo info;
+			info.path = it->path();
+			info.fileNameLower = ToLowerInvariantW(fileName);
+			info.writeTime = it->last_write_time(entryErr);
+			files.push_back(std::move(info));
+		}
+
+		std::sort(files.begin(), files.end(), [](const EntryInfo& left, const EntryInfo& right)
+		{
+			if (left.writeTime != right.writeTime)
+				return left.writeTime > right.writeTime;
+			return left.fileNameLower > right.fileNameLower;
+		});
+
+		for (size_t i = maxCount; i < files.size(); ++i)
+		{
+			if (!protectedNameLower.empty() && files[i].fileNameLower == protectedNameLower)
+				continue;
+			std::error_code removeErr;
+			std::filesystem::remove(files[i].path, removeErr);
+		}
 	}
 }

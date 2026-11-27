@@ -130,6 +130,7 @@ int Tests::run()
 		[this]() { test_tileset_browser_long_list_coords(); },
 		[this]() { test_crash_reporter(); },
 		[this]() { test_map_save_and_emergency_backup(); },
+		[this]() { test_autosave_isolation_and_rotation(); },
 	});
 	for (const auto f : test_functions)
 	{
@@ -2697,6 +2698,110 @@ void Tests::test_map_save_and_emergency_backup()
 		for (const auto& existing : createdBackups)
 			TEST(fs::exists(existing));
 	}
+
+	REPORT_TEST(true);
+}
+
+void Tests::test_autosave_isolation_and_rotation()
+{
+	namespace fs = std::filesystem;
+	const fs::path tempDir = fs::temp_directory_path() / ("ra2map_autosave_test_" + std::to_string(GetCurrentProcessId()));
+	std::error_code ec;
+	fs::remove_all(tempDir, ec);
+	const fs::path dirA = tempDir / L"FolderA";
+	const fs::path dirB = tempDir / L"FolderB";
+	const fs::path sharedAutosaveDir = tempDir / L"SharedAutosaves";
+	TEST(fs::create_directories(dirA, ec));
+	TEST(fs::create_directories(dirB, ec));
+	TEST(fs::create_directories(sharedAutosaveDir, ec));
+
+	struct Cleanup
+	{
+		fs::path dir;
+		~Cleanup()
+		{
+			std::error_code err;
+			fs::remove_all(dir, err);
+		}
+	} cleanup{ tempDir };
+
+	const fs::path mapA = dirA / L"arena.yrm";
+	const fs::path mapAUpper = dirA / L"ARENA.YRM";
+	const fs::path mapB = dirB / L"arena.yrm";
+
+	// 1. Source ID stability across case/slashes, distinct across directories.
+	const std::wstring idA = MapSaveUtil::ComputeMapSourceId(mapA);
+	const std::wstring idAUpper = MapSaveUtil::ComputeMapSourceId(mapAUpper);
+	const std::wstring idB = MapSaveUtil::ComputeMapSourceId(mapB);
+	TEST(idA.size() == 16);
+	TEST(idA == idAUpper);
+	TEST(idA != idB);
+
+	// 2. Non-versioned autosaves for two same-named maps in different directories do not overwrite each other.
+	const auto nonVerA = MapSaveUtil::BuildAutoSavePlan(mapA, sharedAutosaveDir, false);
+	const auto nonVerB = MapSaveUtil::BuildAutoSavePlan(mapB, sharedAutosaveDir, false);
+	TEST(nonVerA.destination != nonVerB.destination);
+	TEST(MapSaveUtil::WriteBytesAtomically(nonVerA.destination, "MAP_A_DATA", true));
+	TEST(MapSaveUtil::WriteBytesAtomically(nonVerB.destination, "MAP_B_DATA", true));
+	{
+		std::ifstream inA(nonVerA.destination, std::ios::binary);
+		const std::string dataA((std::istreambuf_iterator<char>(inA)), std::istreambuf_iterator<char>());
+		std::ifstream inB(nonVerB.destination, std::ios::binary);
+		const std::string dataB((std::istreambuf_iterator<char>(inB)), std::istreambuf_iterator<char>());
+		TEST(dataA == "MAP_A_DATA");
+		TEST(dataB == "MAP_B_DATA");
+	}
+
+	// 3. Legacy-format backup in the same shared directory must NEVER be deleted by new rotation.
+	const fs::path legacyBackup = sharedAutosaveDir / L"arena-autosave-20260101-000000.yrm";
+	TEST(MapSaveUtil::WriteBytesAtomically(legacyBackup, "LEGACY_BACKUP", true));
+
+	// 4. Versioned autosaves + rotation for Map A and Map B stay completely isolated.
+	auto makeTime = [](WORD sec) -> SYSTEMTIME
+	{
+		SYSTEMTIME st{};
+		st.wYear = 2026;
+		st.wMonth = 11;
+		st.wDay = 27;
+		st.wHour = 8;
+		st.wMinute = 30;
+		st.wSecond = sec;
+		return st;
+	};
+
+	std::vector<fs::path> mapAFiles;
+	std::vector<fs::path> mapBFiles;
+	const auto baseTime = fs::file_time_type::clock::now();
+
+	for (int i = 0; i < 3; ++i)
+	{
+		const SYSTEMTIME stA = makeTime(static_cast<WORD>(10 + i));
+		const auto planA = MapSaveUtil::BuildAutoSavePlan(mapA, sharedAutosaveDir, true, &stA);
+		TEST(MapSaveUtil::WriteBytesAtomically(planA.destination, "A_" + std::to_string(i), false));
+		fs::last_write_time(planA.destination, baseTime + std::chrono::seconds(i), ec);
+		mapAFiles.push_back(planA.destination);
+		MapSaveUtil::PruneVersionedAutoSaves(sharedAutosaveDir, planA.versionedPrefix, L".yrm", 2, planA.destination);
+
+		const SYSTEMTIME stB = makeTime(static_cast<WORD>(20 + i));
+		const auto planB = MapSaveUtil::BuildAutoSavePlan(mapB, sharedAutosaveDir, true, &stB);
+		TEST(MapSaveUtil::WriteBytesAtomically(planB.destination, "B_" + std::to_string(i), false));
+		fs::last_write_time(planB.destination, baseTime + std::chrono::seconds(10 + i), ec);
+		mapBFiles.push_back(planB.destination);
+		MapSaveUtil::PruneVersionedAutoSaves(sharedAutosaveDir, planB.versionedPrefix, L".yrm", 2, planB.destination);
+	}
+
+	// Each map retains its own 2 newest backups independently.
+	TEST(!fs::exists(mapAFiles[0]));
+	TEST(fs::exists(mapAFiles[1]));
+	TEST(fs::exists(mapAFiles[2]));
+	TEST(!fs::exists(mapBFiles[0]));
+	TEST(fs::exists(mapBFiles[1]));
+	TEST(fs::exists(mapBFiles[2]));
+
+	// Non-versioned and legacy backups are completely untouched.
+	TEST(fs::exists(nonVerA.destination));
+	TEST(fs::exists(nonVerB.destination));
+	TEST(fs::exists(legacyBackup));
 
 	REPORT_TEST(true);
 }

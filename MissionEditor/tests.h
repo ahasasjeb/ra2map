@@ -50,4 +50,5 @@ private:
 	void test_tileset_browser_long_list_coords();
 	void test_crash_reporter();
 	void test_map_save_and_emergency_backup();
+	void test_autosave_isolation_and_rotation();
 };

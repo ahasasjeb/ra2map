@@ -130,4 +130,31 @@ namespace MapSaveUtil
 		const std::wstring& fileStamp,
 		DWORD processId,
 		const AtomicWriteHooks* hooks = nullptr);
+
+	// Computes a stable 16-hex-character identifier for a map's canonical source path
+	// (case- and separator-normalized on Windows) so same-named maps in different
+	// directories do not collide in shared autosave folders.
+	std::wstring ComputeMapSourceId(const std::filesystem::path& sourcePath);
+
+	struct AutoSavePathPlan
+	{
+		std::wstring sourceId;
+		std::wstring versionedPrefix;
+		std::filesystem::path destination;
+	};
+
+	AutoSavePathPlan BuildAutoSavePlan(
+		const std::filesystem::path& sourcePath,
+		const std::filesystem::path& directory,
+		bool versioned,
+		const SYSTEMTIME* nowOverride = nullptr);
+
+	// Rotates versioned autosaves strictly matching versionedPrefix + timestamp + extension,
+	// leaving other maps' backups and legacy-format backups untouched.
+	void PruneVersionedAutoSaves(
+		const std::filesystem::path& directory,
+		const std::wstring& versionedPrefix,
+		const std::wstring& extension,
+		size_t maxCount,
+		const std::filesystem::path& protectedPath = {});
 }

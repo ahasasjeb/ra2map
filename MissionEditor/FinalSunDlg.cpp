@@ -3621,25 +3621,8 @@ void CFinalSunDlg::ApplyAutomaticSaveSettings()
 void CFinalSunDlg::PruneAutomaticSaves(const std::filesystem::path& directory,
 	const std::wstring& filePrefix, const std::wstring& extension)
 {
-	std::error_code error;
-	std::vector<std::filesystem::directory_entry> files;
-	for (std::filesystem::directory_iterator it(directory, error), end; !error && it != end; it.increment(error))
-	{
-		const std::wstring fileName = it->path().filename().wstring();
-		const bool matchesMap = fileName.size() >= filePrefix.size() &&
-			_wcsnicmp(fileName.c_str(), filePrefix.c_str(), filePrefix.size()) == 0;
-		const bool matchesExtension = _wcsicmp(it->path().extension().c_str(), extension.c_str()) == 0;
-		if (it->is_regular_file(error) && matchesMap && matchesExtension)
-			files.push_back(*it);
-	}
-	std::sort(files.begin(), files.end(), [](const auto& left, const auto& right)
-	{
-		std::error_code leftError;
-		std::error_code rightError;
-		return left.last_write_time(leftError) > right.last_write_time(rightError);
-	});
-	for (size_t i = static_cast<size_t>(theApp.m_Options.autoSaveMaxCount); i < files.size(); ++i)
-		std::filesystem::remove(files[i].path(), error);
+	const size_t maxCount = static_cast<size_t>(max(1, theApp.m_Options.autoSaveMaxCount));
+	MapSaveUtil::PruneVersionedAutoSaves(directory, filePrefix, extension, maxCount);
 }
 
 void CFinalSunDlg::CreateAutomaticSave()
@@ -3670,26 +3653,30 @@ void CFinalSunDlg::CreateAutomaticSave()
 	if (error)
 		return;
 
-	const std::wstring filePrefix = source.stem().wstring() + L"-autosave-";
-	std::filesystem::path destination;
-	if (theApp.m_Options.autoSaveVersioned)
-	{
-		SYSTEMTIME now{};
-		GetLocalTime(&now);
-		wchar_t timestamp[32]{};
-		swprintf_s(timestamp, L"%04u%02u%02u-%02u%02u%02u", now.wYear, now.wMonth, now.wDay, now.wHour, now.wMinute, now.wSecond);
-		destination = directory / (filePrefix + timestamp + source.extension().wstring());
-	}
-	else
-	{
-		destination = directory / (source.stem().wstring() + L"-autosave" + source.extension().wstring());
-	}
+	const auto plan = MapSaveUtil::BuildAutoSavePlan(
+		source,
+		directory,
+		theApp.m_Options.autoSaveVersioned != FALSE);
 
 	m_automaticSaveInProgress = true;
-	SaveMap(utf16ToUtf8(destination.wstring()).c_str(), false);
+	std::wstring actualPath;
+	const bool saved = SaveMap(utf16ToUtf8(plan.destination.wstring()).c_str(), false, &actualPath);
 	m_automaticSaveInProgress = false;
-	if (theApp.m_Options.autoSaveVersioned)
-		PruneAutomaticSaves(directory, filePrefix, source.extension().wstring());
+
+	if (saved && theApp.m_Options.autoSaveVersioned)
+	{
+		const std::filesystem::path committedPath = actualPath.empty()
+			? plan.destination
+			: std::filesystem::path(actualPath);
+		const std::wstring committedExt = committedPath.extension().wstring();
+		const size_t maxCount = static_cast<size_t>(max(1, theApp.m_Options.autoSaveMaxCount));
+		MapSaveUtil::PruneVersionedAutoSaves(
+			directory,
+			plan.versionedPrefix,
+			committedExt,
+			maxCount,
+			committedPath);
+	}
 }
 
 void CFinalSunDlg::OnTimer(UINT_PTR nIDEvent)
