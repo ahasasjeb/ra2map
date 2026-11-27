@@ -36,6 +36,7 @@
 #include <stdlib.h>
 
 #include <atomic>
+#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <exception>
@@ -64,8 +65,23 @@ namespace
 	constexpr int kBtnOpenCrashDir = 1002;
 	constexpr int kBtnCloseApp = IDCLOSE;
 
+	enum CrashPhase : int
+	{
+		kCrashPhaseIdle = 0,
+		kCrashPhaseDiagnostics = 1,
+		kCrashPhaseDialog = 2,
+		kCrashPhaseFinished = 3,
+	};
+
+	constexpr DWORD kDbgHelpStackLockTimeoutMs = 1500;
+	constexpr DWORD kDbgHelpSymbolLockTimeoutMs = 500;
+	constexpr DWORD kSecondaryCrashMaxWaitMs = 20000;
+	constexpr DWORD kStackOverflowDiagnosticsTimeoutMs = 20000;
+	constexpr DWORD kStackOverflowDialogMaxWaitMs = 60000;
+
 	std::atomic<DWORD> g_activeCrashThreadId{ 0 };
-	std::mutex g_dbgHelpMutex;
+	std::atomic<int> g_crashPhase{ kCrashPhaseIdle };
+	std::timed_mutex g_dbgHelpMutex;
 
 	using SymInitializeWFn = BOOL(WINAPI*)(HANDLE, PCWSTR, BOOL);
 	using SymCleanupFn = BOOL(WINAPI*)(HANDLE);
@@ -360,24 +376,59 @@ namespace
 		return L".";
 	}
 
-	void ResolveFrameInfo(HANDLE process, DbgHelpApi& api, bool hasSymbols, DWORD64 address, CrashStackFrame& frame)
+	bool QueryModuleForAddressSafe(
+		DWORD64 address,
+		wchar_t* outPath,
+		size_t outPathCount,
+		DWORD* outLen,
+		DWORD64* outBase)
+	{
+		if (outLen)
+			*outLen = 0;
+		if (outBase)
+			*outBase = 0;
+		if (!address || !outPath || outPathCount == 0)
+			return false;
+
+		__try
+		{
+			HMODULE mod = nullptr;
+			if (!GetModuleHandleExW(
+				GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+				reinterpret_cast<LPCWSTR>(static_cast<ULONG_PTR>(address)),
+				&mod) || mod == nullptr)
+			{
+				return false;
+			}
+			const DWORD len = GetModuleFileNameW(mod, outPath, static_cast<DWORD>(outPathCount));
+			if (outLen)
+				*outLen = len;
+			if (outBase)
+				*outBase = reinterpret_cast<DWORD64>(mod);
+			return len > 0 && len < outPathCount;
+		}
+		__except (EXCEPTION_EXECUTE_HANDLER)
+		{
+			return false;
+		}
+	}
+
+	void ResolveFrameModuleOnlySafe(DWORD64 address, CrashStackFrame& frame)
 	{
 		frame.address = address;
-
-		HMODULE mod = nullptr;
-		if (GetModuleHandleExW(
-			GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-			reinterpret_cast<LPCWSTR>(static_cast<ULONG_PTR>(address)),
-			&mod) && mod != nullptr)
+		wchar_t modPath[MAX_PATH * 2] = { 0 };
+		DWORD len = 0;
+		DWORD64 base = 0;
+		if (QueryModuleForAddressSafe(address, modPath, _countof(modPath), &len, &base))
 		{
-			wchar_t modPath[MAX_PATH * 2] = { 0 };
-			const DWORD len = GetModuleFileNameW(mod, modPath, static_cast<DWORD>(_countof(modPath)));
-			if (len > 0 && len < _countof(modPath))
-			{
-				frame.moduleName = WideToUtf8Safe(GetBaseNameW(std::wstring(modPath, len)));
-			}
-			frame.moduleOffset = address - reinterpret_cast<DWORD64>(mod);
+			frame.moduleName = WideToUtf8Safe(GetBaseNameW(std::wstring(modPath, len)));
+			frame.moduleOffset = address - base;
 		}
+	}
+
+	void ResolveFrameInfo(HANDLE process, DbgHelpApi& api, bool hasSymbols, DWORD64 address, CrashStackFrame& frame)
+	{
+		ResolveFrameModuleOnlySafe(address, frame);
 
 		if (hasSymbols && api.symFromAddrW)
 		{
@@ -571,6 +622,7 @@ namespace
 	{
 		std::wstring dumpPath;
 		DWORD faultingThreadId = 0;
+		DWORD dbgHelpLockTimeoutMs = 2000;
 		bool hasExceptionInfo = false;
 		ExceptionPointersSnapshotPod exceptionSnapshot = {};
 		EXCEPTION_POINTERS exceptionPointers = {};
@@ -621,7 +673,13 @@ namespace
 			return ok;
 		}
 
-		std::lock_guard<std::mutex> lock(g_dbgHelpMutex);
+		std::unique_lock<std::timed_mutex> lock(g_dbgHelpMutex, std::defer_lock);
+		if (!lock.try_lock_for(std::chrono::milliseconds(task.dbgHelpLockTimeoutMs)))
+		{
+			task.lastError = ERROR_BUSY;
+			task.success = false;
+			return false;
+		}
 		DbgHelpApi& api = LoadDbgHelp();
 		if (!api.miniDumpWriteDump)
 		{
@@ -721,18 +779,20 @@ namespace
 
 		const unsigned char bom[3] = { 0xEF, 0xBB, 0xBF };
 		DWORD written = 0;
-		BOOL ok = WriteFile(file, bom, sizeof(bom), &written, nullptr);
-		if (ok && !content.empty())
+		BOOL ok = WriteFile(file, bom, sizeof(bom), &written, nullptr) && (written == sizeof(bom));
+		size_t totalWritten = 0;
+		while (ok && totalWritten < content.size())
 		{
-			ok = WriteFile(
-				file,
-				content.data(),
-				static_cast<DWORD>(content.size()),
-				&written,
-				nullptr);
+			const size_t remaining = content.size() - totalWritten;
+			const DWORD chunk = static_cast<DWORD>(remaining > (1u << 20) ? (1u << 20) : remaining);
+			written = 0;
+			ok = WriteFile(file, content.data() + totalWritten, chunk, &written, nullptr) && (written > 0);
+			totalWritten += written;
 		}
-		CloseHandle(file);
-		return ok != FALSE;
+		if (ok)
+			FlushFileBuffers(file);
+		const BOOL closed = CloseHandle(file);
+		return ok != FALSE && closed != FALSE;
 	}
 
 	void AppendToErrStreamSafe(const char* text)
@@ -1009,54 +1069,124 @@ namespace
 	{
 		CrashReportData data;
 		EXCEPTION_POINTERS* exceptionPointers = nullptr;
+		const CONTEXT* stackCaptureContext = nullptr;
+		int captureSkipFrames = 0;
 		DWORD faultingThreadId = 0;
 		bool allowEmergencySave = true;
 		bool showDialog = true;
 		bool fatal = true;
+		HANDLE diagnosticsDoneEvent = nullptr;
 	};
+
+	void BuildArtifactPaths(
+		const std::wstring& crashDirectory,
+		DWORD processId,
+		std::wstring& outReportPath,
+		std::wstring& outDumpPath)
+	{
+		std::wstring fileStamp;
+		FormatTimestampNow(&fileStamp);
+
+		wchar_t baseName[128];
+		std::swprintf(
+			baseName,
+			_countof(baseName),
+			L"crash_%ls_pid%lu",
+			fileStamp.c_str(),
+			static_cast<unsigned long>(processId != 0 ? processId : GetCurrentProcessId()));
+
+		std::wstring prefix = crashDirectory;
+		if (!prefix.empty() && prefix.back() != L'\\' && prefix.back() != L'/')
+			prefix.push_back(L'\\');
+		prefix += baseName;
+
+		outReportPath = prefix + L".txt";
+		outDumpPath = prefix + L".dmp";
+	}
 
 	void ExecuteCrashFlow(CrashFlowRequest& req)
 	{
-		// Capture stack trace from faulting context when available.
+		if (req.fatal)
+			g_crashPhase.store(kCrashPhaseDiagnostics, std::memory_order_release);
+
+		// Step 0: Resolve crash directory and emit a minimal diagnostic report FIRST,
+		// without acquiring DbgHelp locks or running symbolization/minidump.
+		const std::wstring crashDir = ResolveCrashDirectoryW();
+		CreateDirectoryRecursiveW(crashDir);
+
+		std::wstring reportPath;
+		std::wstring dumpPath;
+		BuildArtifactPaths(crashDir, req.data.processId, reportPath, dumpPath);
+
+		if (req.data.faultAddress == 0 && req.data.hasRegisters)
+		{
+#ifdef _M_X64
+			req.data.faultAddress = req.data.registers.Rip;
+#endif
+		}
+		if (req.data.faultLocation.empty() && req.data.faultAddress != 0)
+		{
+			CrashStackFrame minimalFaultFrame;
+			ResolveFrameModuleOnlySafe(req.data.faultAddress, minimalFaultFrame);
+			req.data.faultLocation = FormatLocation(minimalFaultFrame);
+		}
+
+		CrashArtifacts minimalArtifacts;
+		minimalArtifacts.crashDirectory = crashDir;
+		minimalArtifacts.reportFilePath = reportPath;
+		minimalArtifacts.dumpFilePath = dumpPath;
+		minimalArtifacts.dumpStatus = CrashDumpStatus::NotAttempted;
+		const std::string minimalReportUtf8 = CrashReporter::FormatCrashReport(req.data, &minimalArtifacts);
+		minimalArtifacts.reportWritten = WriteUtf8FileWithBom(reportPath, minimalReportUtf8);
+
+		// Step 1: Optional bounded stack capture and symbolization (degrades cleanly if DbgHelp is busy).
 		if (req.data.stackFrames.empty())
 		{
-			const CONTEXT* ctx = (req.exceptionPointers && req.exceptionPointers->ContextRecord)
-				? req.exceptionPointers->ContextRecord
-				: nullptr;
-			req.data.stackFrames = CrashReporter::CaptureStackFrames(ctx, ctx ? 0 : 2, 64);
+			const CONTEXT* ctx = req.stackCaptureContext;
+			if (!ctx && req.exceptionPointers && req.exceptionPointers->ContextRecord)
+				ctx = req.exceptionPointers->ContextRecord;
+			const int skip = ctx ? req.captureSkipFrames : (req.captureSkipFrames > 0 ? req.captureSkipFrames : 2);
+			req.data.stackFrames = CrashReporter::CaptureStackFramesBounded(
+				ctx,
+				skip,
+				64,
+				kDbgHelpStackLockTimeoutMs,
+				nullptr);
 		}
 
-		if (req.data.faultLocation.empty())
+		if (req.data.faultAddress != 0)
 		{
-			if (req.data.faultAddress != 0)
+			std::unique_lock<std::timed_mutex> lock(g_dbgHelpMutex, std::defer_lock);
+			if (lock.try_lock_for(std::chrono::milliseconds(kDbgHelpSymbolLockTimeoutMs)))
 			{
 				CrashStackFrame faultFrame;
-				{
-					std::lock_guard<std::mutex> lock(g_dbgHelpMutex);
-					DbgHelpApi& api = LoadDbgHelp();
-					const bool hasSymbols = EnsureSymbolsInitialized(api);
-					ResolveFrameInfo(GetCurrentProcess(), api, hasSymbols, req.data.faultAddress, faultFrame);
-				}
-				req.data.faultLocation = FormatLocation(faultFrame);
-			}
-			else if (!req.data.stackFrames.empty())
-			{
-				req.data.faultAddress = req.data.stackFrames[0].address;
-				req.data.faultLocation = FormatLocation(req.data.stackFrames[0]);
+				DbgHelpApi& api = LoadDbgHelp();
+				const bool hasSymbols = EnsureSymbolsInitialized(api);
+				ResolveFrameInfo(GetCurrentProcess(), api, hasSymbols, req.data.faultAddress, faultFrame);
+				const std::string resolvedLocation = FormatLocation(faultFrame);
+				if (!resolvedLocation.empty())
+					req.data.faultLocation = resolvedLocation;
 			}
 		}
+		else if (!req.data.stackFrames.empty())
+		{
+			req.data.faultAddress = req.data.stackFrames[0].address;
+			req.data.faultLocation = FormatLocation(req.data.stackFrames[0]);
+		}
 
-		const std::wstring crashDir = ResolveCrashDirectoryW();
-
-		// 1. Write minidump + crash report BEFORE touching editor state or UI.
-		CrashArtifacts artifacts = CrashReporter::WriteCrashArtifacts(
+		// Step 2: Write minidump + updated crash report BEFORE touching editor state or UI.
+		CrashReporter::MiniDumpExecutionOptions dumpOpts;
+		dumpOpts.precomputedReportPath = reportPath;
+		dumpOpts.precomputedDumpPath = dumpPath;
+		CrashArtifacts artifacts = CrashReporter::WriteCrashArtifactsEx(
 			crashDir,
 			req.data,
 			req.exceptionPointers,
-			req.faultingThreadId);
+			req.faultingThreadId,
+			dumpOpts);
 
-		// 2. Attempt non-UI, non-reentrant emergency backup from the last committed
-		//    immutable map snapshot (guarded by SEH, never touching live Map or UI).
+		// Step 3: Attempt non-UI, non-reentrant emergency backup from the last committed
+		//         immutable map snapshot (guarded by SEH, never touching live Map or UI).
 		if (req.allowEmergencySave && req.fatal)
 		{
 			std::wstring backupDir;
@@ -1105,17 +1235,88 @@ namespace
 		const std::wstring debugOut = Utf8ToWideSafe(finalReportUtf8 + "\n");
 		OutputDebugStringW(debugOut.c_str());
 
+		if (req.diagnosticsDoneEvent)
+			SetEvent(req.diagnosticsDoneEvent);
+
+		if (req.fatal)
+			g_crashPhase.store(kCrashPhaseDialog, std::memory_order_release);
+
 		if (req.showDialog && !IsDebuggerPresent())
 		{
 			ShowCrashDialog(req.data, finalReportUtf8, artifacts, req.fatal);
 		}
+
+		if (req.fatal)
+			g_crashPhase.store(kCrashPhaseFinished, std::memory_order_release);
+	}
+
+	// Heap-owned stack-overflow crash task shared between faulting thread and
+	// fresh-stack worker so a bounded wait/timeout never causes UAF.
+	struct StackOverflowCrashTask
+	{
+		CrashFlowRequest req;
+		ExceptionPointersSnapshotPod exceptionSnapshot = {};
+		EXCEPTION_POINTERS exceptionPointers = {};
+		bool hasExceptionInfo = false;
+		HANDLE diagnosticsDoneEvent = nullptr;
+
+		// Optional hook used by unit tests.
+		void(*customWorkerHook)(const CrashReportData&, const EXCEPTION_POINTERS*, void*) = nullptr;
+		void* customWorkerHookContext = nullptr;
+
+		~StackOverflowCrashTask()
+		{
+			if (diagnosticsDoneEvent)
+			{
+				CloseHandle(diagnosticsDoneEvent);
+				diagnosticsDoneEvent = nullptr;
+			}
+		}
+	};
+
+	void PopulateStackOverflowExceptionSnapshot(const EXCEPTION_POINTERS* src, StackOverflowCrashTask& task)
+	{
+		if (!CopyExceptionPointersSnapshotSafe(src, &task.exceptionSnapshot))
+			return;
+
+		for (size_t i = 0; i + 1 < task.exceptionSnapshot.recordCount; ++i)
+		{
+			task.exceptionSnapshot.records[i].ExceptionRecord = &task.exceptionSnapshot.records[i + 1];
+		}
+		if (task.exceptionSnapshot.recordCount > 0)
+		{
+			task.exceptionSnapshot.records[task.exceptionSnapshot.recordCount - 1].ExceptionRecord = nullptr;
+			task.exceptionPointers.ExceptionRecord = &task.exceptionSnapshot.records[0];
+		}
+		if (task.exceptionSnapshot.hasContext)
+		{
+			task.exceptionPointers.ContextRecord = &task.exceptionSnapshot.context;
+		}
+		task.hasExceptionInfo = (task.exceptionPointers.ExceptionRecord != nullptr || task.exceptionPointers.ContextRecord != nullptr);
+		if (task.hasExceptionInfo)
+			task.req.exceptionPointers = &task.exceptionPointers;
 	}
 
 	DWORD WINAPI StackOverflowCrashThreadProc(LPVOID param)
 	{
-		auto* req = static_cast<CrashFlowRequest*>(param);
-		if (req)
-			ExecuteCrashFlow(*req);
+		std::unique_ptr<std::shared_ptr<StackOverflowCrashTask>> holder(
+			static_cast<std::shared_ptr<StackOverflowCrashTask>*>(param));
+		if (!holder || !(*holder))
+			return 0;
+
+		StackOverflowCrashTask& task = **holder;
+		if (task.customWorkerHook)
+		{
+			task.customWorkerHook(
+				task.req.data,
+				task.hasExceptionInfo ? &task.exceptionPointers : nullptr,
+				task.customWorkerHookContext);
+			if (task.diagnosticsDoneEvent)
+				SetEvent(task.diagnosticsDoneEvent);
+			return 0;
+		}
+
+		ExecuteCrashFlow(task.req);
 		return 0;
 	}
 
@@ -1124,13 +1325,30 @@ namespace
 		const DWORD tid = GetCurrentThreadId();
 		DWORD expected = 0;
 		if (g_activeCrashThreadId.compare_exchange_strong(expected, tid))
+		{
+			g_crashPhase.store(kCrashPhaseDiagnostics, std::memory_order_release);
 			return true;
+		}
 
-		// Another thread is already handling a crash: wait briefly so we don't
-		// terminate the process out from under the dialog/dump writer.
+		// Another thread is already handling a crash: wait boundedly while it
+		// finishes writing diagnostics so we don't kill the process mid-write,
+		// yet never hang indefinitely if the primary handler is wedged.
 		if (expected != tid)
 		{
-			Sleep(INFINITE);
+			const DWORD startTick = GetTickCount();
+			while (g_activeCrashThreadId.load(std::memory_order_acquire) != 0)
+			{
+				const int phase = g_crashPhase.load(std::memory_order_acquire);
+				if (phase >= kCrashPhaseFinished)
+					break;
+				const DWORD elapsed = GetTickCount() - startTick;
+				const DWORD limit = (phase == kCrashPhaseDialog)
+					? kStackOverflowDialogMaxWaitMs
+					: kSecondaryCrashMaxWaitMs;
+				if (elapsed >= limit)
+					break;
+				Sleep(50);
+			}
 		}
 		return false;
 	}
@@ -1171,15 +1389,41 @@ namespace
 			req.data.registers = *exceptionInfo->ContextRecord;
 		}
 
-		// For stack overflow, run the entire report/dump/UI on a fresh thread stack!
+		// For stack overflow, run the entire report/dump/UI on a fresh thread stack
+		// with heap-owned inputs and a bounded wait so we never hang or UAF.
 		if (exceptionCode == EXCEPTION_STACK_OVERFLOW)
 		{
-			req.allowEmergencySave = false; // Avoid heavy map serialization on overflowed process
-			HANDLE hThread = CreateThread(nullptr, 0, StackOverflowCrashThreadProc, &req, 0, nullptr);
+			auto task = std::make_shared<StackOverflowCrashTask>();
+			task->req = std::move(req);
+			task->req.exceptionPointers = nullptr;
+			task->req.allowEmergencySave = false; // Avoid heavy work on overflowed process
+			task->diagnosticsDoneEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+			task->req.diagnosticsDoneEvent = task->diagnosticsDoneEvent;
+			PopulateStackOverflowExceptionSnapshot(exceptionInfo, *task);
+
+			auto* workerParam = new std::shared_ptr<StackOverflowCrashTask>(task);
+			HANDLE hThread = CreateThread(nullptr, 0, StackOverflowCrashThreadProc, workerParam, 0, nullptr);
 			if (hThread)
 			{
-				WaitForSingleObject(hThread, INFINITE);
+				if (task->diagnosticsDoneEvent)
+				{
+					HANDLE handles[2] = { hThread, task->diagnosticsDoneEvent };
+					const DWORD waitResult = WaitForMultipleObjects(2, handles, FALSE, kStackOverflowDiagnosticsTimeoutMs);
+					if (waitResult == WAIT_OBJECT_0 + 1)
+					{
+						// Diagnostics completed cleanly; allow bounded time for user crash dialog.
+						WaitForSingleObject(hThread, kStackOverflowDialogMaxWaitMs);
+					}
+				}
+				else
+				{
+					WaitForSingleObject(hThread, kStackOverflowDiagnosticsTimeoutMs);
+				}
 				CloseHandle(hThread);
+			}
+			else
+			{
+				delete workerParam;
 			}
 		}
 		else
@@ -1189,6 +1433,7 @@ namespace
 
 		if (IsDebuggerPresent())
 		{
+			g_crashPhase.store(kCrashPhaseIdle, std::memory_order_release);
 			g_activeCrashThreadId.store(0);
 			return EXCEPTION_CONTINUE_SEARCH;
 		}
@@ -1234,7 +1479,8 @@ namespace
 		req.data.cppExceptionMessage = cppMsg;
 		req.data.hasRegisters = true;
 		req.data.registers = ctx;
-		req.data.stackFrames = CrashReporter::CaptureStackFrames(&ctx, 1, 64);
+		req.stackCaptureContext = &ctx;
+		req.captureSkipFrames = 1;
 
 		ExecuteCrashFlow(req);
 
@@ -1389,7 +1635,8 @@ namespace CrashReporter
 		req.data.cppExceptionMessage = message ? message : "";
 		req.data.hasRegisters = true;
 		req.data.registers = ctx;
-		req.data.stackFrames = CaptureStackFrames(&ctx, 1, 64);
+		req.stackCaptureContext = &ctx;
+		req.captureSkipFrames = 1;
 
 		ExecuteCrashFlow(req);
 
@@ -1397,6 +1644,7 @@ namespace CrashReporter
 		{
 			if (IsDebuggerPresent())
 			{
+				g_crashPhase.store(kCrashPhaseIdle, std::memory_order_release);
 				g_activeCrashThreadId.store(0);
 				DebugBreak();
 			}
@@ -1444,7 +1692,8 @@ namespace CrashReporter
 			? e->GetRuntimeClass()->m_lpszClassName
 			: "CException";
 		req.data.cppExceptionMessage = errorBuf[0] ? errorBuf : "No MFC error message available.";
-		req.data.stackFrames = CaptureStackFrames(&ctx, 1, 64);
+		req.stackCaptureContext = &ctx;
+		req.captureSkipFrames = 1;
 
 		ExecuteCrashFlow(req);
 	}
@@ -1590,17 +1839,66 @@ namespace CrashReporter
 		int skipFrames,
 		int maxFrames)
 	{
+		return CaptureStackFramesBounded(context, skipFrames, maxFrames, kDbgHelpStackLockTimeoutMs, nullptr);
+	}
+
+	std::vector<CrashStackFrame> CaptureStackFramesBounded(
+		const CONTEXT* context,
+		int skipFrames,
+		int maxFrames,
+		DWORD lockTimeoutMs,
+		bool* outSymbolized)
+	{
+		if (outSymbolized)
+			*outSymbolized = false;
+
 		std::vector<CrashStackFrame> frames;
 		if (maxFrames <= 0)
 			return frames;
 		if (skipFrames < 0)
 			skipFrames = 0;
 
-		std::lock_guard<std::mutex> lock(g_dbgHelpMutex);
+		std::unique_lock<std::timed_mutex> lock(g_dbgHelpMutex, std::defer_lock);
+		if (!lock.try_lock_for(std::chrono::milliseconds(lockTimeoutMs)))
+		{
+			// DbgHelp lock is contended or wedged: degrade gracefully to lock-free
+			// module+offset frames without symbolization.
+			if (context != nullptr)
+			{
+#ifdef _M_X64
+				if (context->Rip != 0 && static_cast<int>(frames.size()) < maxFrames)
+				{
+					CrashStackFrame frame;
+					ResolveFrameModuleOnlySafe(context->Rip, frame);
+					frames.push_back(std::move(frame));
+				}
+#endif
+			}
+			const int remaining = maxFrames - static_cast<int>(frames.size());
+			if (remaining > 0)
+			{
+				std::vector<void*> raw(static_cast<size_t>(remaining), nullptr);
+				const USHORT captured = CaptureStackBackTrace(
+					static_cast<DWORD>(skipFrames + (context == nullptr ? 1 : 0)),
+					static_cast<DWORD>(remaining),
+					raw.data(),
+					nullptr);
+				for (USHORT i = 0; i < captured; ++i)
+				{
+					CrashStackFrame frame;
+					ResolveFrameModuleOnlySafe(reinterpret_cast<DWORD64>(raw[i]), frame);
+					frames.push_back(std::move(frame));
+				}
+			}
+			return frames;
+		}
+
 		DbgHelpApi& api = LoadDbgHelp();
 		const HANDLE process = GetCurrentProcess();
 		const HANDLE thread = GetCurrentThread();
 		const bool hasSymbols = EnsureSymbolsInitialized(api);
+		if (outSymbolized)
+			*outSymbolized = hasSymbols;
 
 		CONTEXT localCtx = {};
 		if (context != nullptr)
@@ -1828,24 +2126,22 @@ namespace CrashReporter
 		artifacts.crashDirectory = crashDirectory;
 		CreateDirectoryRecursiveW(crashDirectory);
 
-		std::wstring fileStamp;
-		FormatTimestampNow(&fileStamp);
+		if (!options.precomputedReportPath.empty() && !options.precomputedDumpPath.empty())
+		{
+			artifacts.reportFilePath = options.precomputedReportPath;
+			artifacts.dumpFilePath = options.precomputedDumpPath;
+		}
+		else
+		{
+			BuildArtifactPaths(crashDirectory, data.processId, artifacts.reportFilePath, artifacts.dumpFilePath);
+		}
 
-		wchar_t baseName[128];
-		std::swprintf(
-			baseName,
-			_countof(baseName),
-			L"crash_%ls_pid%lu",
-			fileStamp.c_str(),
-			static_cast<unsigned long>(data.processId != 0 ? data.processId : GetCurrentProcessId()));
-
-		std::wstring prefix = crashDirectory;
-		if (!prefix.empty() && prefix.back() != L'\\' && prefix.back() != L'/')
-			prefix.push_back(L'\\');
-		prefix += baseName;
-
-		artifacts.reportFilePath = prefix + L".txt";
-		artifacts.dumpFilePath = prefix + L".dmp";
+		// Write an initial minimal/current text report BEFORE waiting on minidump
+		// so diagnostic data is already persisted on disk even if dump generation stalls.
+		artifacts.dumpStatus = CrashDumpStatus::NotAttempted;
+		artifacts.reportWritten = WriteUtf8FileWithBom(
+			artifacts.reportFilePath,
+			FormatCrashReport(data, &artifacts));
 
 		// Write minidump on a dedicated worker thread (recommended by Microsoft
 		// and required when handling EXCEPTION_STACK_OVERFLOW). The task and deep
@@ -1854,6 +2150,7 @@ namespace CrashReporter
 		auto task = std::make_shared<MiniDumpTask>();
 		task->dumpPath = artifacts.dumpFilePath;
 		task->faultingThreadId = faultingThreadId != 0 ? faultingThreadId : GetCurrentThreadId();
+		task->dbgHelpLockTimeoutMs = options.dbgHelpLockTimeoutMs;
 		task->customWriter = options.customWriter;
 		task->customWriterContext = options.customWriterContext;
 		PopulateMiniDumpExceptionSnapshot(exceptionPointers, *task);
@@ -2041,4 +2338,74 @@ namespace CrashReporter
 
 		return Utf8ToWideSafe(oss.str());
 	}
+
+#ifdef _DEBUG
+	ScopedDbgHelpLockForTest::ScopedDbgHelpLockForTest()
+	{
+		g_dbgHelpMutex.lock();
+		m_locked = true;
+	}
+
+	ScopedDbgHelpLockForTest::~ScopedDbgHelpLockForTest()
+	{
+		if (m_locked)
+		{
+			g_dbgHelpMutex.unlock();
+			m_locked = false;
+		}
+	}
+
+	bool RunStackOverflowTaskBoundedForTest(
+		const CrashReportData& data,
+		const EXCEPTION_POINTERS* exceptionPointers,
+		DWORD faultingThreadId,
+		DWORD diagnosticsTimeoutMs,
+		void(*workerHook)(const CrashReportData&, const EXCEPTION_POINTERS*, void*),
+		void* hookContext,
+		bool* outTimedOut)
+	{
+		if (outTimedOut)
+			*outTimedOut = false;
+
+		auto task = std::make_shared<StackOverflowCrashTask>();
+		task->req.data = data;
+		task->req.faultingThreadId = faultingThreadId;
+		task->req.allowEmergencySave = false;
+		task->req.showDialog = false;
+		task->req.fatal = false;
+		task->diagnosticsDoneEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+		task->req.diagnosticsDoneEvent = task->diagnosticsDoneEvent;
+		task->customWorkerHook = workerHook;
+		task->customWorkerHookContext = hookContext;
+		PopulateStackOverflowExceptionSnapshot(exceptionPointers, *task);
+
+		auto* workerParam = new std::shared_ptr<StackOverflowCrashTask>(task);
+		HANDLE hThread = CreateThread(nullptr, 0, StackOverflowCrashThreadProc, workerParam, 0, nullptr);
+		if (!hThread)
+		{
+			delete workerParam;
+			return false;
+		}
+
+		DWORD waitResult = WAIT_FAILED;
+		if (task->diagnosticsDoneEvent)
+		{
+			HANDLE handles[2] = { hThread, task->diagnosticsDoneEvent };
+			waitResult = WaitForMultipleObjects(2, handles, FALSE, diagnosticsTimeoutMs);
+		}
+		else
+		{
+			waitResult = WaitForSingleObject(hThread, diagnosticsTimeoutMs);
+		}
+		CloseHandle(hThread);
+
+		if (waitResult == WAIT_TIMEOUT)
+		{
+			if (outTimedOut)
+				*outTimedOut = true;
+			return false;
+		}
+		return waitResult == WAIT_OBJECT_0 || waitResult == WAIT_OBJECT_0 + 1;
+	}
+#endif
 }

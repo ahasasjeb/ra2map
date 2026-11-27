@@ -2386,6 +2386,127 @@ void Tests::test_crash_reporter()
 		CloseHandle(state.finishedEvent);
 	}
 
+#ifdef _DEBUG
+	// 8. Verify bounded DbgHelp degradation: when g_dbgHelpMutex is held by another thread,
+	//    CaptureStackFramesBounded degrades cleanly to module+offset frames without hanging,
+	//    and WriteCrashArtifactsEx still writes the .txt report and fails dump with ERROR_BUSY.
+	{
+		HANDLE lockedEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+		HANDLE unlockEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+		TEST(lockedEvent && unlockEvent);
+
+		struct LockHolderArgs { HANDLE locked; HANDLE unlock; } holderArgs{ lockedEvent, unlockEvent };
+		HANDLE holderThread = CreateThread(nullptr, 0, [](LPVOID p) -> DWORD
+		{
+			auto* a = static_cast<LockHolderArgs*>(p);
+			CrashReporter::ScopedDbgHelpLockForTest lock;
+			SetEvent(a->locked);
+			WaitForSingleObject(a->unlock, 5000);
+			return 0;
+		}, &holderArgs, 0, nullptr);
+		TEST(holderThread != nullptr);
+		TEST(WaitForSingleObject(lockedEvent, 5000) == WAIT_OBJECT_0);
+
+		bool symbolized = true;
+		const DWORD startTick = GetTickCount();
+		const auto degradedFrames = CrashReporter::CaptureStackFramesBounded(nullptr, 0, 8, 50, &symbolized);
+		const DWORD elapsedCapture = GetTickCount() - startTick;
+		TEST(!symbolized);
+		TEST(!degradedFrames.empty());
+		TEST(elapsedCapture < 2000);
+
+		CrashReporter::MiniDumpExecutionOptions busyOpts;
+		busyOpts.timeoutMs = 2000;
+		busyOpts.dbgHelpLockTimeoutMs = 50;
+		const CrashArtifacts busyArtifacts = CrashReporter::WriteCrashArtifactsEx(
+			(tempDir / "dbghelp_busy").wstring(),
+			data,
+			nullptr,
+			GetCurrentThreadId(),
+			busyOpts);
+		TEST(busyArtifacts.reportWritten);
+		TEST(fs::exists(busyArtifacts.reportFilePath));
+		TEST(!busyArtifacts.dumpWritten);
+		TEST(busyArtifacts.dumpStatus == CrashDumpStatus::Failed);
+		TEST(busyArtifacts.dumpError.find("170") != std::string::npos); // ERROR_BUSY == 170
+
+		SetEvent(unlockEvent);
+		TEST(WaitForSingleObject(holderThread, 5000) == WAIT_OBJECT_0);
+		CloseHandle(holderThread);
+		CloseHandle(lockedEvent);
+		CloseHandle(unlockEvent);
+	}
+
+	// 9. Verify stack-overflow worker bounded timeout + heap-owned lifetime (no UAF).
+	{
+		struct SoTestState
+		{
+			HANDLE started = nullptr;
+			HANDLE release = nullptr;
+			HANDLE finished = nullptr;
+			DWORD expectedCode = 0xE00050F0u;
+			DWORD64 expectedRip = 0x00007FF655667788ULL;
+			bool intact = false;
+		} soState;
+		soState.started = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+		soState.release = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+		soState.finished = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+		TEST(soState.started && soState.release && soState.finished);
+
+		bool timedOut = false;
+		{
+			CONTEXT stackCtx = {};
+#ifdef _M_X64
+			stackCtx.Rip = soState.expectedRip;
+#endif
+			EXCEPTION_RECORD stackRec = {};
+			stackRec.ExceptionCode = soState.expectedCode;
+			EXCEPTION_POINTERS stackEp = {};
+			stackEp.ExceptionRecord = &stackRec;
+			stackEp.ContextRecord = &stackCtx;
+
+			const bool completed = CrashReporter::RunStackOverflowTaskBoundedForTest(
+				data,
+				&stackEp,
+				GetCurrentThreadId(),
+				50,
+				[](const CrashReportData& d, const EXCEPTION_POINTERS* ep, void* ctxPtr)
+				{
+					auto* s = static_cast<SoTestState*>(ctxPtr);
+					SetEvent(s->started);
+					WaitForSingleObject(s->release, 5000);
+					bool ok = (d.crashSource == "UnitTest Synthetic Crash") &&
+						ep != nullptr &&
+						ep->ExceptionRecord != nullptr &&
+						ep->ContextRecord != nullptr &&
+						ep->ExceptionRecord->ExceptionCode == s->expectedCode;
+#ifdef _M_X64
+					ok = ok && (ep->ContextRecord->Rip == s->expectedRip);
+#endif
+					s->intact = ok;
+					SetEvent(s->finished);
+				},
+				&soState,
+				&timedOut);
+			TEST(!completed);
+			TEST(timedOut);
+
+			std::memset(&stackCtx, 0xEE, sizeof(stackCtx));
+			std::memset(&stackRec, 0xEE, sizeof(stackRec));
+			std::memset(&stackEp, 0xEE, sizeof(stackEp));
+		}
+
+		TEST(WaitForSingleObject(soState.started, 5000) == WAIT_OBJECT_0);
+		SetEvent(soState.release);
+		TEST(WaitForSingleObject(soState.finished, 5000) == WAIT_OBJECT_0);
+		TEST(soState.intact);
+
+		CloseHandle(soState.started);
+		CloseHandle(soState.release);
+		CloseHandle(soState.finished);
+	}
+#endif
+
 	// Verify both Chinese and English UI summary texts include key fields.
 	const std::wstring zhSummary = CrashReporter::BuildCrashSummaryText(data, artifacts, true);
 	const std::wstring enSummary = CrashReporter::BuildCrashSummaryText(data, artifacts, false);

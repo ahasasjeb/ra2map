@@ -104,6 +104,9 @@ namespace CrashReporter
 	struct MiniDumpExecutionOptions
 	{
 		DWORD timeoutMs = 15000;
+		DWORD dbgHelpLockTimeoutMs = 2000;
+		std::wstring precomputedReportPath;
+		std::wstring precomputedDumpPath;
 		using WriterFn = bool(*)(
 			const std::wstring& dumpPath,
 			EXCEPTION_POINTERS* exceptionPointers,
@@ -144,6 +147,13 @@ namespace CrashReporter
 		int skipFrames = 0,
 		int maxFrames = 64);
 
+	std::vector<CrashStackFrame> CaptureStackFramesBounded(
+		const CONTEXT* context,
+		int skipFrames,
+		int maxFrames,
+		DWORD lockTimeoutMs,
+		bool* outSymbolized = nullptr);
+
 	std::string FormatStackFrame(size_t index, const CrashStackFrame& frame);
 
 	std::string FormatCrashReport(
@@ -169,4 +179,30 @@ namespace CrashReporter
 		const CrashReportData& data,
 		const CrashArtifacts& artifacts,
 		bool useChinese);
+
+#ifdef _DEBUG
+	class ScopedDbgHelpLockForTest
+	{
+	public:
+		ScopedDbgHelpLockForTest();
+		~ScopedDbgHelpLockForTest();
+
+		ScopedDbgHelpLockForTest(const ScopedDbgHelpLockForTest&) = delete;
+		ScopedDbgHelpLockForTest& operator=(const ScopedDbgHelpLockForTest&) = delete;
+
+		bool IsLocked() const { return m_locked; }
+
+	private:
+		bool m_locked = false;
+	};
+
+	bool RunStackOverflowTaskBoundedForTest(
+		const CrashReportData& data,
+		const EXCEPTION_POINTERS* exceptionPointers,
+		DWORD faultingThreadId,
+		DWORD diagnosticsTimeoutMs,
+		void(*workerHook)(const CrashReportData&, const EXCEPTION_POINTERS*, void*),
+		void* hookContext,
+		bool* outTimedOut);
+#endif
 }
