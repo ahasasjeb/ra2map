@@ -24,6 +24,7 @@
 #include "FinalSunDlg.h"
 #include "variables.h"
 #include "functions.h"
+#include "MapSaveUtil.h"
 #include "MissionEditorPackLib.h"
 #include "RustCore.h"
 
@@ -750,28 +751,37 @@ namespace
 		}
 	}
 
-	bool InvokeEmergencySaveMap(const char* utf8Path)
+	bool InvokeEmergencyBackupFromSnapshot(
+		const std::wstring* backupDir,
+		const std::wstring* fileStamp,
+		DWORD pid,
+		MapSaveUtil::EmergencyBackupResult* outResult)
 	{
-		if (!utf8Path || !utf8Path[0])
+		if (!backupDir || !fileStamp || !outResult)
 			return false;
-		if (!Map || Map->GetIsoSize() == 0)
-			return false;
-		auto* mainDlg = dynamic_cast<CFinalSunDlg*>(theApp.m_pMainWnd);
-		if (!mainDlg || !mainDlg->m_hWnd || !::IsWindow(mainDlg->m_hWnd))
-			return false;
-
-		mainDlg->SaveMap(utf8Path, false);
-		return true;
+		*outResult = MapSaveUtil::WriteEmergencyMapBackup(*backupDir, *fileStamp, pid);
+		return outResult->status == MapSaveUtil::EmergencyBackupStatus::Saved;
 	}
 
-	bool TryEmergencySaveMapInner(const char* utf8Path)
+	bool TryEmergencyBackupFromSnapshot(
+		const std::wstring& backupDir,
+		const std::wstring& fileStamp,
+		DWORD pid,
+		MapSaveUtil::EmergencyBackupResult* outResult,
+		bool* outSehFaulted)
 	{
+		if (outSehFaulted)
+			*outSehFaulted = false;
+		if (!outResult)
+			return false;
 		__try
 		{
-			return InvokeEmergencySaveMap(utf8Path);
+			return InvokeEmergencyBackupFromSnapshot(&backupDir, &fileStamp, pid, outResult);
 		}
 		__except (EXCEPTION_EXECUTE_HANDLER)
 		{
+			if (outSehFaulted)
+				*outSehFaulted = true;
 			return false;
 		}
 	}
@@ -1045,29 +1055,40 @@ namespace
 			req.exceptionPointers,
 			req.faultingThreadId);
 
-		// 2. Attempt emergency non-interactive backup save (guarded by SEH).
+		// 2. Attempt non-UI, non-reentrant emergency backup from the last committed
+		//    immutable map snapshot (guarded by SEH, never touching live Map or UI).
 		if (req.allowEmergencySave && req.fatal)
 		{
-			std::wstring backupW;
+			std::wstring backupDir;
 			if (!u8AppDataPath.empty())
 			{
-				backupW = Utf8ToWideSafe(u8AppDataPath);
-				if (!backupW.empty() && backupW.back() != L'\\' && backupW.back() != L'/')
-					backupW.push_back(L'\\');
-				backupW += L"fcrash_backup.map";
+				backupDir = Utf8ToWideSafe(u8AppDataPath);
 			}
 			else if (!crashDir.empty())
 			{
-				backupW = crashDir + L"\\fcrash_backup.map";
+				backupDir = crashDir;
 			}
 
-			if (!backupW.empty())
+			if (!backupDir.empty())
 			{
-				const std::string backupUtf8 = WideToUtf8Safe(backupW);
-				if (TryEmergencySaveMapInner(backupUtf8.c_str()))
+				std::wstring fileStamp;
+				FormatTimestampNow(&fileStamp);
+				const DWORD pid = req.data.processId != 0 ? req.data.processId : GetCurrentProcessId();
+				MapSaveUtil::EmergencyBackupResult backupResult;
+				bool sehFaulted = false;
+				if (TryEmergencyBackupFromSnapshot(backupDir, fileStamp, pid, &backupResult, &sehFaulted))
 				{
-					artifacts.backupMapPath = backupW;
+					artifacts.backupMapPath = backupResult.actualPath;
 					artifacts.backupMapSaved = true;
+					artifacts.backupMapError.clear();
+				}
+				else
+				{
+					artifacts.backupMapPath.clear();
+					artifacts.backupMapSaved = false;
+					artifacts.backupMapError = sehFaulted
+						? "SEH exception while writing emergency backup"
+						: backupResult.error;
 				}
 			}
 		}
@@ -1749,6 +1770,8 @@ namespace CrashReporter
 			}
 			if (artifacts->backupMapSaved && !artifacts->backupMapPath.empty())
 				oss << "Backup Map       : " << WideToUtf8Safe(artifacts->backupMapPath) << " (SAVED)\n";
+			else if (!artifacts->backupMapError.empty())
+				oss << "Backup Map       : (NOT SAVED: " << artifacts->backupMapError << ")\n";
 		}
 
 		oss << "\n--- Call Stack (" << data.stackFrames.size() << " frames) ---\n";

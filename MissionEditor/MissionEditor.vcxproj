@@ -282,6 +282,7 @@
     <ClCompile Include="Loading.cpp" />
     <ClCompile Include="MapD.cpp" />
     <ClCompile Include="MapData.cpp" />
+    <ClCompile Include="MapSaveUtil.cpp" />
     <ClCompile Include="MapSnapshots.cpp" />
     <ClCompile Include="MapMinimap.cpp" />
     <ClCompile Include="MapLoadingDlg.cpp" />
@@ -403,6 +404,7 @@
     <ClInclude Include="macros.h" />
     <ClInclude Include="MapD.h" />
     <ClInclude Include="MapData.h" />
+    <ClInclude Include="MapSaveUtil.h" />
     <ClInclude Include="FieldData.h" />
     <ClInclude Include="MapSnapshots.h" />
     <ClInclude Include="MapMinimap.h" />

@@ -95,6 +95,7 @@ struct CrashArtifacts
 	bool dumpWritten = false;
 	CrashDumpStatus dumpStatus = CrashDumpStatus::NotAttempted;
 	bool backupMapSaved = false;
+	std::string backupMapError;
 	std::string dumpError;
 };
 

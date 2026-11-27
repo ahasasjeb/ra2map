@@ -39,6 +39,7 @@
 #include "TileSetVulkanRecovery.h"
 #include "TileSetBrowserView.h"
 #include "CrashReporter.h"
+#include "MapSaveUtil.h"
 #include "functions.h"
 
 class TestError : public std::runtime_error
@@ -128,6 +129,7 @@ int Tests::run()
 		[this]() { test_tileset_vulkan_recovery(); },
 		[this]() { test_tileset_browser_long_list_coords(); },
 		[this]() { test_crash_reporter(); },
+		[this]() { test_map_save_and_emergency_backup(); },
 	});
 	for (const auto f : test_functions)
 	{
@@ -2393,5 +2395,187 @@ void Tests::test_crash_reporter()
 	TEST(enSummary.find(L"synthetic test failure") != std::wstring::npos);
 
 	fs::remove_all(tempDir, ec);
+	REPORT_TEST(true);
+}
+
+void Tests::test_map_save_and_emergency_backup()
+{
+	namespace fs = std::filesystem;
+	const fs::path tempDir = fs::temp_directory_path() / ("ra2map_save_test_" + std::to_string(GetCurrentProcessId()));
+	std::error_code ec;
+	fs::remove_all(tempDir, ec);
+	TEST(fs::create_directories(tempDir, ec));
+
+	struct Cleanup
+	{
+		fs::path dir;
+		~Cleanup()
+		{
+			MapSaveUtil::ClearCommittedMapSnapshot();
+			std::error_code err;
+			fs::remove_all(dir, err);
+		}
+	} cleanup{ tempDir };
+
+	// 1. Extension resolution: only replace final extension, never directory/stem ".map" substrings.
+	{
+		const fs::path dirWithMap(L"C:\\my.map.folder\\arena.map");
+		TEST(MapSaveUtil::ResolveMapOutputPath(dirWithMap, false, false, true) == dirWithMap);
+		TEST(MapSaveUtil::ResolveMapOutputPath(dirWithMap, true, false, true) == fs::path(L"C:\\my.map.folder\\arena.mpr"));
+		TEST(MapSaveUtil::ResolveMapOutputPath(dirWithMap, true, true, true) == fs::path(L"C:\\my.map.folder\\arena.yrm"));
+		TEST(MapSaveUtil::ResolveMapOutputPath(fs::path(L"C:\\maps\\arena.mpr"), true, true, true) == fs::path(L"C:\\maps\\arena.yrm"));
+		TEST(MapSaveUtil::ResolveMapOutputPath(fs::path(L"C:\\maps\\arena.mmx"), true, true, true) == fs::path(L"C:\\maps\\arena.mmx"));
+		TEST(MapSaveUtil::ResolveMapOutputPath(dirWithMap, true, true, false) == dirWithMap);
+	}
+
+	// 2. Atomic write integrity: success, unwritable/nonexistent dir, incomplete write, commit failure.
+	{
+		const fs::path target = tempDir / L"existing.yrm";
+		DWORD err = 0;
+		TEST(MapSaveUtil::WriteBytesAtomically(target, "GOOD_V1", true, &err));
+
+		// allowOverwrite=false must NOT overwrite an existing good file.
+		TEST(!MapSaveUtil::WriteBytesAtomically(target, "BAD_OVERWRITE", false, &err));
+		{
+			std::ifstream in(target, std::ios::binary);
+			const std::string content((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+			TEST(content == "GOOD_V1");
+		}
+
+		// Simulated incomplete write must fail, clean up temp file, and leave existing file intact.
+		MapSaveUtil::AtomicWriteHooks partialWriteHooks;
+		partialWriteHooks.writeFn = [](HANDLE file, std::string_view bytes, DWORD* outErr, void*) -> bool
+		{
+			DWORD written = 0;
+			if (!bytes.empty())
+				WriteFile(file, bytes.data(), 2, &written, nullptr);
+			if (outErr)
+				*outErr = ERROR_DISK_FULL;
+			return false;
+		};
+		TEST(!MapSaveUtil::WriteBytesAtomically(target, "PARTIAL_NEW_CONTENT", true, &err, &partialWriteHooks));
+		TEST(err == ERROR_DISK_FULL);
+		{
+			std::ifstream in(target, std::ios::binary);
+			const std::string content((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+			TEST(content == "GOOD_V1");
+		}
+
+		// Simulated commit failure must fail, clean up temp file, and leave existing file intact.
+		MapSaveUtil::AtomicWriteHooks commitFailHooks;
+		commitFailHooks.commitFn = [](const fs::path&, const fs::path&, bool, DWORD* outErr, void*) -> bool
+		{
+			if (outErr)
+				*outErr = ERROR_ACCESS_DENIED;
+			return false;
+		};
+		TEST(!MapSaveUtil::WriteBytesAtomically(target, "COMMIT_FAIL_CONTENT", true, &err, &commitFailHooks));
+		TEST(err == ERROR_ACCESS_DENIED);
+		{
+			std::ifstream in(target, std::ios::binary);
+			const std::string content((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+			TEST(content == "GOOD_V1");
+		}
+
+		// Nonexistent parent directory must fail cleanly.
+		TEST(!MapSaveUtil::WriteBytesAtomically(tempDir / L"no_such_dir" / L"out.map", "DATA", true, &err));
+
+		// Verify no leftover .tmp files remain in tempDir.
+		for (const auto& entry : fs::directory_iterator(tempDir))
+		{
+			TEST(entry.path().extension() != L".tmp");
+		}
+	}
+
+	// 3. Reentrancy guard prevents nested live saves.
+	{
+		TEST(!MapSaveUtil::IsMapSaveInProgress());
+		MapSaveUtil::ScopedMapSaveGuard outer;
+		TEST(outer.IsAcquired());
+		TEST(MapSaveUtil::IsMapSaveInProgress());
+		MapSaveUtil::ScopedMapSaveGuard inner;
+		TEST(!inner.IsAcquired());
+	}
+	TEST(!MapSaveUtil::IsMapSaveInProgress());
+
+	// 4. Serialized map output (SP .map, MP .mpr, YR .yrm) reloads cleanly via CIniFile.
+	CIniFile mapIni;
+	mapIni.sections["Basic"].values["Name"] = "Backup Integrity Map";
+	mapIni.sections["Basic"].values["GameMode"] = "standard";
+	mapIni.sections["Map"].values["Theater"] = "TEMPERATE";
+	mapIni.sections["Map"].values["Size"] = "0,0,16,16";
+	mapIni.sections["Header"].values["NumberStartingPoints"] = "2";
+	const std::string serialized = MapSaveUtil::SerializeMapIniToUtf8(
+		mapIni,
+		[](const CString&) { return false; },
+		false,
+		false);
+
+	// 5. Emergency backup with no committed snapshot reports NoSnapshotAvailable honestly.
+	MapSaveUtil::ClearCommittedMapSnapshot();
+	const auto noSnapResult = MapSaveUtil::WriteEmergencyMapBackup(
+		(tempDir / L"backups").wstring(),
+		L"20261127_080000",
+		GetCurrentProcessId());
+	TEST(noSnapResult.status == MapSaveUtil::EmergencyBackupStatus::NoSnapshotAvailable);
+	TEST(noSnapResult.actualPath.empty());
+
+	// 6. Emergency backup with committed snapshot writes unique files for SP/MP/YR,
+	//    never overwrites previous good backups, reports exact existing path, and reloads cleanly.
+	const std::wstring exts[] = { L".map", L".mpr", L".yrm" };
+	const fs::path backupDir = tempDir / L"backups";
+	std::vector<fs::path> createdBackups;
+	for (const auto& ext : exts)
+	{
+		MapSaveUtil::PublishCommittedMapSnapshot(serialized, ext, (tempDir / (L"src" + ext)).wstring());
+		const auto res1 = MapSaveUtil::WriteEmergencyMapBackup(backupDir.wstring(), L"20261127_080001", 1234);
+		TEST(res1.status == MapSaveUtil::EmergencyBackupStatus::Saved);
+		TEST(!res1.actualPath.empty());
+		const fs::path p1(res1.actualPath);
+		TEST(fs::exists(p1));
+		TEST(p1.extension() == ext);
+
+		// Reload the written backup to confirm valid INI round-trip.
+		CIniFile reloaded;
+		TEST(reloaded.LoadFile(p1.string()) == 0);
+		TEST(reloaded.GetValueByName("Basic", "Name", CString()) == CString("Backup Integrity Map"));
+		TEST(reloaded.GetValueByName("Map", "Theater", CString()) == CString("TEMPERATE"));
+
+		// Second emergency backup with identical timestamp+pid must create a distinct file,
+		// preserving the first good backup intact.
+		MapSaveUtil::PublishCommittedMapSnapshot(serialized + "; second\n", ext, (tempDir / (L"src" + ext)).wstring());
+		const auto res2 = MapSaveUtil::WriteEmergencyMapBackup(backupDir.wstring(), L"20261127_080001", 1234);
+		TEST(res2.status == MapSaveUtil::EmergencyBackupStatus::Saved);
+		const fs::path p2(res2.actualPath);
+		TEST(p2 != p1);
+		TEST(fs::exists(p1) && fs::exists(p2));
+		createdBackups.push_back(p1);
+		createdBackups.push_back(p2);
+	}
+
+	// Failed emergency backup (e.g. path blocked by an existing regular file or failing hook)
+	// must report WriteFailed and preserve all previous backups.
+	{
+		const fs::path fileAsDir = tempDir / L"not_a_directory";
+		TEST(MapSaveUtil::WriteBytesAtomically(fileAsDir, "BLOCKER", true));
+		const auto failDirRes = MapSaveUtil::WriteEmergencyMapBackup(fileAsDir.wstring(), L"20261127_080002", 1234);
+		TEST(failDirRes.status == MapSaveUtil::EmergencyBackupStatus::WriteFailed);
+		TEST(failDirRes.actualPath.empty());
+
+		MapSaveUtil::AtomicWriteHooks failHooks;
+		failHooks.writeFn = [](HANDLE, std::string_view, DWORD* outErr, void*) -> bool
+		{
+			if (outErr)
+				*outErr = ERROR_WRITE_FAULT;
+			return false;
+		};
+		const auto failWriteRes = MapSaveUtil::WriteEmergencyMapBackup(backupDir.wstring(), L"20261127_080003", 1234, &failHooks);
+		TEST(failWriteRes.status == MapSaveUtil::EmergencyBackupStatus::WriteFailed);
+		TEST(failWriteRes.actualPath.empty());
+
+		for (const auto& existing : createdBackups)
+			TEST(fs::exists(existing));
+	}
+
 	REPORT_TEST(true);
 }

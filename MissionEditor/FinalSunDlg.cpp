@@ -58,6 +58,7 @@
 #include <chrono>
 #include "userscriptsdlg.h"
 #include "CrashReporter.h"
+#include "MapSaveUtil.h"
 
 
 #ifdef _DEBUG
@@ -594,6 +595,7 @@ void CFinalSunDlg::OnFileOpenmap()
 		bNoDraw=FALSE;
 		return;
 	}
+	MapSaveUtil::ClearCommittedMapSnapshot();
 
 	
 	BOOL bNoMapFile=FALSE;
@@ -758,16 +760,20 @@ void CFinalSunDlg::OnFileSaveas()
 	
 	if(dlg.DoModal()!=IDCANCEL)
 	{
-		currentMapFile = dlg.GetPathName();
+		std::wstring actualPath;
+		if (SaveMap(dlg.GetPathName(), true, &actualPath))
+		{
+			currentMapFile = actualPath.empty()
+				? dlg.GetPathName()
+				: CString(utf16ToUtf8(actualPath).c_str());
 
-		CString str=GetLanguageStringACP("MainDialogCaption");
-		str+=" (";
-		str+=(char*)(LPCTSTR)dlg.GetPathName();
-		str+=")";
+			CString str=GetLanguageStringACP("MainDialogCaption");
+			str+=" (";
+			str+=currentMapFile;
+			str+=")";
 
-		this->SetWindowText(str);
-		
-		SaveMap(dlg.GetPathName());
+			this->SetWindowText(str);
+		}
 	}
 
 	
@@ -861,54 +867,61 @@ void CFinalSunDlg::OnFileSave()
 
 
 
-void CFinalSunDlg::SaveMap(CString FileName_, bool interactive)
+bool CFinalSunDlg::SaveMap(CString FileName_, bool interactive, std::wstring* outActualPath)
 {
-	SetCursor(LoadCursor(NULL, IDC_WAIT));
+	if (outActualPath)
+		outActualPath->clear();
+
+	MapSaveUtil::ScopedMapSaveGuard saveGuard;
+	if (!saveGuard.IsAcquired())
+		return false;
+
+	if (interactive)
+		SetCursor(LoadCursor(NULL, IDC_WAIT));
 
 	errstream << "SaveMap() called" << endl;
 	errstream.flush();
 
 	BOOL bSaveAsMMX=FALSE;
 	BOOL hidePreview=FALSE;
-	BOOL previewPrinted=FALSE;
 
-	
+	const std::filesystem::path requestedPath(utf8ToUtf16(FileName_.GetString()));
+	const bool isMultiplayer = (Map->IsMultiplayer() != FALSE);
+	const bool isYRMap = (Map->IsYRMap() != FALSE);
+#ifdef RA2_MODE
+	constexpr bool isRA2Mode = true;
+#else
+	constexpr bool isRA2Mode = false;
+#endif
 
-	FileName_.MakeLower();
-	FileName_=(LPCSTR)FileName_; // GetLength() needs to return proper size
+	if (isRA2Mode && isMultiplayer && _wcsicmp(requestedPath.extension().c_str(), L".mmx") == 0)
+		bSaveAsMMX = TRUE;
 
+	const std::filesystem::path resolvedDestPath = MapSaveUtil::ResolveMapOutputPath(
+		requestedPath,
+		isMultiplayer,
+		isYRMap,
+		isRA2Mode);
 
-	CString CoreName=FileName_;
+	CString CoreName = utf16ToUtf8(resolvedDestPath.stem().wstring()).c_str();
+	CoreName.MakeLower();
 	CString Description;
-	int minplayers;
-	int maxplayers;
-	BOOL standard;
-	BOOL meatgrind;
-	BOOL navalwar;
-	BOOL nukewar;
-	BOOL airwar;
-	BOOL megawealth;
-	BOOL duel;
-	BOOL cooperative;
+	int minplayers = 2;
+	int maxplayers = 2;
+	BOOL standard = FALSE;
+	BOOL meatgrind = FALSE;
+	BOOL navalwar = FALSE;
+	BOOL nukewar = FALSE;
+	BOOL airwar = FALSE;
+	BOOL megawealth = FALSE;
+	BOOL duel = FALSE;
+	BOOL cooperative = FALSE;
 	// MW Apr 17th, 2002: Added Teamgame!
-	BOOL teamgame;
+	BOOL teamgame = FALSE;
 
-	if(CoreName.ReverseFind('\\')>=0) CoreName=CoreName.Right(CoreName.GetLength()-CoreName.ReverseFind('\\')-1);
-	if(CoreName.Find(".")>=0) CoreName=CoreName.Left(CoreName.Find("."));
-
-	
-
-	
 #ifdef RA2_MODE
 	if(Map->IsMultiplayer())
 	{
-		if(FileName_.Find(".mmx")>=0) bSaveAsMMX=TRUE; else bSaveAsMMX=FALSE;
-		if(FileName_.Find(".map")>=0) FileName_.Replace(".map",".mpr");
-		
-		// MW 07/27/01: Check for YRM
-		if(FileName_.Find(".mpr")>=0 && Map->IsYRMap()) FileName_.Replace(".mpr",".yrm");
-
-		
 		// MW 07/28/01: Create [Header]
 		int i;
 		int wp_count=0;
@@ -1008,7 +1021,11 @@ void CFinalSunDlg::SaveMap(CString FileName_, bool interactive)
 			opt.m_Standard=TRUE;
 
 		
-		if(interactive && opt.DoModal()==IDCANCEL) return;
+		if(interactive && opt.DoModal()==IDCANCEL)
+		{
+			SetCursor(m_hArrowCursor);
+			return false;
+		}
 
 		gm="";
 		if(opt.m_Standard) gm+="standard, ";
@@ -1050,7 +1067,7 @@ void CFinalSunDlg::SaveMap(CString FileName_, bool interactive)
 		Map->GetIniFile().sections["Basic"].values["MaxPlayer"]=c;
 		
 		if(opt.m_Compress==0) dwFlags|=MAPDATA_UPDATE_TO_INI_ALL_COMPRESSED;
-		if(opt.m_PreviewMode==0) dwFlags|=MAPDATA_UPDATE_TO_INI_ALL_PREVIEW;
+		if(interactive && opt.m_PreviewMode==0) dwFlags|=MAPDATA_UPDATE_TO_INI_ALL_PREVIEW;
 		if(opt.m_PreviewMode==2) hidePreview=TRUE;
 	}
 	else
@@ -1075,7 +1092,11 @@ void CFinalSunDlg::SaveMap(CString FileName_, bool interactive)
 			opt.m_MegaWealth=gm.Find("megawealth")>=0;
 		}
 
-		if(interactive && opt.DoModal()==IDCANCEL) return;
+		if(interactive && opt.DoModal()==IDCANCEL)
+		{
+			SetCursor(m_hArrowCursor);
+			return false;
+		}
 
 		Description=opt.m_Description;
 		standard=opt.m_Standard;
@@ -1090,23 +1111,25 @@ void CFinalSunDlg::SaveMap(CString FileName_, bool interactive)
 		maxplayers=opt.m_Maxplayers+2;
 		minplayers=opt.m_MinPlayers+2;
 
-		dwFlags|=MAPDATA_UPDATE_TO_INI_ALL_PREVIEW;
+		if (interactive)
+			dwFlags|=MAPDATA_UPDATE_TO_INI_ALL_PREVIEW;
 
 		Map->GetIniFile().sections["Basic"].values["Official"]="Yes";
 
 		// Map->GetIniFile().sections["Basic"].values["Name"]=opt.m_Description;
 	}	
 	
-	SetText(GetLanguageStringACP("PackingData"));
-	UpdateWindow();	
+	std::unique_ptr<CSavingDlg> savingDlg;
+	if (interactive)
+	{
+		SetText(GetLanguageStringACP("PackingData"));
+		UpdateWindow();	
+		savingDlg = std::make_unique<CSavingDlg>();
+		savingDlg->ShowWindow(SW_SHOW);
+		savingDlg->BringWindowToTop();
+		savingDlg->UpdateWindow();
+	}
 	errstream << "Calling UpdateIniFile()"<<endl;
-	
-	
-	
-	CSavingDlg dlg;
-	dlg.ShowWindow(SW_SHOW);
-	dlg.BringWindowToTop();
-	dlg.UpdateWindow();
 	Map->UpdateIniFile(dwFlags);
 
 		
@@ -1143,264 +1166,160 @@ void CFinalSunDlg::SaveMap(CString FileName_, bool interactive)
 
 	
 	
-	SetText(GetLanguageStringACP("SavingStatus"));
-	UpdateWindow();
+	if (interactive)
+	{
+		SetText(GetLanguageStringACP("SavingStatus"));
+		UpdateWindow();
+	}
 
-	
-		
+	// classify rules sections from a freshly built cache: doing the
+	// Projectile reference scan per section below made saving large
+	// maps lock up
+	Map->BuildRulesSectionCache();
 
-	std::wstring FileName = utf8ToUtf16(FileName_.GetString());
-
-	map<CString, BOOL> rulessections;
-		
-	std::string tempfile=u8AppDataPath;
-	tempfile+="\\TmpMap.map";
-	std::wstring u16tempfile = utf8ToUtf16(tempfile);
-
-		CString fi;
-		
-		deleteFile(tempfile);
-		HANDLE hFile=CreateFileW(u16tempfile.c_str(), GENERIC_WRITE, 0, NULL, TRUNCATE_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, NULL);
-		CloseHandle(hFile);
-		hFile=CreateFileW(u16tempfile.c_str(), GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, NULL);
-		
-
-		DWORD bwr;
-		
-#ifdef TS_MODE
-		fi= "; Map created with FinalSun Mission Editor";
-		fi+="\n";
-		fi+= "; note that all comments were truncated" ;
-		fi+= "\n";
-		fi+= "; https://github.com/ahasasjeb/ra2map" ;
-		fi+="\n";
-#else
-		fi= "; Map created with FinalAlert 2 Mission Editor";
-		fi+="\n";
-		fi+= "; note that all comments were truncated" ;
-		fi+= "\n";
-		fi+= "; https://github.com/ahasasjeb/ra2map" ;
-		fi+="\n";
-#endif
-		fi+= "; Encoding=UTF-8";
-		fi+= "\n";
-
-		WriteFile(hFile, fi, fi.GetLength(), &bwr, NULL);
-
-		fi="";
-		auto writeSection = [&](const CString& sectionName, const CIniFileSection& section)
+	std::function<void(const CString&, int)> progressCallback;
+	if (interactive)
+	{
+		progressCallback = [this](const CString& sectionName, int percent)
 		{
-			std::string output;
-			output.reserve(sectionName.GetLength() + 4 + section.values.size() * 80);
-			output += '[';
-			output.append(sectionName.GetString(), sectionName.GetLength());
-			output += "]\n";
-
-			int entryIndex = 0;
-			for (const auto& entry : section.values)
-			{
-				output.append(entry.first.GetString(), entry.first.GetLength());
-				output += '=';
-				output.append(entry.second.GetString(), entry.second.GetLength());
-				output += '\n';
-
-				if (entryIndex % 500 == 0)
-				{
-					const int percent = entryIndex * 100 / static_cast<int>(section.values.size());
-					char percentText[50];
-					itoa(percent, percentText, 10);
-					SetText(TranslateStringVariables(2, TranslateStringVariables(1, GetLanguageStringACP("SavingStatusPct"), sectionName), percentText));
-					UpdateWindow();
-				}
-				++entryIndex;
-			}
-			output += '\n';
-			WriteFile(hFile, output.data(), static_cast<DWORD>(output.size()), &bwr, NULL);
+			char percentText[50];
+			itoa(percent, percentText, 10);
+			SetText(TranslateStringVariables(2, TranslateStringVariables(1, GetLanguageStringACP("SavingStatusPct"), sectionName), percentText));
+			UpdateWindow();
 		};
+	}
 
-		// MW 07/28/01: Header saving at top
-		for (const auto& section : ini.sections)
+#ifdef TS_MODE
+	constexpr bool isTSMode = true;
+#else
+	constexpr bool isTSMode = false;
+#endif
+
+	const std::string serializedMap = MapSaveUtil::SerializeMapIniToUtf8(
+		ini,
+		[](const CString& sectionName) { return Map->IsRulesSection(sectionName) != FALSE; },
+		hidePreview != FALSE,
+		isTSMode,
+		progressCallback);
+
+	if (savingDlg)
+	{
+		savingDlg->DestroyWindow();
+		savingDlg.reset();
+	}
+
+	std::filesystem::path targetPath = resolvedDestPath;
+	if(bSaveAsMMX)
+	{
+		MAPFileName.Replace(" ", "");
+		MMXFileName.Replace(" ", "");
+		PKTFileName.Replace(" ", "");
+		CoreName.Replace(" ", "");
+		targetPath = std::filesystem::path(utf8ToUtf16(MAPFileName.GetString()));
+	}
+
+	DWORD writeError = 0;
+	bool savedOk = MapSaveUtil::WriteBytesAtomically(
+		targetPath,
+		serializedMap,
+		/*allowOverwrite=*/true,
+		&writeError);
+
+	if (savedOk)
+	{
+		if(bSaveAsMMX)
 		{
-			if (section.first == "Header")
+			CIniFile f;
+			f.sections["MultiMaps"].values["1"]=CoreName;
+			f.sections[CoreName].values["Description"]=Description;
+			CString gm;
+			if(standard) gm+="standard, ";
+			if(meatgrind) gm+="meatgrind, ";
+			if(navalwar) gm+="navalwar, ";
+			if(nukewar) gm+="nukewar, ";
+			if(airwar) gm+="airwar, ";
+			if(megawealth) gm+="megawealth, ";
+			if(duel) gm+="duel, ";
+			if(cooperative) gm+="cooperative, ";
+
+			if(gm.ReverseFind(',')>=0) gm=gm.Left(gm.ReverseFind(','));
+
+			f.sections[CoreName].values["GameMode"]=gm;
+
+			char c[50];
+			itoa(maxplayers, c, 10);
+			f.sections[CoreName].values["MaxPlayers"]=c;
+			itoa(minplayers,c, 10);
+			f.sections[CoreName].values["MinPlayers"]=c;
+
+			f.sections[CoreName].values["CD"]="0,1";
+
+			const BOOL pktSaved = f.SaveFile(PKTFileName);
+
+			LPCSTR files[2];
+			files[0]=(LPCSTR)PKTFileName;
+			files[1]=(LPCSTR)MAPFileName;
+
+#ifdef RA2_MODE
+			auto game = yuri_mode ? FSunPackLib::Game::RA2_YR : FSunPackLib::Game::RA2;
+#else
+			auto game = FSunPackLib::Game::TS;
+#endif
+			const BOOL mixWritten = pktSaved
+				? FSunPackLib::WriteMixFile(MMXFileName, files, 2, game)
+				: FALSE;
+
+			DeleteFile(PKTFileName);
+			DeleteFile(MAPFileName);
+
+			savedOk = (pktSaved != FALSE && mixWritten != FALSE);
+			if (savedOk)
 			{
-				rulessections[section.first] = TRUE;
-				writeSection(section.first, section.second);
+				const std::wstring mmxWide = utf8ToUtf16(MMXFileName.GetString());
+				if (outActualPath)
+					*outActualPath = mmxWide;
+				const std::wstring snapshotExt = isYRMap ? L".yrm" : (isMultiplayer ? L".mpr" : L".map");
+				MapSaveUtil::PublishCommittedMapSnapshot(serializedMap, snapshotExt, mmxWide);
+				if (interactive)
+				{
+					SetText(TranslateStringVariables(1,GetLanguageStringACP("FileSaved"), MMXFileName));
+					InsertPrevFile(MMXFileName);
+				}
 			}
-
-		}
-
-		// classify rules sections from a freshly built cache: doing the
-		// Projectile reference scan per section below made saving large
-		// maps lock up
-		Map->BuildRulesSectionCache();
-
-		for (const auto& section : ini.sections)
-		{
-			if (Map->IsRulesSection(section.first))
-			{
-				rulessections[section.first] = TRUE;
-				writeSection(section.first, section.second);
-			}
-
-		}
-
-		// the preview must be before map data...
-		if(hidePreview)
-		{
-			fi+= "; this is a hidden preview";fi+= "\n";
-			fi+= "[Preview]" ;fi+= "\n" ;
-			fi+= "Size=0,0,106,61" ;fi+= "\n" ;fi+= "\n";
-			fi+= "[PreviewPack]" ;fi+= "\n";
-			fi+= "2=BIACcgAEwBtAMnRABAAaQCSANMAVQASAAnIABMAbQDJ0QAQAGkAkgDTAFUAEgAJyAATAG0" ;fi+= "\n";
-			fi+= "1=yAsAIAXQ5PDQ5PDQ6JQATAEE6PDQ4PDI4JgBTAFEAkgAJyAATAG0AydEAEABpAJIA0wBVA" ;fi+= "\n" ;fi+= "\n";
-		}
-		else{
-			fi+= "[Preview]" ;fi+= "\n";
-			for (const auto& entry : ini.sections["Preview"].values)
-			{
-				fi += entry.first; fi += "=";
-				fi += entry.second;
-				fi+= "\n";
-			}
-			fi+= "\n";
-			fi+= "[PreviewPack]" ;fi+= "\n";
-			for (const auto& entry : ini.sections["PreviewPack"].values)
-			{
-				fi += entry.first; fi += "=";
-				fi += entry.second;
-				fi+= "\n";
-			}
-			fi+= "\n";
-		}
-
-		
-		WriteFile(hFile, fi, fi.GetLength(), &bwr, NULL);
-		// clear the buffer, otherwise the preview sections are written to the
-		// file a second time together with [Digest] below
-		fi="";
-
-		for (const auto& section : ini.sections)
-		{
-			if (rulessections.find(section.first) != rulessections.end() ||
-				section.first == "Digest" || section.first == "PreviewPack" ||
-				section.first == "Preview" || section.first == "Header")
-			{
-
-				
-
-				
-			}
-			else if (!section.first.IsEmpty())
-			{
-				writeSection(section.first, section.second);
-			}
-		}
-
-		
-		fi+= "\n";
-		fi+= "[Digest]" ;fi+= "\n";
-		for (const auto& entry : ini.sections["Digest"].values)
-		{
-			fi += entry.first; fi += "=";
-			fi += entry.second;
-			fi+= "\n";
-		}
-		fi+= "\n";
-		WriteFile(hFile, fi, fi.GetLength(), &bwr, NULL);
-
-				
-		CloseHandle(hFile);
-
-		dlg.DestroyWindow();
-
-		auto DestName=FileName;
-		if(bSaveAsMMX) 
-		{
-			MAPFileName.Replace(" ", "");
-			MMXFileName.Replace(" ", "");
-			PKTFileName.Replace(" ", "");
-			CoreName.Replace(" ", "");
-		}
-		if (bSaveAsMMX)
-			FileName = utf8ToUtf16(MAPFileName.GetString());
-		
-		const auto u8FileName = utf16ToUtf8(FileName);
-
-		if(!CopyFileW(u16tempfile.c_str(), FileName.c_str(), FALSE))
-		{
-			MessageBox(GetLanguageStringACP("FileReadOnly"),TranslateStringACP("Error"),MB_OK);
 		}
 		else
 		{
-			SetText(TranslateStringVariables(1,GetLanguageStringACP("FileSaved"), u8FileName.c_str()));
-			if(bSaveAsMMX)
-			{				
-				SetText(TranslateStringVariables(1,GetLanguageStringACP("FileSaved"), MMXFileName));
-				
-				// MW 07/20/01:
-				InsertPrevFile(MMXFileName);
-
-				CIniFile f;
-				//CoreName.Replace(" ", "");
-				//Description.Replace(" ","");
-				
-				f.sections["MultiMaps"].values["1"]=CoreName;
-				f.sections[CoreName].values["Description"]=Description;
-				CString gm;
-				if(standard) gm+="standard, ";
-				if(meatgrind) gm+="meatgrind, ";
-				if(navalwar) gm+="navalwar, ";
-				if(nukewar) gm+="nukewar, ";
-				if(airwar) gm+="airwar, ";
-				if(megawealth) gm+="megawealth, ";
-				if(duel) gm+="duel, ";
-				if(cooperative) gm+="cooperative, ";
-
-				if(gm.ReverseFind(',')>=0) gm=gm.Left(gm.ReverseFind(','));
-
-				f.sections[CoreName].values["GameMode"]=gm;
-
-				char c[50];
-				itoa(maxplayers, c, 10);
-				f.sections[CoreName].values["MaxPlayers"]=c;
-				itoa(minplayers,c,10);
-				f.sections[CoreName].values["MinPlayers"]=c;
-
-				f.sections[CoreName].values["CD"]="0,1";
-				
-
-				f.SaveFile(PKTFileName);
-
-				LPCSTR files[2];
-				files[0]=(LPCSTR)PKTFileName;
-				files[1]=(LPCSTR)MAPFileName;
-
-#ifdef RA2_MODE
-				auto game = yuri_mode ? FSunPackLib::Game::RA2_YR : FSunPackLib::Game::RA2;
-#else
-				auto game = FSunPackLib::Game::TS;
-#endif
-				FSunPackLib::WriteMixFile(MMXFileName, files, 2, game);
-
-				DeleteFile(PKTFileName);
-				DeleteFile(MAPFileName);
-			}
-			else
+			const std::wstring actualWide = targetPath.wstring();
+			const std::string u8FileName = utf16ToUtf8(actualWide);
+			if (outActualPath)
+				*outActualPath = actualWide;
+			MapSaveUtil::PublishCommittedMapSnapshot(serializedMap, targetPath.extension().wstring(), actualWide);
+			if (interactive)
 			{
-				// MW 07/20/01:
-				if (interactive)
-					InsertPrevFile(u8FileName.c_str());
+				SetText(TranslateStringVariables(1,GetLanguageStringACP("FileSaved"), u8FileName.c_str()));
+				InsertPrevFile(u8FileName.c_str());
 			}
 		}
-
-		deleteFile(tempfile);
-
-	SetCursor(m_hArrowCursor);
-	if (!m_automaticSaveInProgress)
-		RefreshMapWriteTime();
-	//SetReady();
-
 	}
+
+	if (!savedOk)
+	{
+		errstream << "SaveMap() failed for " << utf16ToUtf8(targetPath.wstring())
+			<< " (Win32 error " << writeError << ")" << endl;
+		errstream.flush();
+		if (interactive)
+		{
+			MessageBox(GetLanguageStringACP("FileReadOnly"),TranslateStringACP("Error"),MB_OK);
+		}
+	}
+
+	if (interactive)
+		SetCursor(m_hArrowCursor);
+	if (savedOk && !m_automaticSaveInProgress)
+		RefreshMapWriteTime();
+
+	return savedOk;
+}
 
 void CFinalSunDlg::SetReady()
 {
@@ -1731,6 +1650,7 @@ void CFinalSunDlg::OnFileNew()
 		else if(theater==4) theater_s=THEATER4; else if(theater==5) theater_s=THEATER5;
 	
 		Map->CreateMap(width, height, theater_s, stdheight);	
+		MapSaveUtil::ClearCommittedMapSnapshot();
 		
 		if(!bSingleplayer)
 		{
@@ -2090,6 +2010,7 @@ void CFinalSunDlg::UnloadAll()
 		dlg.UpdateWindow();
 
 		tiledata=0;
+		MapSaveUtil::ClearCommittedMapSnapshot();
 
 		theApp.m_loading->FreeAll();
 		
@@ -3594,6 +3515,7 @@ void CFinalSunDlg::OpenMap(LPCSTR lpFilename)
 		bNoDraw=FALSE;
 		return;
 	}
+	MapSaveUtil::ClearCommittedMapSnapshot();
 
 	
 	BOOL bNoMapFile=FALSE;

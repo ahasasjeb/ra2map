@@ -132,6 +132,9 @@
     <ClCompile Include="MapData.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="MapSaveUtil.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="MapSnapshots.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -434,6 +437,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="MapData.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="MapSaveUtil.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="FieldData.h">

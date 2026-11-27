@@ -78,7 +78,7 @@ public:
 	CAITriggerTypes m_aitriggertypes;
 	CAiTriggerTypesEnable m_aitriggertypesenable;
 	void SetText(const char* text);
-	void SaveMap(CString FileName, bool interactive = true);
+	bool SaveMap(CString FileName, bool interactive = true, std::wstring* outActualPath = nullptr);
 	void ApplyAutomaticSaveSettings();
 	void SetReady();
 	CScriptTypes m_Scripttypes;
