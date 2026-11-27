@@ -66,6 +66,36 @@ struct TileSetBrowserLayout
 		return layout;
 	}
 
+	struct VisibleRowRange
+	{
+		int firstRow = 0;
+		int lastRow = -1;
+		bool Empty() const { return firstRow > lastRow; }
+	};
+
+	VisibleRowRange ComputeVisibleRows(int scrollY, int viewportHeight, int marginRows = 1) const
+	{
+		if (rows <= 0 || itemCount <= 0 || tileHeight <= 0 || viewportHeight <= 0)
+			return {};
+
+		const int64_t viewTop = scrollY > 0 ? static_cast<int64_t>(scrollY) : 0;
+		const int64_t viewBottomExclusive = static_cast<int64_t>(scrollY) + static_cast<int64_t>(viewportHeight);
+		if (viewBottomExclusive <= 0)
+			return {};
+
+		const int64_t rawFirst = viewTop / tileHeight;
+		const int64_t rawLast = (viewBottomExclusive - 1) / tileHeight;
+		const int64_t margin = marginRows > 0 ? static_cast<int64_t>(marginRows) : 0;
+
+		const int64_t clampedFirst = (rawFirst - margin) > 0 ? (rawFirst - margin) : 0;
+		const int64_t maxRow = static_cast<int64_t>(rows - 1);
+		const int64_t clampedLast = (rawLast + margin) < maxRow ? (rawLast + margin) : maxRow;
+		if (clampedFirst > clampedLast)
+			return {};
+
+		return { static_cast<int>(clampedFirst), static_cast<int>(clampedLast) };
+	}
+
 	int HitTest(int listX, int listY) const
 	{
 		if (rows <= 0 || itemCount <= 0 || tileWidth <= 0 || tileHeight <= 0 || listX < 0 || listY < 0)
@@ -157,6 +187,7 @@ public:
 	bool IsTransientTimerActiveForTest() const { return m_activeTransientTimerId != 0; }
 	UINT_PTR GetActiveRetryTimerIdForTest() const { return m_activeRetryTimerId; }
 	UINT_PTR GetActiveTransientTimerIdForTest() const { return m_activeTransientTimerId; }
+	int GetLastDrawVisitedItemsForTest() const { return m_lastDrawVisitedItemsForTest; }
 	void TriggerDrawForTest(CDC* pDC) { OnDraw(pDC); }
 
 	virtual void AssertValid() const;
@@ -220,6 +251,7 @@ protected:
 
 	VulkanTestHooks* m_testHooks = nullptr;
 	bool m_testRendererActive = false;
+	int m_lastDrawVisitedItemsForTest = 0;
 	DebugFaultInjection m_debugFaultInjection;
 #endif
 };

@@ -1947,6 +1947,7 @@ void Tests::test_tileset_browser_long_list_coords()
 
 		// Draw and inspect VulkanScene commands in viewport-local coordinates.
 		drawView();
+		TEST(view.GetLastDrawVisitedItemsForTest() > 0 && view.GetLastDrawVisitedItemsForTest() <= 24);
 		TEST(presentedSource.left == 0 && presentedSource.top == 0);
 		TEST(presentedSource.right == clientRect.Width() && presentedSource.bottom == clientRect.Height());
 		const VulkanScene* scene = view.GetGpuSceneForTest();
@@ -2004,6 +2005,7 @@ void Tests::test_tileset_browser_long_list_coords()
 				&& AD.data3 == static_cast<int>(expectedImageIndex));
 
 			drawView();
+			TEST(view.GetLastDrawVisitedItemsForTest() > 0 && view.GetLastDrawVisitedItemsForTest() <= 24);
 			TEST(presentedSource.left == 0 && presentedSource.top == 0);
 			TEST(presentedSource.right == clientRect.Width() && presentedSource.bottom == clientRect.Height());
 			const VulkanScene* scene = view.GetGpuSceneForTest();
@@ -2918,6 +2920,15 @@ void Tests::test_tileset_browser_resize_scroll_range()
 		TEST(TileSetBrowserLayout::ClampScrollPos(-5, 1000, 240) == 0);
 		TEST(TileSetBrowserLayout::ClampScrollPos(900, 1000, 240) == 760);
 		TEST(TileSetBrowserLayout::ClampScrollPos(500, 160, 240) == 0);
+
+		// Visible row range computation (O(visibleRows) bounds).
+		TEST(empty.ComputeVisibleRows(0, 240).Empty());
+		const auto topRange = partial.ComputeVisibleRows(0, 240, 0);
+		TEST(!topRange.Empty() && topRange.firstRow == 0 && topRange.lastRow == 2);
+		const auto midRange = partial.ComputeVisibleRows(4000, 240, 1);
+		TEST(!midRange.Empty() && midRange.firstRow == 49 && midRange.lastRow == 53);
+		const auto pastEnd = partial.ComputeVisibleRows(partial.totalHeight + 240, 240, 1);
+		TEST(pastEnd.Empty());
 	}
 
 	// 2. Real CTileSetBrowserView resize (4 cols -> 1 col -> 4 cols) for both Mode 1 and Mode 2.

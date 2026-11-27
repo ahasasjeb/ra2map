@@ -664,28 +664,36 @@ void CTileSetBrowserView::OnDraw(CDC* pDC)
 
 	const int scrollX = GetScrollPos(SB_HORZ);
 	const int scrollY = GetScrollPos(SB_VERT);
-	const RECT listViewport{ scrollX, scrollY, scrollX + width, scrollY + height };
 	const RECT viewport{ 0, 0, width, height };
+#ifdef _DEBUG
+	m_lastDrawVisitedItemsForTest = 0;
+#endif
 
 	if (m_gpuScene != nullptr)
 	{
 		m_gpuScene->Begin(viewport);
 
 		const TileSetBrowserLayout layout = ComputeLayout(width);
-		if (layout.rows > 0 && (m_CurrentMode != 1 || (tiledata != NULL && (*tiledata) != NULL)))
+		const auto visibleRows = layout.ComputeVisibleRows(scrollY, height, 1);
+		if (!visibleRows.Empty() && (m_CurrentMode != 1 || (tiledata != NULL && (*tiledata) != NULL)))
 		{
-			const int max_r = layout.cols;
-
-			int cur_y = 0;
-			int cur_x = 0;
-
 			if (m_CurrentMode == 1)
 			{
-				for (int i = 0; i < m_tilecount; i++)
+				for (int row = visibleRows.firstRow; row <= visibleRows.lastRow; ++row)
 				{
-					const DWORD dwID = m_currentTileIds[i];
-					if (cur_y + m_tile_height >= listViewport.top && cur_y <= listViewport.bottom)
+					const int rowStart = row * layout.cols;
+					const int rowEnd = min(layout.itemCount, rowStart + layout.cols);
+					const int local_y = row * layout.tileHeight - scrollY;
+					const bool rowIntersectsViewport = (local_y + layout.tileHeight > 0 && local_y < height);
+
+					for (int index = rowStart; index < rowEnd; ++index)
 					{
+#ifdef _DEBUG
+						++m_lastDrawVisitedItemsForTest;
+#endif
+						const int col = index - rowStart;
+						const int local_x = col * layout.tileWidth - scrollX;
+						const DWORD dwID = m_currentTileIds[index];
 						DWORD renderID = dwID;
 						if (theApp.m_Options.bMarbleMadness && (*tiledata)[dwID].wMarbleGround != 0xFFFF)
 							renderID = (*tiledata)[dwID].wMarbleGround;
@@ -694,10 +702,8 @@ void CTileSetBrowserView::OnDraw(CDC* pDC)
 						const int added_height = GetAddedHeight(renderID);
 						const int curwidth = td.rect.right - td.rect.left;
 						const int curheight = added_height + td.rect.bottom - td.rect.top;
-						const int local_x = cur_x - scrollX;
-						const int local_y = cur_y - scrollY;
-						const int base_x = local_x + (m_tile_width - curwidth) / 2;
-						const int base_y = local_y + (m_tile_height - curheight) / 2;
+						const int base_x = local_x + (layout.tileWidth - curwidth) / 2;
+						const int base_y = local_y + (layout.tileHeight - curheight) / 2;
 						const RECT tileClip{
 							max(viewport.left, static_cast<LONG>(base_x)),
 							max(viewport.top, static_cast<LONG>(base_y)),
@@ -723,62 +729,56 @@ void CTileSetBrowserView::OnDraw(CDC* pDC)
 							}
 						}
 
-						if (AD.mode == ACTIONMODE_SETTILE && AD.type == dwID)
+						if (rowIntersectsViewport && AD.mode == ACTIONMODE_SETTILE && AD.type == dwID)
 						{
 							LineDrawer drawer(*m_gpuScene);
-							drawer.Rectangle(local_x + 2, local_y + 2, local_x + m_tile_width - 2, local_y + m_tile_height - 2, 0x00ff0000);
+							drawer.Rectangle(local_x + 2, local_y + 2, local_x + layout.tileWidth - 2, local_y + layout.tileHeight - 2, 0x00ff0000);
 						}
-					}
-
-					cur_x += m_tile_width;
-					if (i % max_r == max_r - 1)
-					{
-						cur_y += m_tile_height;
-						cur_x = 0;
 					}
 				}
 			}
 			else if (m_CurrentMode == 2)
 			{
-				for (size_t displayIndex = 0; displayIndex < m_currentOverlayImages.size(); ++displayIndex)
+				for (int row = visibleRows.firstRow; row <= visibleRows.lastRow; ++row)
 				{
-					const OverlayImageRef& image = m_currentOverlayImages[displayIndex];
-					PICDATA* p = ovrlpics[image.overlayType][image.imageIndex];
-					if (p != NULL && p->pic != NULL)
+					const int rowStart = row * layout.cols;
+					const int rowEnd = min(layout.itemCount, rowStart + layout.cols);
+					const int local_y = row * layout.tileHeight - scrollY;
+					const bool rowIntersectsViewport = (local_y + layout.tileHeight > 0 && local_y < height);
+
+					for (int index = rowStart; index < rowEnd; ++index)
 					{
-						if (cur_y + m_tile_height >= listViewport.top && cur_y <= listViewport.bottom)
+#ifdef _DEBUG
+						++m_lastDrawVisitedItemsForTest;
+#endif
+						const OverlayImageRef& image = m_currentOverlayImages[index];
+						PICDATA* p = ovrlpics[image.overlayType][image.imageIndex];
+						if (p == NULL || p->pic == NULL)
+							continue;
+
+						const int col = index - rowStart;
+						const int local_x = col * layout.tileWidth - scrollX;
+						const int curwidth = p->wMaxWidth;
+						const int curheight = p->wMaxHeight;
+						const int drawx = local_x + (layout.tileWidth - curwidth) / 2;
+						const int drawy = local_y + (layout.tileHeight - curheight) / 2;
+
+						if (p->bType == PICDATA_TYPE_BMP && p->bitmap)
 						{
-							const int curwidth = p->wMaxWidth;
-							const int curheight = p->wMaxHeight;
-							const int local_x = cur_x - scrollX;
-							const int local_y = cur_y - scrollY;
-							const int drawx = local_x + (m_tile_width - curwidth) / 2;
-							const int drawy = local_y + (m_tile_height - curheight) / 2;
-
-							if (p->bType == PICDATA_TYPE_BMP && p->bitmap)
-							{
-								m_gpuScene->Bitmap(*p->bitmap, drawx, drawy);
-							}
-							else
-							{
-								m_gpuScene->Indexed(static_cast<const BYTE*>(p->pic), curwidth, curheight,
-									reinterpret_cast<const short*>(p->vborder),
-									p->lighting && !p->lighting->empty() ? p->lighting->data() : nullptr,
-									p->pal ? p->pal : iPalIso, nullptr, false, drawx, drawy, viewport);
-							}
-
-							if (AD.mode == ACTIONMODE_PLACE && AD.data2 == image.overlayType && AD.data3 == image.imageIndex && AD.data == 33 && AD.type == 6)
-							{
-								LineDrawer drawer(*m_gpuScene);
-								drawer.Rectangle(local_x + 2, local_y + 2, local_x + m_tile_width - 2, local_y + m_tile_height - 2, 0x00ff0000);
-							}
+							m_gpuScene->Bitmap(*p->bitmap, drawx, drawy);
+						}
+						else
+						{
+							m_gpuScene->Indexed(static_cast<const BYTE*>(p->pic), curwidth, curheight,
+								reinterpret_cast<const short*>(p->vborder),
+								p->lighting && !p->lighting->empty() ? p->lighting->data() : nullptr,
+								p->pal ? p->pal : iPalIso, nullptr, false, drawx, drawy, viewport);
 						}
 
-						cur_x += m_tile_width;
-						if (displayIndex % max_r == max_r - 1)
+						if (rowIntersectsViewport && AD.mode == ACTIONMODE_PLACE && AD.data2 == image.overlayType && AD.data3 == image.imageIndex && AD.data == 33 && AD.type == 6)
 						{
-							cur_y += m_tile_height;
-							cur_x = 0;
+							LineDrawer drawer(*m_gpuScene);
+							drawer.Rectangle(local_x + 2, local_y + 2, local_x + layout.tileWidth - 2, local_y + layout.tileHeight - 2, 0x00ff0000);
 						}
 					}
 				}
