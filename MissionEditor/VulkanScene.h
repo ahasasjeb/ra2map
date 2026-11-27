@@ -142,14 +142,16 @@ public:
 		const BYTE* lighting, const int* palette, const int* remap,
 		bool half, int x, int y, const RECT& clip);
 	bool Bitmap(const RgbaBitmap& source, int x, int y, const RECT* sourceRect = nullptr);
+	void ReleaseBitmap(uint64_t bitmapId);
 	void Line(int x0, int y0, int x1, int y1, unsigned int color, int period = 1, bool invert = false);
 #ifdef _DEBUG
 	const std::vector<rs_scene_command>& GetCommandsForTest() const { return m_commands; }
 	const RECT& GetSourceForTest() const { return m_source; }
+	size_t GetCachedBitmapCountForTest() const { return m_bitmaps.size(); }
 #endif
 
 private:
-	unsigned int Upload(const unsigned int* words, size_t count);
+	unsigned int Upload(const unsigned int* words, size_t count, uint64_t* outKey = nullptr);
 	void DropOverlay();
 
 	rs_vulkan_renderer* m_renderer;
@@ -165,6 +167,6 @@ private:
 	size_t m_overlayStart = 0, m_overlayEnd = 0;
 	std::map<std::tuple<const void*, int, int, const void*>, unsigned int> m_images;
 	std::map<std::array<unsigned int, 256>, unsigned int> m_palettes;
-	struct BitmapAsset { unsigned int offset; int width, height; };
+	struct BitmapAsset { unsigned int offset; int width, height; uint64_t assetKey; };
 	std::map<uint64_t, BitmapAsset> m_bitmaps;
 };

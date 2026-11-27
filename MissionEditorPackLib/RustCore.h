@@ -344,6 +344,7 @@ typedef struct rs_scene_command {
     unsigned int extra[4];
 } rs_scene_command;
 int rs_vulkan_scene_upload(rs_vulkan_renderer*, uint64_t key, const unsigned int* words, size_t count, unsigned int* offset);
+int rs_vulkan_scene_release(rs_vulkan_renderer*, uint64_t key);
 int rs_vulkan_scene_present(rs_vulkan_renderer*, const rs_scene_command*, size_t count,
     float left, float top, float scale_x, float scale_y, unsigned int width, unsigned int height, int vsync);
 size_t rs_vulkan_info(const rs_vulkan_renderer*, char* dst, size_t cap);

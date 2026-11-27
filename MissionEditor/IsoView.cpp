@@ -265,6 +265,18 @@ void CIsoView::updateFontScaled()
 	m_fontDefaultHeight = -MulDiv(12, dpiY, 72);
 	m_Font9Height = -MulDiv(9, dpiY, 72);
 
+	if (m_gpuScene)
+	{
+		if (m_textDefault) m_textDefault->ReleaseGpuAssets(*m_gpuScene);
+		if (m_text9) m_text9->ReleaseGpuAssets(*m_gpuScene);
+		if (m_textScaled) m_textScaled->ReleaseGpuAssets(*m_gpuScene);
+		if (m_text9Scaled) m_text9Scaled->ReleaseGpuAssets(*m_gpuScene);
+		if (m_textBlue) m_textBlue->ReleaseGpuAssets(*m_gpuScene);
+		if (m_textBlueScaled) m_textBlueScaled->ReleaseGpuAssets(*m_gpuScene);
+		if (m_textBlue9) m_textBlue9->ReleaseGpuAssets(*m_gpuScene);
+		if (m_textBlue9Scaled) m_textBlue9Scaled->ReleaseGpuAssets(*m_gpuScene);
+	}
+
 	m_textDefault = std::make_unique<TextDrawer>(m_fontDefaultHeight, RGB(0, 0, 0), RGB(255, 255, 255));
 	m_text9 = std::make_unique<TextDrawer>(m_Font9Height, RGB(0, 0, 0), RGB(255, 255, 255));
 	m_textScaled = std::make_unique<TextDrawer>(static_cast<int>(m_fontDefaultHeight / m_viewScale.y), RGB(0, 0, 0), RGB(255, 255, 255));

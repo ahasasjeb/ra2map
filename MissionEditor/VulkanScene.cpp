@@ -144,11 +144,17 @@ void VulkanScene::EndOverlay()
 	m_screenSpace = false;
 }
 
-unsigned int VulkanScene::Upload(const unsigned int* words, size_t count)
+unsigned int VulkanScene::Upload(const unsigned int* words, size_t count, uint64_t* outKey)
 {
+	const uint64_t key = ++m_nextKey;
+	if (outKey)
+		*outKey = key;
 	unsigned int offset = 0;
-	if (rs_vulkan_scene_upload(m_renderer, ++m_nextKey, words, count, &offset) != RS_OK)
-		m_failed = true;
+	if (m_renderer != nullptr)
+	{
+		if (rs_vulkan_scene_upload(m_renderer, key, words, count, &offset) != RS_OK)
+			m_failed = true;
+	}
 	return offset;
 }
 
@@ -214,10 +220,13 @@ bool VulkanScene::Bitmap(const RgbaBitmap& source, int x, int y, const RECT* sou
 	if (it == m_bitmaps.end())
 	{
 		const size_t count = static_cast<size_t>(source.width) * source.height;
+		uint64_t assetKey = 0;
+		const unsigned int offset = Upload(source.pixels.data(), count, &assetKey);
 		it = m_bitmaps.emplace(source.id, BitmapAsset{
-			Upload(source.pixels.data(), count),
+			offset,
 			source.width,
-			source.height
+			source.height,
+			assetKey
 		}).first;
 	}
 
@@ -252,6 +261,18 @@ bool VulkanScene::Bitmap(const RgbaBitmap& source, int x, int y, const RECT* sou
 	cmd.extra[2] = m_screenSpace ? 1u : 0u;
 	m_commands.push_back(cmd);
 	return true;
+}
+
+void VulkanScene::ReleaseBitmap(uint64_t bitmapId)
+{
+	if (bitmapId == 0)
+		return;
+	const auto it = m_bitmaps.find(bitmapId);
+	if (it == m_bitmaps.end())
+		return;
+	if (m_renderer != nullptr && it->second.assetKey != 0)
+		rs_vulkan_scene_release(m_renderer, it->second.assetKey);
+	m_bitmaps.erase(it);
 }
 
 void VulkanScene::Line(int x0, int y0, int x1, int y1, unsigned int color, int period, bool invert)

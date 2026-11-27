@@ -40,8 +40,13 @@ public:
     bool isValid() const;
 
     void RenderText(VulkanScene& scene, int x, int y, const std::string& text, bool centered = false);
+    void ReleaseGpuAssets(VulkanScene& scene);
 
     ProjectedVec GetExtent(const std::string& text) const;
+#ifdef _DEBUG
+    void SetMaxCacheEntriesForTest(size_t limit) { m_maxCacheEntries = limit > 0 ? limit : 1; }
+    size_t GetCachedStringCountForTest() const { return m_stringCache.size(); }
+#endif
 
 private:
     struct CachedString
@@ -53,7 +58,7 @@ private:
         int h = 0;
     };
 
-    CachedString& GetCachedString(const std::string& text);
+    CachedString& GetCachedString(VulkanScene& scene, const std::string& text);
 
     RgbaBitmap m_fontAtlas;
     ProjectedVec m_charExtent;
@@ -65,5 +70,5 @@ private:
 
     std::map<std::string, CachedString> m_stringCache;
     std::list<std::string> m_lruOrder;
-    static constexpr size_t m_maxCacheEntries = 512;
+    size_t m_maxCacheEntries = 512;
 };

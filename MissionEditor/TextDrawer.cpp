@@ -157,7 +157,22 @@ bool TextDrawer::isValid() const
     return !m_fontAtlas.empty();
 }
 
-TextDrawer::CachedString& TextDrawer::GetCachedString(const std::string& text)
+void TextDrawer::ReleaseGpuAssets(VulkanScene& scene)
+{
+    if (m_fontAtlas.id != 0)
+        scene.ReleaseBitmap(m_fontAtlas.id);
+    for (const auto& entry : m_stringCache)
+    {
+        if (entry.second.main && entry.second.main->id != 0)
+            scene.ReleaseBitmap(entry.second.main->id);
+        if (entry.second.shadow && entry.second.shadow->id != 0)
+            scene.ReleaseBitmap(entry.second.shadow->id);
+    }
+    m_stringCache.clear();
+    m_lruOrder.clear();
+}
+
+TextDrawer::CachedString& TextDrawer::GetCachedString(VulkanScene& scene, const std::string& text)
 {
     const auto it = m_stringCache.find(text);
     if (it != m_stringCache.end())
@@ -170,7 +185,15 @@ TextDrawer::CachedString& TextDrawer::GetCachedString(const std::string& text)
     {
         if (m_lruOrder.empty())
             break;
-        m_stringCache.erase(m_lruOrder.front());
+        const auto victimIt = m_stringCache.find(m_lruOrder.front());
+        if (victimIt != m_stringCache.end())
+        {
+            if (victimIt->second.main && victimIt->second.main->id != 0)
+                scene.ReleaseBitmap(victimIt->second.main->id);
+            if (victimIt->second.shadow && victimIt->second.shadow->id != 0)
+                scene.ReleaseBitmap(victimIt->second.shadow->id);
+            m_stringCache.erase(victimIt);
+        }
         m_lruOrder.pop_front();
     }
 
@@ -235,7 +258,7 @@ void TextDrawer::RenderText(VulkanScene& scene, int x, int y, const std::string&
 
     if (RequiresGdiText(text))
     {
-        auto& cached = GetCachedString(text);
+        auto& cached = GetCachedString(scene, text);
         if (cached.shadow)
             scene.Bitmap(*cached.shadow, cur.x + shadowOffset, cur.y + shadowOffset);
         if (cached.main)

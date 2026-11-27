@@ -1,5 +1,5 @@
 use super::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::time::Instant;
 
 #[repr(C)]
@@ -27,10 +27,180 @@ struct SceneFrame {
     output: StagingBuffer,
 }
 
-pub(super) struct SceneGpu {
-    assets: Vec<u32>,
+struct AssetArena {
+    words: Vec<u32>,
     keys: HashMap<u64, (u32, usize)>,
-    uploaded: usize,
+    free_ranges: Vec<(u32, usize)>,
+    deferred_frees: VecDeque<(u32, usize, u64)>,
+    pending_uploads: Vec<(u32, usize)>,
+}
+
+impl AssetArena {
+    fn new() -> Self {
+        Self {
+            words: vec![0],
+            keys: HashMap::new(),
+            free_ranges: Vec::new(),
+            deferred_frees: VecDeque::new(),
+            pending_uploads: vec![(0, 1)],
+        }
+    }
+
+    fn len(&self) -> usize {
+        self.words.len()
+    }
+
+    fn mark_full_upload(&mut self) {
+        self.pending_uploads.clear();
+        if !self.words.is_empty() {
+            self.pending_uploads.push((0, self.words.len()));
+        }
+    }
+
+    fn clear_pending_uploads(&mut self) {
+        self.pending_uploads.clear();
+    }
+
+    fn record_pending(&mut self, offset: u32, len: usize) {
+        if len == 0 {
+            return;
+        }
+        if let Some(last) = self.pending_uploads.last_mut() {
+            if (last.0 as usize) + last.1 == offset as usize {
+                last.1 += len;
+                return;
+            }
+        }
+        self.pending_uploads.push((offset, len));
+    }
+
+    fn upload(&mut self, key: u64, data: &[u32], max_asset_words: usize) -> Result<u32, String> {
+        if let Some(&(existing, size)) = self.keys.get(&key) {
+            if size != data.len() {
+                return Err("scene asset key reused with different size".into());
+            }
+            return Ok(existing);
+        }
+
+        // Best-fit search in reclaimed free ranges so evicted non-ASCII bitmaps reuse storage.
+        let mut best_idx: Option<usize> = None;
+        let mut best_len = usize::MAX;
+        for (idx, &(_, free_len)) in self.free_ranges.iter().enumerate() {
+            if free_len >= data.len() && free_len < best_len {
+                best_idx = Some(idx);
+                best_len = free_len;
+                if free_len == data.len() {
+                    break;
+                }
+            }
+        }
+
+        if let Some(idx) = best_idx {
+            let (offset, free_len) = self.free_ranges[idx];
+            if free_len == data.len() {
+                self.free_ranges.remove(idx);
+            } else {
+                self.free_ranges[idx] = (offset + data.len() as u32, free_len - data.len());
+            }
+            let start = offset as usize;
+            self.words[start..start + data.len()].copy_from_slice(data);
+            self.keys.insert(key, (offset, data.len()));
+            self.record_pending(offset, data.len());
+            return Ok(offset);
+        }
+
+        if self.words.len().saturating_add(data.len()) > max_asset_words {
+            return Err(
+                "scene asset cache exceeds the device storage-buffer limit; reload map to release assets"
+                    .into(),
+            );
+        }
+        let start = self.words.len() as u32;
+        self.words.extend_from_slice(data);
+        self.keys.insert(key, (start, data.len()));
+        self.record_pending(start, data.len());
+        Ok(start)
+    }
+
+    fn release(&mut self, key: u64, current_frame: u64) -> bool {
+        if let Some((offset, len)) = self.keys.remove(&key) {
+            // Defer slot reuse until all frames in flight (plus the frame currently being recorded)
+            // have completed on the GPU.
+            let retire_after = current_frame.saturating_add(MAX_FRAMES_IN_FLIGHT as u64);
+            self.deferred_frees.push_back((offset, len, retire_after));
+            true
+        } else {
+            false
+        }
+    }
+
+    fn insert_free_range(&mut self, offset: u32, len: usize) {
+        if len == 0 {
+            return;
+        }
+        let pos = self
+            .free_ranges
+            .partition_point(|&(existing_off, _)| existing_off < offset);
+        self.free_ranges.insert(pos, (offset, len));
+
+        // Coalesce with next range if adjacent.
+        if pos + 1 < self.free_ranges.len() {
+            let (cur_off, cur_len) = self.free_ranges[pos];
+            let (next_off, next_len) = self.free_ranges[pos + 1];
+            if (cur_off as usize) + cur_len == next_off as usize {
+                self.free_ranges[pos].1 += next_len;
+                self.free_ranges.remove(pos + 1);
+            }
+        }
+        // Coalesce with previous range if adjacent.
+        if pos > 0 {
+            let (prev_off, prev_len) = self.free_ranges[pos - 1];
+            let (cur_off, cur_len) = self.free_ranges[pos];
+            if (prev_off as usize) + prev_len == cur_off as usize {
+                self.free_ranges[pos - 1].1 += cur_len;
+                self.free_ranges.remove(pos);
+            }
+        }
+    }
+
+    fn reclaim_retired(&mut self, completed_frame: u64) {
+        while self
+            .deferred_frees
+            .front()
+            .is_some_and(|&(_, _, retire_after)| retire_after <= completed_frame)
+        {
+            if let Some((offset, len, _)) = self.deferred_frees.pop_front() {
+                self.insert_free_range(offset, len);
+            }
+        }
+
+        // Trim any trailing free range at the end of words (keeping sentinel word 0).
+        while let Some(&(off, len)) = self.free_ranges.last() {
+            let start = off as usize;
+            if start >= 1 && start + len == self.words.len() {
+                self.free_ranges.pop();
+                self.words.truncate(start);
+            } else {
+                break;
+            }
+        }
+
+        let new_len = self.words.len();
+        self.pending_uploads.retain_mut(|(off, len)| {
+            let start = *off as usize;
+            if start >= new_len {
+                return false;
+            }
+            if start + *len > new_len {
+                *len = new_len - start;
+            }
+            *len > 0
+        });
+    }
+}
+
+pub(super) struct SceneGpu {
+    arena: AssetArena,
     gpu_assets: StagingBuffer,
     frames: Vec<SceneFrame>,
     layout: vk::DescriptorSetLayout,
@@ -52,9 +222,7 @@ pub(super) struct SceneGpu {
 impl SceneGpu {
     unsafe fn new(r: &VulkanRenderer) -> Result<Self, String> {
         let mut s = Self {
-            assets: vec![0],
-            keys: HashMap::new(),
-            uploaded: 0,
+            arena: AssetArena::new(),
             gpu_assets: StagingBuffer::default(),
             frames: (0..MAX_FRAMES_IN_FLIGHT)
                 .map(|_| SceneFrame::default())
@@ -364,6 +532,7 @@ impl VulkanRenderer {
         let cb = self.frames[frame].command_buffer;
         unsafe { self.device.wait_for_fences(&[fence], true, u64::MAX) }
             .map_err(|e| format!("scene frame wait: {e:?}"))?;
+        s.arena.reclaim_retired(s.frame_count);
         if s.timestamp_pending[frame] {
             let mut stamps = [0u64; 2];
             if unsafe {
@@ -403,11 +572,11 @@ impl VulkanRenderer {
         source[2] *= width as f32 / extent.width as f32;
         source[3] *= height as f32 / extent.height as f32;
         let bins = make_bins(commands, source, extent.width, extent.height)?;
-        if s.gpu_assets.len < s.assets.len() * 4 {
+        if s.gpu_assets.len < s.arena.len() * 4 {
             unsafe { self.device.device_wait_idle() }
                 .map_err(|e| format!("scene asset growth wait: {e:?}"))?;
-            unsafe { reserve(self, &mut s.gpu_assets, s.assets.len() * 4, true) }?;
-            s.uploaded = 0;
+            unsafe { reserve(self, &mut s.gpu_assets, s.arena.len() * 4, true) }?;
+            s.arena.mark_full_upload();
         }
         let f = &mut s.frames[frame];
         unsafe {
@@ -431,15 +600,30 @@ impl VulkanRenderer {
             );
             ptr::copy_nonoverlapping(bins.as_ptr().cast::<u8>(), f.bins.mapped, bins.len() * 4);
         }
-        let pending = &s.assets[s.uploaded..];
-        if !pending.is_empty() {
+        let total_pending_words: usize = s.arena.pending_uploads.iter().map(|&(_, len)| len).sum();
+        let mut upload_copies: Vec<vk::BufferCopy> = Vec::new();
+        if total_pending_words > 0 {
             unsafe {
-                reserve(self, &mut f.upload, pending.len() * 4, false)?;
-                ptr::copy_nonoverlapping(
-                    pending.as_ptr().cast::<u8>(),
-                    f.upload.mapped,
-                    pending.len() * 4,
-                );
+                reserve(self, &mut f.upload, total_pending_words * 4, false)?;
+                let mut src_word_offset: usize = 0;
+                upload_copies.reserve(s.arena.pending_uploads.len());
+                for &(dst_word_offset, word_len) in &s.arena.pending_uploads {
+                    if word_len == 0 {
+                        continue;
+                    }
+                    let src_slice = &s.arena.words[dst_word_offset as usize..dst_word_offset as usize + word_len];
+                    ptr::copy_nonoverlapping(
+                        src_slice.as_ptr().cast::<u8>(),
+                        f.upload.mapped.add(src_word_offset * 4),
+                        word_len * 4,
+                    );
+                    upload_copies.push(vk::BufferCopy {
+                        src_offset: (src_word_offset * 4) as u64,
+                        dst_offset: (dst_word_offset as usize * 4) as u64,
+                        size: (word_len * 4) as u64,
+                    });
+                    src_word_offset += word_len;
+                }
             }
         }
         let buffers = [&s.gpu_assets, &f.commands, &f.bins, &f.output];
@@ -484,16 +668,12 @@ impl VulkanRenderer {
                     frame as u32 * 2,
                 );
             }
-            if !pending.is_empty() {
+            if !upload_copies.is_empty() {
                 self.device.cmd_copy_buffer(
                     cb,
                     f.upload.buffer,
                     s.gpu_assets.buffer,
-                    &[vk::BufferCopy {
-                        src_offset: 0,
-                        dst_offset: s.uploaded as u64 * 4,
-                        size: pending.len() as u64 * 4,
-                    }],
+                    &upload_copies,
                 );
             }
             self.device.cmd_pipeline_barrier(
@@ -621,7 +801,7 @@ impl VulkanRenderer {
             unsafe { self.recover_signaled_fence(frame) };
             return Err(format!("scene submit: {e:?}"));
         }
-        s.uploaded = s.assets.len();
+        s.arena.clear_pending_uploads();
         s.timestamp_pending[frame] = s.timestamp_bits != 0;
         self.current_frame = (frame + 1) % self.frames.len();
         self.image_initialized[index as usize] = true;
@@ -673,21 +853,27 @@ pub unsafe extern "C" fn rs_vulkan_scene_upload(
             r.scene = Some(unsafe { SceneGpu::new(r) }?);
         }
         let s = r.scene.as_mut().unwrap();
-        if let Some(&(existing, size)) = s.keys.get(&key) {
-            if size != count {
-                return Err("scene asset key reused with different size".into());
-            }
-            unsafe { *offset = existing };
-            return Ok(());
-        }
-        if s.assets.len().saturating_add(count) > s.max_asset_words {
-            return Err("scene asset cache exceeds the device storage-buffer limit; reload map to release assets".into());
-        }
-        let start = s.assets.len() as u32;
-        s.assets
-            .extend_from_slice(unsafe { slice::from_raw_parts(words, count) });
-        s.keys.insert(key, (start, count));
+        let data = unsafe { slice::from_raw_parts(words, count) };
+        let start = s.arena.upload(key, data, s.max_asset_words)?;
         unsafe { *offset = start };
+        Ok(())
+    }));
+    ffi_result(result)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn rs_vulkan_scene_release(
+    renderer: *mut RsVulkanRenderer,
+    key: u64,
+) -> i32 {
+    if renderer.is_null() {
+        return RS_ERR_BAD_ARG;
+    }
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let r = unsafe { &mut (*renderer).inner };
+        if let Some(s) = r.scene.as_mut() {
+            s.arena.release(key, s.frame_count);
+        }
         Ok(())
     }));
     ffi_result(result)
@@ -767,7 +953,7 @@ pub unsafe extern "C" fn rs_vulkan_scene_present(
             None => unsafe { SceneGpu::new(r) }?,
         };
         let commands = unsafe { slice::from_raw_parts(commands, count) };
-        let result = validate_commands(commands, scene.assets.len()).and_then(|_| unsafe {
+        let result = validate_commands(commands, scene.arena.len()).and_then(|_| unsafe {
             r.present_scene(
                 &mut scene,
                 commands,
@@ -960,11 +1146,12 @@ mod tests {
             let mut colors = vec![0; 256];
             colors[1] = 0x000000ff;
             colors[16] = 0x00ff0000;
-            s.assets = colors;
-            s.assets.extend(
+            s.arena.words = colors;
+            s.arena.words.extend(
                 (0..256)
                     .map(|i| 16 | (47 << 8) | if (i % 16 + i / 16) % 2 == 0 { 65536 } else { 0 }),
             );
+            s.arena.mark_full_upload();
             let mut a = SceneCommand::default();
             a.rect = [8, 8, 16, 16];
             a.clip = [10, 10, 22, 22];
@@ -988,8 +1175,9 @@ mod tests {
                     );
                 }
             }
-            let bitmap_offset = s.assets.len() as u32;
-            s.assets.extend([0xffff00ff, 0xff000000, 0, 0xff00ff00]);
+            let bitmap_offset = s.arena.words.len() as u32;
+            s.arena.words.extend([0xffff00ff, 0xff000000, 0, 0xff00ff00]);
+            s.arena.record_pending(bitmap_offset, 4);
             let mut bitmap = SceneCommand::default();
             bitmap.rect = [10, 10, 2, 2];
             bitmap.clip = [0, 0, 64, 64];
@@ -1009,8 +1197,9 @@ mod tests {
             invert_line.line = [10, 10, 13, 10];
             invert_line.extra[0] = 1;
             invert_line.extra[1] = 1;
-            let light_offset = s.assets.len() as u32;
-            s.assets.push(20 | (200 << 8));
+            let light_offset = s.arena.words.len() as u32;
+            s.arena.words.push(20 | (200 << 8));
+            s.arena.record_pending(light_offset, 1);
             let mut lit = SceneCommand::default();
             lit.rect = [32, 16, 1, 1];
             lit.clip = [0, 0, 64, 64];
@@ -1138,6 +1327,56 @@ mod tests {
         let offset = bins[6] as usize;
         assert_eq!(&bins[offset..offset + 2], &[0, 1]);
     }
+
+    #[test]
+    fn asset_arena_reclaims_deferred_frees_and_bounds_growth() {
+        let mut arena = AssetArena::new();
+        let max_words = 1024;
+        let payload = vec![0xAABBCCDDu32; 64];
+
+        // Upload key 1 and release on frame 0: must NOT be reused before frame MAX_FRAMES_IN_FLIGHT.
+        let off1 = arena.upload(1, &payload, max_words).unwrap();
+        assert_eq!(off1, 1);
+        assert!(arena.release(1, 0));
+        assert!(!arena.release(1, 0)); // idempotent
+
+        arena.reclaim_retired(0);
+        arena.reclaim_retired((MAX_FRAMES_IN_FLIGHT - 1) as u64);
+        // Slot is still deferred, so key 2 allocates at a fresh offset.
+        let off2 = arena.upload(2, &payload, max_words).unwrap();
+        assert_eq!(off2, 65);
+
+        // Once frame MAX_FRAMES_IN_FLIGHT completes, key 1's slot is reclaimed and reused.
+        arena.reclaim_retired(MAX_FRAMES_IN_FLIGHT as u64);
+        arena.clear_pending_uploads();
+        let off3 = arena.upload(3, &payload, max_words).unwrap();
+        assert_eq!(off3, off1);
+        assert_eq!(arena.pending_uploads, vec![(off1, 64)]);
+
+        // Releasing both adjacent blocks and reclaiming coalesces & trims words back to sentinel [0].
+        assert!(arena.release(2, 10));
+        assert!(arena.release(3, 10));
+        arena.reclaim_retired(10 + MAX_FRAMES_IN_FLIGHT as u64);
+        assert_eq!(arena.len(), 1);
+        assert!(arena.free_ranges.is_empty());
+
+        // Stress test: 2000 churn cycles stay strictly bounded well below max_words.
+        for i in 0u64..2000 {
+            let key = 100 + i;
+            let _ = arena.upload(key, &payload, max_words).unwrap();
+            assert!(arena.release(key, i));
+            arena.reclaim_retired(i + MAX_FRAMES_IN_FLIGHT as u64);
+        }
+        assert!(arena.len() <= 256);
+    }
+
+    #[test]
+    fn scene_release_rejects_null_renderer() {
+        assert_eq!(
+            unsafe { rs_vulkan_scene_release(ptr::null_mut(), 1) },
+            RS_ERR_BAD_ARG
+        );
+    }
 }
 
 #[no_mangle]
@@ -1164,7 +1403,7 @@ pub unsafe extern "C" fn rs_vulkan_info(
         r.frames.len()
     );
     if let Some(s) = &r.scene {
-        message.push_str(&format!("; GPU scene frames={}; commands={}; assets={} MiB; wait/record/present={:.2}/{:.2}/{:.2} ms; GPU={:.2} ms", s.frame_count, s.last_commands, s.assets.len() / 262144, s.last_ms[0], s.last_ms[1], s.last_ms[2], s.last_gpu_ms));
+        message.push_str(&format!("; GPU scene frames={}; commands={}; assets={} MiB; wait/record/present={:.2}/{:.2}/{:.2} ms; GPU={:.2} ms", s.frame_count, s.last_commands, s.arena.len() / 262144, s.last_ms[0], s.last_ms[1], s.last_ms[2], s.last_gpu_ms));
     }
     let n = message.len().min(cap - 1);
     unsafe {

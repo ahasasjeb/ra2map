@@ -36,6 +36,7 @@
 #include "AlliesEditorDlg.h"
 #include "PanScroll.h"
 #include "VulkanScene.h"
+#include "TextDrawer.h"
 #include "TileSetVulkanRecovery.h"
 #include "TileSetBrowserView.h"
 #include "CrashReporter.h"
@@ -133,6 +134,7 @@ int Tests::run()
 		[this]() { test_autosave_isolation_and_rotation(); },
 		[this]() { test_isoview_vulkan_present_state(); },
 		[this]() { test_tileset_browser_resize_scroll_range(); },
+		[this]() { test_textdrawer_gpu_cache_eviction(); },
 	});
 	for (const auto f : test_functions)
 	{
@@ -3096,5 +3098,39 @@ void Tests::test_tileset_browser_resize_scroll_range()
 
 	view.DestroyWindow();
 	hostWindow.DestroyWindow();
+	REPORT_TEST(true);
+}
+
+void Tests::test_textdrawer_gpu_cache_eviction()
+{
+	VulkanScene scene(nullptr);
+	const RECT viewport{ 0, 0, 640, 480 };
+	scene.Begin(viewport);
+
+	TextDrawer drawer(-12, RGB(255, 255, 255), RGB(0, 0, 0));
+	TEST(drawer.isValid());
+	drawer.SetMaxCacheEntriesForTest(4);
+
+	// Render 12 distinct non-ASCII labels (each creates main + shadow bitmaps = 2 per string).
+	// GPU bitmap table must stay bounded at <= 4 * 2 = 8 entries as CPU LRU evicts old strings.
+	for (int i = 0; i < 12; ++i)
+	{
+		const std::string label = "\xE6\xB5\x8B\xE8\xAF\x95_" + std::to_string(i); // "测试_<i>"
+		drawer.RenderText(scene, 10, 10, label);
+		TEST(drawer.GetCachedStringCountForTest() <= 4);
+		TEST(scene.GetCachedBitmapCountForTest() <= 8);
+	}
+	TEST(drawer.GetCachedStringCountForTest() == 4);
+	TEST(scene.GetCachedBitmapCountForTest() == 8);
+
+	// ASCII strings use the single shared glyph atlas (+1 bitmap).
+	drawer.RenderText(scene, 10, 40, "ASCII_TEST_123");
+	TEST(scene.GetCachedBitmapCountForTest() == 9);
+
+	// Releasing GPU assets (e.g. on zoom/font rebuild) clears both cached string bitmaps and atlas.
+	drawer.ReleaseGpuAssets(scene);
+	TEST(drawer.GetCachedStringCountForTest() == 0);
+	TEST(scene.GetCachedBitmapCountForTest() == 0);
+
 	REPORT_TEST(true);
 }

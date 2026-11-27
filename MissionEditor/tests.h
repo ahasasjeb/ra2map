@@ -53,4 +53,5 @@ private:
 	void test_autosave_isolation_and_rotation();
 	void test_isoview_vulkan_present_state();
 	void test_tileset_browser_resize_scroll_range();
+	void test_textdrawer_gpu_cache_eviction();
 };
