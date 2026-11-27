@@ -284,6 +284,7 @@ public:
 	std::unique_ptr<VulkanScene> m_gpuScene;
 	bool m_lastPresentSucceeded = false;
 	int m_vulkanPresentFailures;
+	MainCanvasPresentState m_presentState;
 	void HandleProperties(int n, int type);
 	void UpdateDialog(BOOL bRepos=TRUE);
 	CMenu m_menu;

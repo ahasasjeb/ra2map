@@ -95,6 +95,8 @@ namespace
 {
 	constexpr UINT VULKAN_RESIZE_TIMER_ID = 12;
 	constexpr UINT VULKAN_RESIZE_DEBOUNCE_MS = 75;
+	constexpr UINT VULKAN_SWAPCHAIN_RETRY_TIMER_ID = 13;
+	constexpr UINT VULKAN_SWAPCHAIN_RETRY_MS = 30;
 }
 
 CIsoView::CIsoView()
@@ -2877,6 +2879,9 @@ void CIsoView::OnSize(UINT nType, int cx, int cy)
 
 	GetWindowRect(&m_myRect);
 
+	if (cx > 0 && cy > 0)
+		m_presentState.OnResizeNonZero();
+
 	// Keep presenting the last complete frame during live resize. Re-rendering the
 	// map and repainting the minimap for every intermediate WM_SIZE made the newly
 	// exposed client area visibly lag behind. The cached frame is stretched
@@ -3957,13 +3962,36 @@ void CIsoView::HideTileSet(DWORD dwTileSet)
 void CIsoView::FlipHighResBuffer(const RECT* sourceRectOverride)
 {
 	m_lastPresentSucceeded = false;
+	m_presentState.lastPresentSucceeded = false;
 	if (!m_gpuScene || !m_gpuScene->IsActive())
 		return;
 
 	RECT client{};
 	GetClientRect(&client);
 	const RECT source = sourceRectOverride ? *sourceRectOverride : GetScaledDisplayRect();
-	if (!m_gpuScene->Present(source, client.right, client.bottom, theApp.m_Options.bVSync))
+	m_presentState.resizePreview = m_resizePreview;
+	m_presentState.lastPresentSourceRect = m_lastPresentSourceRect;
+	m_presentState.consecutiveHardFailures = m_vulkanPresentFailures;
+
+	const VulkanPresentResult result = m_gpuScene->PresentWithResult(
+		source,
+		client.right,
+		client.bottom,
+		theApp.m_Options.bVSync != FALSE);
+	const MainCanvasPresentDecision decision = m_presentState.ApplyResult(
+		result,
+		source,
+		sourceRectOverride != nullptr);
+
+	m_lastPresentSucceeded = m_presentState.lastPresentSucceeded;
+	m_lastPresentSourceRect = m_presentState.lastPresentSourceRect;
+	m_resizePreview = m_presentState.resizePreview;
+	m_vulkanPresentFailures = m_presentState.consecutiveHardFailures;
+
+	if (decision.cancelCoalescedRedraw && m_hWnd != nullptr)
+		KillTimer(VULKAN_SWAPCHAIN_RETRY_TIMER_ID);
+
+	if (decision.releaseRenderer)
 	{
 		char error[1024]{};
 		rs_vulkan_last_error(error, sizeof(error));
@@ -3972,14 +4000,16 @@ void CIsoView::FlipHighResBuffer(const RECT* sourceRectOverride)
 		// A failure after acquire may leave a signaled acquire semaphore.
 		// Retire the entire renderer before retrying cleanly on the next paint.
 		ReleaseVulkanRenderer();
-		if (++m_vulkanPresentFailures < 5)
+		if (decision.scheduleImmediateRetry)
 			Invalidate(FALSE);
 		return;
 	}
-	m_vulkanPresentFailures = 0;
-	m_lastPresentSucceeded = true;
-	if (sourceRectOverride == nullptr)
-		m_lastPresentSourceRect = source;
+
+	if (decision.scheduleCoalescedRedraw)
+	{
+		if (m_hWnd == nullptr || SetTimer(VULKAN_SWAPCHAIN_RETRY_TIMER_ID, VULKAN_SWAPCHAIN_RETRY_MS, nullptr) == 0)
+			Invalidate(FALSE);
+	}
 }
 
 bool CIsoView::InitializeVulkanRenderer()
@@ -3995,8 +4025,12 @@ bool CIsoView::InitializeVulkanRenderer()
 		GetClientRect(&clientRect);
 		const int width = clientRect.right - clientRect.left;
 		const int height = clientRect.bottom - clientRect.top;
-		if (width <= 0 || height <= 0 ||
-			rs_vulkan_prepare(m_vulkanRenderer, width, height, theApp.m_Options.bVSync ? 1 : 0) == RS_OK)
+		const int prepareStatus = (width <= 0 || height <= 0)
+			? RS_OK
+			: rs_vulkan_prepare(m_vulkanRenderer, width, height, theApp.m_Options.bVSync ? 1 : 0);
+		if (prepareStatus == RS_OK ||
+			prepareStatus == RS_VULKAN_MINIMIZED ||
+			prepareStatus == RS_VULKAN_SWAPCHAIN_OUT_OF_DATE)
 		{
 			m_gpuScene = std::make_unique<VulkanScene>(m_vulkanRenderer);
 			char info[1024]{};
@@ -4017,13 +4051,17 @@ bool CIsoView::InitializeVulkanRenderer()
 
 void CIsoView::ReleaseVulkanRenderer()
 {
+	if (m_hWnd != nullptr)
+		KillTimer(VULKAN_SWAPCHAIN_RETRY_TIMER_ID);
 	m_gpuScene.reset();
 	if (m_vulkanRenderer != nullptr)
 	{
 		rs_vulkan_destroy(m_vulkanRenderer);
 		m_vulkanRenderer = nullptr;
 	}
+	m_presentState.OnRendererReleased();
 	m_lastPresentSucceeded = false;
+	m_resizePreview = false;
 	m_previewHasSaved = FALSE;
 }
 
@@ -4930,7 +4968,7 @@ void CIsoView::DrawObjectPreviewAt(int x, int y)
 			RenderUIOverlay();
 			FlipHighResBuffer();
 
-			m_previewHasSaved = TRUE;
+			m_previewHasSaved = (m_gpuScene && m_gpuScene->HasPreview()) ? TRUE : FALSE;
 		}
 	}
 
@@ -4958,7 +4996,7 @@ void CIsoView::SavePreviewRegion(const RECT& /*rect*/)
 	if (m_gpuScene && m_gpuScene->IsActive())
 	{
 		m_gpuScene->SavePreview();
-		m_previewHasSaved = TRUE;
+		m_previewHasSaved = m_gpuScene->HasPreview() ? TRUE : FALSE;
 		return;
 	}
 	m_previewHasSaved = FALSE;
@@ -4967,8 +5005,10 @@ void CIsoView::SavePreviewRegion(const RECT& /*rect*/)
 // truncates the GPU command buffer back to the preview watermark to erase the ghost
 void CIsoView::RestorePreviewRegion()
 {
-	if (m_gpuScene && m_gpuScene->IsActive() && m_previewHasSaved)
+	if (m_gpuScene && m_gpuScene->HasPreview() && m_previewHasSaved)
 		m_gpuScene->RestorePreview();
+	else
+		m_previewHasSaved = FALSE;
 }
 
 void CIsoView::OnTimer(UINT_PTR nIDEvent)
@@ -4979,6 +5019,12 @@ void CIsoView::OnTimer(UINT_PTR nIDEvent)
 	last_succeeded_operation = 1000000;
 
 
+	if (nIDEvent == VULKAN_SWAPCHAIN_RETRY_TIMER_ID)
+	{
+		KillTimer(VULKAN_SWAPCHAIN_RETRY_TIMER_ID);
+		Invalidate(FALSE);
+		return;
+	}
 	if (nIDEvent == VULKAN_RESIZE_TIMER_ID)
 	{
 		KillTimer(VULKAN_RESIZE_TIMER_ID);

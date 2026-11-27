@@ -32,6 +32,92 @@ enum class VulkanPresentResult
 	Failed,
 };
 
+struct MainCanvasPresentDecision
+{
+	bool releaseRenderer = false;
+	bool scheduleCoalescedRedraw = false;
+	bool scheduleImmediateRetry = false;
+	bool cancelCoalescedRedraw = false;
+};
+
+struct MainCanvasPresentState
+{
+	static constexpr int kMaxHardFailures = 5;
+	static constexpr int kMaxSwapchainRetries = 4;
+
+	bool lastPresentSucceeded = false;
+	RECT lastPresentSourceRect{};
+	int consecutiveHardFailures = 0;
+	int consecutiveSwapchainRetries = 0;
+	bool resizePreview = false;
+
+	void OnResizeNonZero()
+	{
+		consecutiveSwapchainRetries = 0;
+	}
+
+	void OnRendererReleased()
+	{
+		lastPresentSucceeded = false;
+		resizePreview = false;
+		consecutiveSwapchainRetries = 0;
+	}
+
+	MainCanvasPresentDecision ApplyResult(
+		VulkanPresentResult result,
+		const RECT& source,
+		bool isSourceOverride)
+	{
+		MainCanvasPresentDecision decision;
+		switch (result)
+		{
+		case VulkanPresentResult::Succeeded:
+			consecutiveHardFailures = 0;
+			consecutiveSwapchainRetries = 0;
+			lastPresentSucceeded = true;
+			if (!isSourceOverride)
+				lastPresentSourceRect = source;
+			decision.cancelCoalescedRedraw = true;
+			break;
+
+		case VulkanPresentResult::Minimized:
+			lastPresentSucceeded = false;
+			resizePreview = false;
+			decision.cancelCoalescedRedraw = true;
+			break;
+
+		case VulkanPresentResult::SwapchainOutOfDate:
+			lastPresentSucceeded = false;
+			resizePreview = false;
+			if (++consecutiveSwapchainRetries <= kMaxSwapchainRetries)
+			{
+				decision.scheduleCoalescedRedraw = true;
+			}
+			else
+			{
+				consecutiveSwapchainRetries = 0;
+				decision.releaseRenderer = true;
+				decision.cancelCoalescedRedraw = true;
+				if (++consecutiveHardFailures < kMaxHardFailures)
+					decision.scheduleImmediateRetry = true;
+			}
+			break;
+
+		case VulkanPresentResult::Failed:
+		default:
+			lastPresentSucceeded = false;
+			resizePreview = false;
+			consecutiveSwapchainRetries = 0;
+			decision.releaseRenderer = true;
+			decision.cancelCoalescedRedraw = true;
+			if (++consecutiveHardFailures < kMaxHardFailures)
+				decision.scheduleImmediateRetry = true;
+			break;
+		}
+		return decision;
+	}
+};
+
 // Records scene draw commands in painter order for the Vulkan GPU compute compositor.
 class VulkanScene
 {
@@ -47,10 +133,10 @@ public:
 	void RestoreBase();
 	void SavePreview();
 	void RestorePreview();
+	bool HasPreview() const { return m_active && m_hasPreview; }
 	void BeginOverlay(const RECT& screen, bool highRes);
 	void EndOverlay();
 	VulkanPresentResult PresentWithResult(const RECT& source, int width, int height, bool vsync);
-	bool Present(const RECT& source, int width, int height, bool vsync);
 
 	void Indexed(const BYTE* pixels, int width, int height, const short* borders,
 		const BYTE* lighting, const int* palette, const int* remap,
@@ -71,6 +157,7 @@ private:
 	RECT m_screen{};
 	bool m_screenSpace = false;
 	bool m_active = false;
+	bool m_hasPreview = false;
 	bool m_failed = false;
 	uint64_t m_nextKey = 0;
 	uint64_t m_assetGeneration = 0;

@@ -90,6 +90,7 @@ void VulkanScene::Begin(const RECT& source)
 		m_assetGeneration = currentGen;
 	}
 	m_active = true;
+	m_hasPreview = false;
 	m_source = source;
 	m_screenSpace = false;
 	m_commands.clear();
@@ -119,11 +120,12 @@ void VulkanScene::SavePreview()
 {
 	DropOverlay();
 	m_preview = m_commands;
+	m_hasPreview = true;
 }
 
 void VulkanScene::RestorePreview()
 {
-	if (!m_preview.empty())
+	if (m_hasPreview)
 		m_commands = m_preview;
 	m_overlayStart = m_overlayEnd = 0;
 }
@@ -326,10 +328,4 @@ VulkanPresentResult VulkanScene::PresentWithResult(const RECT& source, int width
 	if (status == RS_VULKAN_SWAPCHAIN_OUT_OF_DATE)
 		return VulkanPresentResult::SwapchainOutOfDate;
 	return VulkanPresentResult::Failed;
-}
-
-bool VulkanScene::Present(const RECT& source, int width, int height, bool vsync)
-{
-	const VulkanPresentResult result = PresentWithResult(source, width, height, vsync);
-	return result == VulkanPresentResult::Succeeded || result == VulkanPresentResult::SwapchainOutOfDate;
 }

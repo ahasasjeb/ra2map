@@ -131,6 +131,7 @@ int Tests::run()
 		[this]() { test_crash_reporter(); },
 		[this]() { test_map_save_and_emergency_backup(); },
 		[this]() { test_autosave_isolation_and_rotation(); },
+		[this]() { test_isoview_vulkan_present_state(); },
 	});
 	for (const auto f : test_functions)
 	{
@@ -2802,6 +2803,85 @@ void Tests::test_autosave_isolation_and_rotation()
 	TEST(fs::exists(nonVerA.destination));
 	TEST(fs::exists(nonVerB.destination));
 	TEST(fs::exists(legacyBackup));
+
+	REPORT_TEST(true);
+}
+
+void Tests::test_isoview_vulkan_present_state()
+{
+	MainCanvasPresentState state;
+	const RECT rectA{ 10, 20, 650, 500 };
+	const RECT rectB{ 30, 40, 830, 640 };
+
+	// 1. Succeeded updates lastPresentSucceeded, lastPresentSourceRect, and clears failure counters.
+	state.consecutiveHardFailures = 2;
+	state.consecutiveSwapchainRetries = 2;
+	auto decision = state.ApplyResult(VulkanPresentResult::Succeeded, rectA, false);
+	TEST(!decision.releaseRenderer && !decision.scheduleCoalescedRedraw && !decision.scheduleImmediateRetry);
+	TEST(decision.cancelCoalescedRedraw);
+	TEST(state.lastPresentSucceeded);
+	TEST(state.consecutiveHardFailures == 0);
+	TEST(state.consecutiveSwapchainRetries == 0);
+	TEST(state.lastPresentSourceRect.left == rectA.left && state.lastPresentSourceRect.right == rectA.right);
+
+	// Source override must not overwrite lastPresentSourceRect.
+	decision = state.ApplyResult(VulkanPresentResult::Succeeded, rectB, true);
+	TEST(state.lastPresentSucceeded);
+	TEST(state.lastPresentSourceRect.left == rectA.left && state.lastPresentSourceRect.right == rectA.right);
+
+	// 2. Minimized preserves renderer & failure counters, does NOT claim success or schedule redraw.
+	state.consecutiveHardFailures = 2;
+	state.resizePreview = true;
+	decision = state.ApplyResult(VulkanPresentResult::Minimized, rectB, false);
+	TEST(!decision.releaseRenderer);
+	TEST(!decision.scheduleCoalescedRedraw);
+	TEST(!decision.scheduleImmediateRetry);
+	TEST(decision.cancelCoalescedRedraw);
+	TEST(!state.lastPresentSucceeded);
+	TEST(!state.resizePreview);
+	TEST(state.consecutiveHardFailures == 2);
+	TEST(state.lastPresentSourceRect.left == rectA.left);
+
+	// 3. SwapchainOutOfDate must NOT reset hard failures, must NOT set lastPresentSucceeded,
+	//    must NOT update lastPresentSourceRect, preserves renderer while within retry cap,
+	//    and escalates to renderer release after exceeding retry cap.
+	state.resizePreview = true;
+	for (int i = 0; i < MainCanvasPresentState::kMaxSwapchainRetries; ++i)
+	{
+		decision = state.ApplyResult(VulkanPresentResult::SwapchainOutOfDate, rectB, false);
+		TEST(!decision.releaseRenderer);
+		TEST(decision.scheduleCoalescedRedraw);
+		TEST(!decision.scheduleImmediateRetry);
+		TEST(!state.lastPresentSucceeded);
+		TEST(!state.resizePreview);
+		TEST(state.consecutiveHardFailures == 2);
+		TEST(state.lastPresentSourceRect.left == rectA.left);
+	}
+	// Exceeding retry cap escalates to renderer release and increments hard failures.
+	decision = state.ApplyResult(VulkanPresentResult::SwapchainOutOfDate, rectB, false);
+	TEST(decision.releaseRenderer);
+	TEST(decision.scheduleImmediateRetry);
+	TEST(!state.lastPresentSucceeded);
+	TEST(state.consecutiveHardFailures == 3);
+	TEST(state.consecutiveSwapchainRetries == 0);
+
+	// 4. Hard Failed releases renderer, clears lastPresentSucceeded, and stops retrying at cap.
+	decision = state.ApplyResult(VulkanPresentResult::Failed, rectB, false);
+	TEST(decision.releaseRenderer && decision.scheduleImmediateRetry);
+	TEST(state.consecutiveHardFailures == 4);
+	decision = state.ApplyResult(VulkanPresentResult::Failed, rectB, false);
+	TEST(decision.releaseRenderer && !decision.scheduleImmediateRetry);
+	TEST(state.consecutiveHardFailures == MainCanvasPresentState::kMaxHardFailures);
+
+	// 5. VulkanScene::HasPreview is tied to active scene & SavePreview, cleared on Begin().
+	VulkanScene scene(nullptr);
+	TEST(!scene.HasPreview());
+	scene.Begin(rectA);
+	TEST(!scene.HasPreview());
+	scene.SavePreview();
+	TEST(scene.HasPreview());
+	scene.Begin(rectB);
+	TEST(!scene.HasPreview());
 
 	REPORT_TEST(true);
 }
