@@ -5601,13 +5601,13 @@ void CIsoView::DrawMap()
 		DrawCellCursor(m_cellCursor);
 	}
 
-	auto renderDuration = std::chrono::duration_cast<std::chrono::duration<float>>(std::chrono::steady_clock::now() - startTime);
+	const auto sceneBuildDurationMs = std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - startTime);
 
 	if (bDrawStats)
 	{
 		if (theApp.m_Options.bShowStats)
 		{
-			auto systemStats = std::format("ms: {0}  Left: {1}  Top: {2}  Right: {3}  Bottom: {4}", renderDuration.count(), left, top, right, bottom);
+			auto systemStats = std::format("Scene CPU: {0:.2f} ms  Left: {1}  Top: {2}  Right: {3}  Bottom: {4}", sceneBuildDurationMs.count(), left, top, right, bottom);
 			m_texts_to_render.push_back({ systemStats.c_str(), r.left + 10, r.top + 10 + (-m_fontDefaultHeight) * 3 / 2, RGB(0,0,0), true });
 		}
 
