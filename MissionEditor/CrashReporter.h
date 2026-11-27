@@ -76,6 +76,15 @@ struct CrashReportData
 	std::vector<CrashStackFrame> stackFrames;
 };
 
+enum class CrashDumpStatus
+{
+	NotAttempted,
+	Succeeded,
+	Failed,
+	TimedOut,
+	WaitFailed,
+};
+
 struct CrashArtifacts
 {
 	std::wstring crashDirectory;
@@ -84,12 +93,28 @@ struct CrashArtifacts
 	std::wstring backupMapPath;
 	bool reportWritten = false;
 	bool dumpWritten = false;
+	CrashDumpStatus dumpStatus = CrashDumpStatus::NotAttempted;
 	bool backupMapSaved = false;
 	std::string dumpError;
 };
 
 namespace CrashReporter
 {
+	struct MiniDumpExecutionOptions
+	{
+		DWORD timeoutMs = 15000;
+		using WriterFn = bool(*)(
+			const std::wstring& dumpPath,
+			EXCEPTION_POINTERS* exceptionPointers,
+			DWORD faultingThreadId,
+			DWORD* outLastError,
+			void* userContext);
+		using WaitFn = DWORD(*)(HANDLE handle, DWORD timeoutMs, void* userContext);
+		WriterFn customWriter = nullptr;
+		void* customWriterContext = nullptr;
+		WaitFn customWait = nullptr;
+		void* customWaitContext = nullptr;
+	};
 	// Installs process-wide crash handlers (Win32 SEH unhandled exception filter,
 	// std::terminate, CRT invalid parameter, pure virtual call, SIGABRT, and thread
 	// stack guarantee). Safe to call multiple times to re-assert the filter after
@@ -129,6 +154,13 @@ namespace CrashReporter
 		const CrashReportData& data,
 		EXCEPTION_POINTERS* exceptionPointers = nullptr,
 		DWORD faultingThreadId = 0);
+
+	CrashArtifacts WriteCrashArtifactsEx(
+		const std::wstring& crashDirectory,
+		const CrashReportData& data,
+		EXCEPTION_POINTERS* exceptionPointers,
+		DWORD faultingThreadId,
+		const MiniDumpExecutionOptions& options);
 
 	bool ShouldUseChineseUI();
 

@@ -39,6 +39,7 @@
 #include <cstring>
 #include <exception>
 #include <iomanip>
+#include <memory>
 #include <mutex>
 #include <sstream>
 #include <typeinfo>
@@ -520,31 +521,116 @@ namespace
 		data.vulkanLastError = vulkanBuf;
 	}
 
-	struct MiniDumpWorkerArgs
+	constexpr size_t kMaxExceptionRecordChain = 16;
+
+	struct ExceptionPointersSnapshotPod
+	{
+		bool hasContext = false;
+		alignas(16) CONTEXT context = {};
+		size_t recordCount = 0;
+		EXCEPTION_RECORD records[kMaxExceptionRecordChain] = {};
+	};
+
+	bool CopyExceptionPointersSnapshotSafe(
+		const EXCEPTION_POINTERS* src,
+		ExceptionPointersSnapshotPod* out)
+	{
+		if (!src || !out)
+			return false;
+
+		__try
+		{
+			if (src->ContextRecord)
+			{
+				out->context = *src->ContextRecord;
+				out->hasContext = true;
+			}
+
+			const EXCEPTION_RECORD* current = src->ExceptionRecord;
+			while (current && out->recordCount < kMaxExceptionRecordChain)
+			{
+				out->records[out->recordCount] = *current;
+				out->records[out->recordCount].ExceptionRecord = nullptr;
+				++out->recordCount;
+				current = current->ExceptionRecord;
+			}
+			return out->hasContext || out->recordCount > 0;
+		}
+		__except (EXCEPTION_EXECUTE_HANDLER)
+		{
+			return out->hasContext || out->recordCount > 0;
+		}
+	}
+
+	// Heap-owned task shared between the caller and the minidump worker thread.
+	// If the caller times out or wait fails, the worker still owns a shared_ptr
+	// keeping dumpPath, deep-copied exception records/context, and result fields
+	// valid until the worker exits.
+	struct MiniDumpTask
 	{
 		std::wstring dumpPath;
-		EXCEPTION_POINTERS* exceptionPointers = nullptr;
 		DWORD faultingThreadId = 0;
+		bool hasExceptionInfo = false;
+		ExceptionPointersSnapshotPod exceptionSnapshot = {};
+		EXCEPTION_POINTERS exceptionPointers = {};
+
+		CrashReporter::MiniDumpExecutionOptions::WriterFn customWriter = nullptr;
+		void* customWriterContext = nullptr;
+
+		// Synchronized via worker thread exit (WAIT_OBJECT_0) or synchronous fallback.
 		bool success = false;
 		DWORD lastError = 0;
 	};
 
-	DWORD WINAPI MiniDumpWorkerProc(LPVOID param)
+	void PopulateMiniDumpExceptionSnapshot(const EXCEPTION_POINTERS* src, MiniDumpTask& task)
 	{
-		auto* args = static_cast<MiniDumpWorkerArgs*>(param);
-		if (!args)
-			return 1;
+		if (!CopyExceptionPointersSnapshotSafe(src, &task.exceptionSnapshot))
+			return;
+
+		for (size_t i = 0; i + 1 < task.exceptionSnapshot.recordCount; ++i)
+		{
+			task.exceptionSnapshot.records[i].ExceptionRecord = &task.exceptionSnapshot.records[i + 1];
+		}
+		if (task.exceptionSnapshot.recordCount > 0)
+		{
+			task.exceptionSnapshot.records[task.exceptionSnapshot.recordCount - 1].ExceptionRecord = nullptr;
+			task.exceptionPointers.ExceptionRecord = &task.exceptionSnapshot.records[0];
+		}
+		if (task.exceptionSnapshot.hasContext)
+		{
+			task.exceptionPointers.ContextRecord = &task.exceptionSnapshot.context;
+		}
+		task.hasExceptionInfo = (task.exceptionPointers.ExceptionRecord != nullptr || task.exceptionPointers.ContextRecord != nullptr);
+	}
+
+	bool ExecuteMiniDumpTask(MiniDumpTask& task)
+	{
+		EXCEPTION_POINTERS* excPtr = task.hasExceptionInfo ? &task.exceptionPointers : nullptr;
+		if (task.customWriter)
+		{
+			DWORD customErr = 0;
+			const bool ok = task.customWriter(
+				task.dumpPath,
+				excPtr,
+				task.faultingThreadId,
+				&customErr,
+				task.customWriterContext);
+			task.lastError = ok ? 0 : customErr;
+			task.success = ok;
+			return ok;
+		}
 
 		std::lock_guard<std::mutex> lock(g_dbgHelpMutex);
 		DbgHelpApi& api = LoadDbgHelp();
 		if (!api.miniDumpWriteDump)
 		{
-			args->lastError = ERROR_PROC_NOT_FOUND;
-			return 1;
+			task.lastError = ERROR_PROC_NOT_FOUND;
+			task.success = false;
+			return false;
 		}
 
 		HANDLE file = CreateFileW(
-			args->dumpPath.c_str(),
+			task.dumpPath.c_str(),
 			GENERIC_WRITE,
 			FILE_SHARE_READ,
 			nullptr,
@@ -553,16 +639,17 @@ namespace
 			nullptr);
 		if (file == INVALID_HANDLE_VALUE)
 		{
-			args->lastError = GetLastError();
-			return 1;
+			task.lastError = GetLastError();
+			task.success = false;
+			return false;
 		}
 
 		MINIDUMP_EXCEPTION_INFORMATION excInfo = {};
 		PMINIDUMP_EXCEPTION_INFORMATION excInfoPtr = nullptr;
-		if (args->exceptionPointers != nullptr)
+		if (excPtr != nullptr)
 		{
-			excInfo.ThreadId = args->faultingThreadId != 0 ? args->faultingThreadId : GetCurrentThreadId();
-			excInfo.ExceptionPointers = args->exceptionPointers;
+			excInfo.ThreadId = task.faultingThreadId != 0 ? task.faultingThreadId : GetCurrentThreadId();
+			excInfo.ExceptionPointers = excPtr;
 			excInfo.ClientPointers = FALSE;
 			excInfoPtr = &excInfo;
 		}
@@ -597,11 +684,25 @@ namespace
 		}
 
 		if (!ok)
-			args->lastError = GetLastError();
+			task.lastError = GetLastError();
 
 		CloseHandle(file);
-		args->success = (ok != FALSE);
-		return ok ? 0 : 1;
+		if (!ok)
+		{
+			DeleteFileW(task.dumpPath.c_str());
+		}
+		task.success = (ok != FALSE);
+		return task.success;
+	}
+
+	DWORD WINAPI MiniDumpWorkerProc(LPVOID param)
+	{
+		std::unique_ptr<std::shared_ptr<MiniDumpTask>> holder(
+			static_cast<std::shared_ptr<MiniDumpTask>*>(param));
+		if (!holder || !(*holder))
+			return 1;
+
+		return ExecuteMiniDumpTask(**holder) ? 0 : 1;
 	}
 
 	bool WriteUtf8FileWithBom(const std::wstring& filePath, const std::string& content)
@@ -1631,8 +1732,18 @@ namespace CrashReporter
 				oss << "Crash Report     : " << WideToUtf8Safe(artifacts->reportFilePath) << "\n";
 			if (!artifacts->dumpFilePath.empty())
 			{
+				const char* statusTag = " (FAILED)";
+				if (artifacts->dumpWritten && artifacts->dumpStatus == CrashDumpStatus::Succeeded)
+					statusTag = " (OK)";
+				else if (artifacts->dumpStatus == CrashDumpStatus::TimedOut)
+					statusTag = " (TIMED OUT / INCOMPLETE)";
+				else if (artifacts->dumpStatus == CrashDumpStatus::WaitFailed)
+					statusTag = " (WAIT FAILED / INCOMPLETE)";
+				else if (artifacts->dumpStatus == CrashDumpStatus::NotAttempted)
+					statusTag = " (NOT ATTEMPTED)";
+
 				oss << "Minidump         : " << WideToUtf8Safe(artifacts->dumpFilePath)
-					<< (artifacts->dumpWritten ? " (OK)" : " (FAILED)") << "\n";
+					<< statusTag << "\n";
 				if (!artifacts->dumpWritten && !artifacts->dumpError.empty())
 					oss << "Minidump Error   : " << artifacts->dumpError << "\n";
 			}
@@ -1675,6 +1786,21 @@ namespace CrashReporter
 		EXCEPTION_POINTERS* exceptionPointers,
 		DWORD faultingThreadId)
 	{
+		return WriteCrashArtifactsEx(
+			crashDirectory,
+			data,
+			exceptionPointers,
+			faultingThreadId,
+			MiniDumpExecutionOptions{});
+	}
+
+	CrashArtifacts WriteCrashArtifactsEx(
+		const std::wstring& crashDirectory,
+		const CrashReportData& data,
+		EXCEPTION_POINTERS* exceptionPointers,
+		DWORD faultingThreadId,
+		const MiniDumpExecutionOptions& options)
+	{
 		CrashArtifacts artifacts;
 		artifacts.crashDirectory = crashDirectory;
 		CreateDirectoryRecursiveW(crashDirectory);
@@ -1699,29 +1825,75 @@ namespace CrashReporter
 		artifacts.dumpFilePath = prefix + L".dmp";
 
 		// Write minidump on a dedicated worker thread (recommended by Microsoft
-		// and required when handling EXCEPTION_STACK_OVERFLOW).
-		MiniDumpWorkerArgs dumpArgs;
-		dumpArgs.dumpPath = artifacts.dumpFilePath;
-		dumpArgs.exceptionPointers = exceptionPointers;
-		dumpArgs.faultingThreadId = faultingThreadId != 0 ? faultingThreadId : GetCurrentThreadId();
+		// and required when handling EXCEPTION_STACK_OVERFLOW). The task and deep
+		// copies of exception records/context are heap-owned via shared_ptr so
+		// they remain valid even if the caller stops waiting on timeout/error.
+		auto task = std::make_shared<MiniDumpTask>();
+		task->dumpPath = artifacts.dumpFilePath;
+		task->faultingThreadId = faultingThreadId != 0 ? faultingThreadId : GetCurrentThreadId();
+		task->customWriter = options.customWriter;
+		task->customWriterContext = options.customWriterContext;
+		PopulateMiniDumpExceptionSnapshot(exceptionPointers, *task);
 
-		HANDLE worker = CreateThread(nullptr, 0, MiniDumpWorkerProc, &dumpArgs, 0, nullptr);
+		auto* workerParam = new std::shared_ptr<MiniDumpTask>(task);
+		HANDLE worker = CreateThread(nullptr, 0, MiniDumpWorkerProc, workerParam, 0, nullptr);
 		if (worker)
 		{
-			WaitForSingleObject(worker, 15000);
+			const DWORD waitResult = options.customWait
+				? options.customWait(worker, options.timeoutMs, options.customWaitContext)
+				: WaitForSingleObject(worker, options.timeoutMs);
+			const DWORD waitError = (waitResult == WAIT_FAILED) ? GetLastError() : 0;
 			CloseHandle(worker);
+
+			if (waitResult == WAIT_OBJECT_0)
+			{
+				artifacts.dumpWritten = task->success;
+				artifacts.dumpStatus = task->success ? CrashDumpStatus::Succeeded : CrashDumpStatus::Failed;
+				if (!task->success)
+				{
+					char errBuf[64];
+					std::snprintf(errBuf, sizeof(errBuf), "Win32 error %lu", static_cast<unsigned long>(task->lastError));
+					artifacts.dumpError = errBuf;
+				}
+			}
+			else if (waitResult == WAIT_TIMEOUT)
+			{
+				artifacts.dumpWritten = false;
+				artifacts.dumpStatus = CrashDumpStatus::TimedOut;
+				char errBuf[128];
+				std::snprintf(
+					errBuf,
+					sizeof(errBuf),
+					"Minidump worker timed out after %lu ms (dump incomplete)",
+					static_cast<unsigned long>(options.timeoutMs));
+				artifacts.dumpError = errBuf;
+			}
+			else
+			{
+				artifacts.dumpWritten = false;
+				artifacts.dumpStatus = CrashDumpStatus::WaitFailed;
+				char errBuf[128];
+				std::snprintf(
+					errBuf,
+					sizeof(errBuf),
+					"WaitForSingleObject failed (result=%lu, Win32 error %lu; dump incomplete)",
+					static_cast<unsigned long>(waitResult),
+					static_cast<unsigned long>(waitError));
+				artifacts.dumpError = errBuf;
+			}
 		}
 		else
 		{
-			MiniDumpWorkerProc(&dumpArgs);
-		}
-
-		artifacts.dumpWritten = dumpArgs.success;
-		if (!dumpArgs.success)
-		{
-			char errBuf[64];
-			std::snprintf(errBuf, sizeof(errBuf), "Win32 error %lu", static_cast<unsigned long>(dumpArgs.lastError));
-			artifacts.dumpError = errBuf;
+			delete workerParam;
+			ExecuteMiniDumpTask(*task);
+			artifacts.dumpWritten = task->success;
+			artifacts.dumpStatus = task->success ? CrashDumpStatus::Succeeded : CrashDumpStatus::Failed;
+			if (!task->success)
+			{
+				char errBuf[64];
+				std::snprintf(errBuf, sizeof(errBuf), "Win32 error %lu", static_cast<unsigned long>(task->lastError));
+				artifacts.dumpError = errBuf;
+			}
 		}
 
 		const std::string reportUtf8 = FormatCrashReport(data, &artifacts);
@@ -1788,8 +1960,12 @@ namespace CrashReporter
 			oss << "\n诊断文件:\n";
 			if (artifacts.reportWritten && !artifacts.reportFilePath.empty())
 				oss << "  报告: " << WideToUtf8Safe(artifacts.reportFilePath) << "\n";
-			if (artifacts.dumpWritten && !artifacts.dumpFilePath.empty())
+			if (artifacts.dumpWritten && artifacts.dumpStatus == CrashDumpStatus::Succeeded && !artifacts.dumpFilePath.empty())
 				oss << "  转储: " << WideToUtf8Safe(artifacts.dumpFilePath) << "\n";
+			else if (artifacts.dumpStatus == CrashDumpStatus::TimedOut)
+				oss << "  转储: 未完成 (写入超时)\n";
+			else if (artifacts.dumpStatus == CrashDumpStatus::WaitFailed)
+				oss << "  转储: 未完成 (等待失败)\n";
 			if (artifacts.backupMapSaved && !artifacts.backupMapPath.empty())
 				oss << "  应急备份地图: " << WideToUtf8Safe(artifacts.backupMapPath) << "\n";
 		}
@@ -1830,8 +2006,12 @@ namespace CrashReporter
 			oss << "\nDiagnostic Files:\n";
 			if (artifacts.reportWritten && !artifacts.reportFilePath.empty())
 				oss << "  Report: " << WideToUtf8Safe(artifacts.reportFilePath) << "\n";
-			if (artifacts.dumpWritten && !artifacts.dumpFilePath.empty())
+			if (artifacts.dumpWritten && artifacts.dumpStatus == CrashDumpStatus::Succeeded && !artifacts.dumpFilePath.empty())
 				oss << "  Minidump: " << WideToUtf8Safe(artifacts.dumpFilePath) << "\n";
+			else if (artifacts.dumpStatus == CrashDumpStatus::TimedOut)
+				oss << "  Minidump: incomplete (timed out)\n";
+			else if (artifacts.dumpStatus == CrashDumpStatus::WaitFailed)
+				oss << "  Minidump: incomplete (wait failed)\n";
 			if (artifacts.backupMapSaved && !artifacts.backupMapPath.empty())
 				oss << "  Backup Map: " << WideToUtf8Safe(artifacts.backupMapPath) << "\n";
 		}

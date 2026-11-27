@@ -2015,6 +2015,97 @@ void Tests::test_tileset_browser_long_list_coords()
 	REPORT_TEST(true);
 }
 
+namespace
+{
+	LONG CopySehAndWriteCrashArtifacts(
+		EXCEPTION_POINTERS* ep,
+		const std::wstring* crashDir,
+		const CrashReportData* data,
+		DWORD tid,
+		CrashArtifacts* outArtifacts)
+	{
+		if (crashDir && data && outArtifacts)
+		{
+			*outArtifacts = CrashReporter::WriteCrashArtifacts(*crashDir, *data, ep, tid);
+		}
+		return EXCEPTION_EXECUTE_HANDLER;
+	}
+
+	bool TriggerSehAndWriteCrashArtifacts(
+		const std::wstring& crashDir,
+		const CrashReportData& data,
+		CrashArtifacts& outArtifacts)
+	{
+		const DWORD tid = GetCurrentThreadId();
+		__try
+		{
+			RaiseException(0xE0001234u, 0, 0, nullptr);
+		}
+		__except (CopySehAndWriteCrashArtifacts(GetExceptionInformation(), &crashDir, &data, tid, &outArtifacts))
+		{
+			return true;
+		}
+		return false;
+	}
+
+	struct DelayedDumpTestState
+	{
+		HANDLE startedEvent = nullptr;
+		HANDLE releaseEvent = nullptr;
+		HANDLE finishedEvent = nullptr;
+		std::wstring expectedPath;
+		DWORD expectedOuterCode = 0;
+		DWORD expectedInnerCode = 0;
+		DWORD64 expectedRip = 0;
+		bool snapshotIntact = false;
+	};
+
+	bool DelayedDumpWriterForTest(
+		const std::wstring& dumpPath,
+		EXCEPTION_POINTERS* exceptionPointers,
+		DWORD /*faultingThreadId*/,
+		DWORD* outLastError,
+		void* userContext)
+	{
+		auto* state = static_cast<DelayedDumpTestState*>(userContext);
+		if (state && state->startedEvent)
+			SetEvent(state->startedEvent);
+		if (state && state->releaseEvent)
+			WaitForSingleObject(state->releaseEvent, 5000);
+
+		bool intact = false;
+		if (state && exceptionPointers && exceptionPointers->ExceptionRecord && exceptionPointers->ContextRecord)
+		{
+			const EXCEPTION_RECORD* outer = exceptionPointers->ExceptionRecord;
+			const EXCEPTION_RECORD* inner = outer->ExceptionRecord;
+			const bool pathMatch = (dumpPath == state->expectedPath);
+			const bool outerMatch = (outer->ExceptionCode == state->expectedOuterCode);
+			const bool innerMatch = (inner != nullptr && inner->ExceptionCode == state->expectedInnerCode && inner->ExceptionRecord == nullptr);
+#ifdef _M_X64
+			const bool ripMatch = (exceptionPointers->ContextRecord->Rip == state->expectedRip);
+#else
+			const bool ripMatch = true;
+#endif
+			intact = pathMatch && outerMatch && innerMatch && ripMatch;
+		}
+		if (state)
+		{
+			state->snapshotIntact = intact;
+			if (state->finishedEvent)
+				SetEvent(state->finishedEvent);
+		}
+		if (outLastError)
+			*outLastError = 0;
+		return true;
+	}
+
+	DWORD FailingWaitForTest(HANDLE /*handle*/, DWORD /*timeoutMs*/, void* /*userContext*/)
+	{
+		SetLastError(ERROR_INVALID_HANDLE);
+		return WAIT_FAILED;
+	}
+}
+
 void Tests::test_crash_reporter()
 {
 	// 1. Verify exception descriptions (including access violation read/write/DEP details).
@@ -2078,8 +2169,18 @@ void Tests::test_crash_reporter()
 	std::error_code ec;
 	fs::remove_all(tempDir, ec);
 
+	const auto verifyValidMinidump = [](const std::wstring& path)
+	{
+		std::ifstream dumpIn(path, std::ios::binary);
+		TEST(dumpIn.is_open());
+		char magic[4] = { 0 };
+		dumpIn.read(magic, 4);
+		TEST(dumpIn.gcount() == 4);
+		TEST(std::memcmp(magic, "MDMP", 4) == 0);
+	};
+
 	const CrashArtifacts artifacts = CrashReporter::WriteCrashArtifacts(
-		tempDir.wstring(),
+		(tempDir / "basic").wstring(),
 		data,
 		nullptr,
 		GetCurrentThreadId());
@@ -2087,6 +2188,7 @@ void Tests::test_crash_reporter()
 	TEST(artifacts.reportWritten);
 	TEST(fs::exists(artifacts.reportFilePath));
 	TEST(artifacts.dumpWritten);
+	TEST(artifacts.dumpStatus == CrashDumpStatus::Succeeded);
 	TEST(fs::exists(artifacts.dumpFilePath));
 
 	// Verify UTF-8 BOM + expected report content.
@@ -2105,14 +2207,181 @@ void Tests::test_crash_reporter()
 		TEST(content.find("Call Stack") != std::string::npos);
 	}
 
-	// Verify minidump header magic ("MDMP").
+	verifyValidMinidump(artifacts.dumpFilePath);
+
+	// 4. Verify C++ synthetic EXCEPTION_POINTERS path produces a valid dump.
 	{
-		std::ifstream dumpIn(artifacts.dumpFilePath, std::ios::binary);
-		TEST(dumpIn.is_open());
-		char magic[4] = { 0 };
-		dumpIn.read(magic, 4);
-		TEST(dumpIn.gcount() == 4);
-		TEST(std::memcmp(magic, "MDMP", 4) == 0);
+		CONTEXT ctx = {};
+		RtlCaptureContext(&ctx);
+		EXCEPTION_RECORD rec = {};
+		rec.ExceptionCode = 0xE06D7363u;
+#ifdef _M_X64
+		rec.ExceptionAddress = reinterpret_cast<PVOID>(ctx.Rip);
+#endif
+		EXCEPTION_POINTERS ep = {};
+		ep.ExceptionRecord = &rec;
+		ep.ContextRecord = &ctx;
+
+		const CrashArtifacts cppArtifacts = CrashReporter::WriteCrashArtifacts(
+			(tempDir / "cpp_ctx").wstring(),
+			data,
+			&ep,
+			GetCurrentThreadId());
+		TEST(cppArtifacts.reportWritten);
+		TEST(cppArtifacts.dumpWritten);
+		TEST(cppArtifacts.dumpStatus == CrashDumpStatus::Succeeded);
+		verifyValidMinidump(cppArtifacts.dumpFilePath);
+	}
+
+	// 5. Verify real SEH EXCEPTION_POINTERS path produces a valid dump.
+	{
+		CrashArtifacts sehArtifacts;
+		TEST(TriggerSehAndWriteCrashArtifacts((tempDir / "seh_ctx").wstring(), data, sehArtifacts));
+		TEST(sehArtifacts.reportWritten);
+		TEST(sehArtifacts.dumpWritten);
+		TEST(sehArtifacts.dumpStatus == CrashDumpStatus::Succeeded);
+		verifyValidMinidump(sehArtifacts.dumpFilePath);
+	}
+
+	// 6. Verify worker timeout: caller must NOT read unpublished results, must mark
+	// dump incomplete, and worker must still see intact deep-copied exception context
+	// after caller's stack inputs are overwritten/destroyed.
+	{
+		DelayedDumpTestState state;
+		state.startedEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+		state.releaseEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+		state.finishedEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+		state.expectedOuterCode = 0xE000CAFEu;
+		state.expectedInnerCode = 0xE000BEEFu;
+		state.expectedRip = 0x00007FF612345678ULL;
+		TEST(state.startedEvent && state.releaseEvent && state.finishedEvent);
+
+		CrashArtifacts timeoutArtifacts;
+		{
+			CONTEXT stackCtx = {};
+#ifdef _M_X64
+			stackCtx.Rip = state.expectedRip;
+#endif
+			EXCEPTION_RECORD stackInner = {};
+			stackInner.ExceptionCode = state.expectedInnerCode;
+			EXCEPTION_RECORD stackOuter = {};
+			stackOuter.ExceptionCode = state.expectedOuterCode;
+			stackOuter.ExceptionRecord = &stackInner;
+			EXCEPTION_POINTERS stackEp = {};
+			stackEp.ExceptionRecord = &stackOuter;
+			stackEp.ContextRecord = &stackCtx;
+
+			CrashReporter::MiniDumpExecutionOptions opts;
+			opts.timeoutMs = 50;
+			opts.customWriter = DelayedDumpWriterForTest;
+			opts.customWriterContext = &state;
+
+			timeoutArtifacts = CrashReporter::WriteCrashArtifactsEx(
+				(tempDir / "timeout").wstring(),
+				data,
+				&stackEp,
+				GetCurrentThreadId(),
+				opts);
+			state.expectedPath = timeoutArtifacts.dumpFilePath;
+
+			// Poison caller stack structs before releasing worker.
+			std::memset(&stackCtx, 0xDD, sizeof(stackCtx));
+			std::memset(&stackInner, 0xDD, sizeof(stackInner));
+			std::memset(&stackOuter, 0xDD, sizeof(stackOuter));
+			std::memset(&stackEp, 0xDD, sizeof(stackEp));
+		}
+
+		TEST(timeoutArtifacts.reportWritten);
+		TEST(!timeoutArtifacts.dumpWritten);
+		TEST(timeoutArtifacts.dumpStatus == CrashDumpStatus::TimedOut);
+		TEST(timeoutArtifacts.dumpError.find("timed out") != std::string::npos);
+
+		{
+			std::ifstream in(timeoutArtifacts.reportFilePath, std::ios::binary);
+			TEST(in.is_open());
+			const std::string content((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+			TEST(content.find("TIMED OUT / INCOMPLETE") != std::string::npos);
+			TEST(content.find(".dmp (OK)") == std::string::npos);
+		}
+
+		TEST(WaitForSingleObject(state.startedEvent, 5000) == WAIT_OBJECT_0);
+		SetEvent(state.releaseEvent);
+		TEST(WaitForSingleObject(state.finishedEvent, 5000) == WAIT_OBJECT_0);
+		TEST(state.snapshotIntact);
+
+		CloseHandle(state.startedEvent);
+		CloseHandle(state.releaseEvent);
+		CloseHandle(state.finishedEvent);
+	}
+
+	// 7. Verify wait failure: caller marks WaitFailed without reading unpublished results,
+	// and worker still owns valid deep-copied inputs until it exits.
+	{
+		DelayedDumpTestState state;
+		state.startedEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+		state.releaseEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+		state.finishedEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+		state.expectedOuterCode = 0xE0001111u;
+		state.expectedInnerCode = 0xE0002222u;
+		state.expectedRip = 0x00007FF687654321ULL;
+		TEST(state.startedEvent && state.releaseEvent && state.finishedEvent);
+
+		CrashArtifacts waitFailArtifacts;
+		{
+			CONTEXT stackCtx = {};
+#ifdef _M_X64
+			stackCtx.Rip = state.expectedRip;
+#endif
+			EXCEPTION_RECORD stackInner = {};
+			stackInner.ExceptionCode = state.expectedInnerCode;
+			EXCEPTION_RECORD stackOuter = {};
+			stackOuter.ExceptionCode = state.expectedOuterCode;
+			stackOuter.ExceptionRecord = &stackInner;
+			EXCEPTION_POINTERS stackEp = {};
+			stackEp.ExceptionRecord = &stackOuter;
+			stackEp.ContextRecord = &stackCtx;
+
+			CrashReporter::MiniDumpExecutionOptions opts;
+			opts.timeoutMs = 5000;
+			opts.customWriter = DelayedDumpWriterForTest;
+			opts.customWriterContext = &state;
+			opts.customWait = FailingWaitForTest;
+
+			waitFailArtifacts = CrashReporter::WriteCrashArtifactsEx(
+				(tempDir / "wait_failed").wstring(),
+				data,
+				&stackEp,
+				GetCurrentThreadId(),
+				opts);
+			state.expectedPath = waitFailArtifacts.dumpFilePath;
+
+			std::memset(&stackCtx, 0xCC, sizeof(stackCtx));
+			std::memset(&stackInner, 0xCC, sizeof(stackInner));
+			std::memset(&stackOuter, 0xCC, sizeof(stackOuter));
+			std::memset(&stackEp, 0xCC, sizeof(stackEp));
+		}
+
+		TEST(waitFailArtifacts.reportWritten);
+		TEST(!waitFailArtifacts.dumpWritten);
+		TEST(waitFailArtifacts.dumpStatus == CrashDumpStatus::WaitFailed);
+		TEST(waitFailArtifacts.dumpError.find("WaitForSingleObject failed") != std::string::npos);
+
+		{
+			std::ifstream in(waitFailArtifacts.reportFilePath, std::ios::binary);
+			TEST(in.is_open());
+			const std::string content((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+			TEST(content.find("WAIT FAILED / INCOMPLETE") != std::string::npos);
+			TEST(content.find(".dmp (OK)") == std::string::npos);
+		}
+
+		TEST(WaitForSingleObject(state.startedEvent, 5000) == WAIT_OBJECT_0);
+		SetEvent(state.releaseEvent);
+		TEST(WaitForSingleObject(state.finishedEvent, 5000) == WAIT_OBJECT_0);
+		TEST(state.snapshotIntact);
+
+		CloseHandle(state.startedEvent);
+		CloseHandle(state.releaseEvent);
+		CloseHandle(state.finishedEvent);
 	}
 
 	// Verify both Chinese and English UI summary texts include key fields.
